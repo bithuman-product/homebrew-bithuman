@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sparkle appcast feed for the bitHuman macOS .app.
+
+  Hosted at https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/appcast.xml
+  Consumed by the Sparkle updater inside bitHuman.app via SUFeedURL in
+  Info.plist.
+
+  Each <item> entry corresponds to one DMG release. Releases are
+  produced by Apps/BithumanMac/Scripts/build-mac-app.sh in the
+  bithuman-kit dev repo, signed by the EdDSA key whose public half
+  is embedded in Info.plist (SUPublicEDKey).
+
+  No items below = no updates available. Sparkle treats an empty
+  feed cleanly; users on the latest version see "you're up to date".
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>bitHuman for Mac</title>
+        <link>https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/appcast.xml</link>
+        <description>On-device voice + video chat for macOS. Made by bitHuman.</description>
+        <language>en</language>
+    </channel>
+</rss>
