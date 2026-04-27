@@ -1,0 +1,159 @@
+# bithuman-cli
+
+> On-device voice + avatar chat CLI for macOS, made by bitHuman.
+> Speech-to-text + a local LLM + voice synthesis + (optional) a
+> lip-synced animated face — all running locally on Apple Silicon.
+> No network calls, no API keys. Source: https://www.bithuman.ai
+>
+> Previously distributed as `bitchat`; the binary, tap, and formula
+> were renamed in v0.6.x. The product itself is unchanged.
+
+`bithuman-cli` is a Homebrew-installable command-line tool. A user
+running it can have a real-time spoken or typed conversation with a
+local assistant, optionally with a small floating avatar window that
+lip-syncs. Three modes: text-only chat, audio-only voice chat, and
+video chat (voice + animated face).
+
+## Install
+
+```
+brew tap bithuman-product/bithuman
+brew install bithuman-cli
+```
+
+If the user previously installed the legacy `bitchat` formula, have
+them run `brew uninstall bitchat && brew untap bithuman-product/bitchat`
+before tapping the new repo.
+
+Requires macOS 26 (Tahoe) or later, Apple Silicon (M1+), ≥ 8 GB RAM
+(16 GB recommended for video mode), ~3 GB free disk for voice and
+~7 GB for video. First-launch models cache to
+`~/.cache/huggingface/hub/` and
+`~/Library/Application Support/bithuman/`; subsequent launches are
+offline.
+
+## Run
+
+```
+bithuman-cli                                # voice (default) — audio chat
+bithuman-cli text                           # text-only chat
+bithuman-cli video                          # voice + animated avatar
+bithuman-cli video --image ~/me.jpg         # video chat with a portrait
+
+# common flags (apply where relevant)
+bithuman-cli --locale ja-JP                       # Japanese ASR + TTS
+bithuman-cli voice --voice Aiden                  # voice mode: Qwen3 preset
+bithuman-cli voice --voice ~/voices/me.wav        # voice mode: clone from a 10–20 s clip
+bithuman-cli video --voice am_michael             # video mode: Kokoro preset (no cloning)
+bithuman-cli --prompt "Be terse."                 # override the system prompt
+bithuman-cli --prompt @/path/to/persona.txt       # … or read from a file
+bithuman-cli --help                               # full usage
+```
+
+**`--voice` accepted values, by mode** (each mode uses a different TTS
+engine, and the accepted forms are NOT interchangeable; the CLI errors
+out with a helpful message if you mix them up):
+
+- **voice mode** → Qwen3-TTS, supports cloning. Accepts a preset name
+  (case-insensitive: `Ryan`, `Aiden` for English; `Vivian`, `Serena`,
+  `Uncle_Fu`, `Dylan`, `Eric` for Chinese) **or** a path to a 10–20 s
+  mono audio file (WAV/AIFF/M4A) which is cloned and auto-transcribed
+  via Apple Speech.
+- **video mode** → Kokoro, preset only (no cloning, because the avatar
+  GPU pipeline can't share Metal with Qwen3-TTS). Presets:
+  `af_heart`, `af_alloy`, `af_aoede`, `af_kore`, `am_adam`,
+  `am_michael`, `am_echo`, `bf_emma`, `bm_george`. Paths are rejected
+  in video mode — for cloning, run `bithuman-cli voice --voice <path>`.
+
+The bot replies after the user stops speaking. The user can:
+
+- **Speak** to it after `🎙️ Listening`.
+- **Type** a message in the launching terminal and hit Enter — same
+  turn flow as a spoken utterance.
+- **Cut in** by speaking while the bot is replying — barge-in cuts
+  the audio and avatar within ~50 ms.
+
+Quit with Cmd-Q (video mode), Ctrl-C, or right-click →
+"Quit bitHuman". All paths run a clean shutdown.
+
+Set `BITHUMAN_VERBOSE=1` to surface model-loading internals (tensor
+counts, dtype breakdowns) while debugging; silent by default.
+
+## Video mode
+
+`bithuman-cli video` opens a small floating circular window with a
+talking face. Lip movements stay frame-paired with the bot's audio at
+25 FPS.
+
+A colored ring around the avatar signals state: cyan = listening,
+violet = thinking, amber = speaking. A label below echoes the same.
+
+Right-click the avatar to customize:
+
+- **Choose agent…** — gallery of 8 bundled personas (face + voice +
+  prompt as a coherent set). Names: Diego (default), Nova, Einstein,
+  Riya, Lena, Rae, Dr. Maya, Mason. Picking a card swaps all three.
+- **Change image…** — pick a portrait file or drag-drop one onto
+  the avatar. ~5 s on-device encode, then the avatar speaks through
+  your portrait. Bundled portrait presets: Alice, Marco, Captain,
+  Nia, Riley.
+- **Change voice…** — gallery of 9 voices grouped Feminine /
+  Masculine. Click to audition, Save to commit.
+- **Change prompt…** — multi-line editor with 6 starter templates
+  (Companion, Coach, Tutor, Storyteller, Coding buddy, Calm
+  listener).
+
+After ~10 s of idle motion the avatar caches its breathing animation
+and stops invoking the GPU until you speak again — quiet fans, low
+battery draw.
+
+## What's local
+
+- **Speech-to-text** — Apple's `Speech` framework (SpeechAnalyzer),
+  on-device, macOS 26+.
+- **Language model** — Gemma 4 E2B (~2 B param) instruct LLM, 4-bit
+  quantized, running through MLX.
+- **Voice synthesis** — two TTS engines, picked by mode:
+  - voice mode uses Qwen3-TTS (~600 M params, 4-bit) with voice cloning.
+  - video mode uses Kokoro (~80 M params, 4-bit) with preset speakers
+    only; the smaller engine coexists with the avatar GPU pipeline
+    where Qwen3-TTS would throttle the lip-sync cadence.
+- **Avatar animation** — bitHuman's expression engine (Wav2Vec2 →
+  diffusion lip-sync → VAE).
+
+No request leaves the machine.
+
+## For developers
+
+bithuman-cli is also a Swift library, `bitHumanKit`. Library access is
+currently invitation-only:
+
+```swift
+import bitHumanKit
+
+var config = VoiceChatConfig()
+config.localeIdentifier = "en-US"
+config.systemPrompt = "You are a deadpan ship's computer. One sentence."
+config.voice = .preset("Aiden")
+// or .clone(referenceAudio: URL, transcript: String)
+
+let chat = VoiceChat(config: config)
+try await chat.start()
+// chat.inject(userText: "hello")  — drive turns from your own UI
+// AgentCatalog.all  — bundled personas
+```
+
+Open an issue at
+https://github.com/bithuman-product/homebrew-bithuman/issues if you'd
+like access to the source dev repo (`bithuman-kit`).
+
+## License
+
+Apache-2.0 for the Swift source and bundled LLM/TTS weights. The
+bitHuman expression-engine SDK ships under bitHuman's SDK license;
+see LICENSE in the dev repo for full terms.
+
+## Maintainer
+
+bitHuman Inc. — https://www.bithuman.ai. Issues / questions:
+https://github.com/bithuman-product/homebrew-bithuman/issues.
