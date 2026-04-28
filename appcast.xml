@@ -21,6 +21,28 @@
         <description>On-device voice + video chat for macOS. Made by bitHuman.</description>
         <language>en</language>
         <item>
+            <title>Version 0.8.1</title>
+            <pubDate>Tue, 28 Apr 2026 04:30:00 +0000</pubDate>
+            <sparkle:version>0.8.1</sparkle:version>
+            <sparkle:shortVersionString>0.8.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>Major engine + UX update. Same on-device runtime; new metering and pre-chat polish.</p>
+                <ul>
+                    <li><strong>API key + heartbeat metering</strong> for the avatar engine — bundled into the .app, so end users authenticate without setup. 2 credits/min, 5-minute offline grace.</li>
+                    <li><strong>Pre-quantized int4 expression engine</strong> — DiT + Wav2Vec2 baked at int4, ANE wav2vec2 path. Active speech-time peak ~5.5 GB (down from ~11 GB).</li>
+                    <li><strong>Pre-chat warm-up gate</strong> with progress arc + agent portrait. Agent swap fades the new face in mid-warm-up and silences the previous voice mid-sentence.</li>
+                    <li><strong>TTS-friendly LLM prompt suffix</strong> — no emoji / markdown / decorative symbols in spoken output.</li>
+                </ul>
+                <p>See the <a href="https://github.com/bithuman-product/bithuman-kit/releases/tag/v0.8.1">v0.8.1 SDK release</a> for the underlying changes.</p>
+            ]]></description>
+            <enclosure
+                url="https://github.com/bithuman-product/homebrew-bithuman/releases/download/v0.8.1-mac/bitHuman-0.8.1.dmg"
+                length="25031615"
+                type="application/octet-stream"
+                sparkle:edSignature="Xyq3IZbdnPNv/aXDWf2FR2Sl0ht6jQhPEHGgdm2AjNbzHZQWf96QjsYyjxMdakOUSu/dI7H93LrVN4tuyzZYBg==" />
+        </item>
+        <item>
             <title>Version 0.1.0</title>
             <pubDate>Sun, 27 Apr 2026 19:00:00 +0000</pubDate>
             <sparkle:version>0.1.0</sparkle:version>
