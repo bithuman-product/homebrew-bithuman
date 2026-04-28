@@ -49,7 +49,7 @@ No cloud round-trip. Works offline once the models are cached.
 
 ## Install
 
-Requires **macOS 26 (Tahoe) or later** on **Apple Silicon** (M1+).
+Requires **macOS 26 (Tahoe) or later** on **Apple Silicon (M3+)** — the avatar engine refuses pre-M3 silicon at runtime.
 
 ```sh
 brew tap bithuman-product/bithuman
@@ -246,10 +246,16 @@ Halo desktop and iPad companion apps.
 
 ## Contributing & source
 
-This repo (`bithuman-product/homebrew-bithuman`) hosts the **release
-artefacts**: the Homebrew formula and notarised binaries. The Swift
-source code lives in a separate dev repo (`bithuman-kit`) and is
-currently invitation-only — open an issue here if you'd like access.
+This repo (`bithuman-product/homebrew-bithuman`) hosts the **release artefacts**: the Homebrew formula and notarised binaries. The Swift source for the underlying SDK is private; the public binary distribution lives at [`bithuman-kit-public`](https://github.com/bithuman-product/bithuman-kit-public). Use that to embed the SDK in your own app.
+
+## Docs
+
+Full SDK and CLI documentation: **[docs.bithuman.ai](https://docs.bithuman.ai)**.
+
+- [bithuman-cli reference](https://docs.bithuman.ai/swift-sdk/cli)
+- [Swift SDK overview](https://docs.bithuman.ai/swift-sdk/overview) — embed in your own Mac/iPad/iPhone app
+- [Authentication](https://docs.bithuman.ai/getting-started/authentication) — only needed for avatar mode (audio-only is unmetered, no key required)
+- [Pricing & credits](https://docs.bithuman.ai/getting-started/pricing)
 
 ## Agents and LLMs
 
