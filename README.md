@@ -246,7 +246,7 @@ Halo desktop and iPad companion apps.
 
 ## Contributing & source
 
-This repo (`bithuman-product/homebrew-bithuman`) hosts the **release artefacts**: the Homebrew formula and notarised binaries. The Swift source for the underlying SDK is private; the public binary distribution lives at [`bithuman-kit-public`](https://github.com/bithuman-product/bithuman-kit-public). Use that to embed the SDK in your own app.
+This repo (`bithuman-product/homebrew-bithuman`) hosts the **release artefacts**: the Homebrew formula and notarised binaries. The Swift source for the underlying SDK is private; the public binary distribution lives at [`bithuman-sdk-public`](https://github.com/bithuman-product/bithuman-sdk-public). Use that to embed the SDK in your own app.
 
 ## Docs
 
