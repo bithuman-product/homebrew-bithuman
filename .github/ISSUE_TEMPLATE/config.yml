@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Bug in bithuman-cli itself (not the install)
+    url: mailto:support@bithuman.ai
+    about: The CLI source is private. For runtime bugs (crashes, audio, avatar, voice cloning), email support — your report reaches the engineers who can fix it.
+  - name: Feature requests for the CLI
+    url: mailto:support@bithuman.ai
+    about: New modes, voices, flags, agents — please email support, not GitHub.
+  - name: Documentation
+    url: https://docs.bithuman.ai
+    about: Full CLI and SDK docs.
+  - name: Community
+    url: https://www.bithuman.ai/community
+    about: Ask the community, share use cases, get help.
+  - name: Security disclosure
+    url: https://github.com/bithuman-product/homebrew-bithuman/blob/main/SECURITY.md
+    about: Found a security issue? Please email security@bithuman.ai instead of filing a public issue.
