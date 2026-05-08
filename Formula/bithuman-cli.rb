@@ -17,9 +17,9 @@
 class BithumanCli < Formula
   desc "On-device voice + video chat CLI for macOS (ASR + LLM + TTS + avatar, all local)"
   homepage "https://github.com/bithuman-product/homebrew-bithuman"
-  version "0.6.3"
+  version "0.7.0"
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v#{version}/bithuman-cli-#{version}.zip"
-  sha256 "a63a1cb2b4a0ca10842b14289be4bf57005aefd35f76976401390206e8c47ecc"
+  sha256 "e3889e7843b58540f964aa5cc494e512b580a39bfca0273b7f56756cc1b0b5b3"
   license "Apache-2.0"
 
   depends_on macos: :tahoe
@@ -27,11 +27,14 @@ class BithumanCli < Formula
 
   def install
     # The release zip layout is flat: the binary plus its sibling
-    # resource bundles all live at the top level. MLX's bundle lookup
-    # is RELATIVE to the binary, so we install everything into libexec
-    # and put a tiny exec-wrapper in bin so the binary's runtime
-    # neighbours are still next to it after Homebrew links.
-    libexec.install Dir["bithuman-cli", "*.bundle"]
+    # resource bundles + frameworks all live at the top level. MLX's
+    # bundle lookup is RELATIVE to the binary, and libwebrtc loads
+    # WebRTC.framework via `@executable_path` rpath, so we install
+    # everything into libexec and put a tiny exec-wrapper in bin so
+    # the binary's runtime neighbours are still next to it after
+    # Homebrew links. (As of 0.7.0, `*.framework` covers libwebrtc
+    # for the new `voice --openai` backend.)
+    libexec.install Dir["bithuman-cli", "*.bundle", "*.framework"]
     (bin/"bithuman-cli").write <<~EOS
       #!/bin/bash
       exec "#{libexec}/bithuman-cli" "$@"
