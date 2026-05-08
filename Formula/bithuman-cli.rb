@@ -19,7 +19,7 @@ class BithumanCli < Formula
   homepage "https://github.com/bithuman-product/homebrew-bithuman"
   version "0.7.0"
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v#{version}/bithuman-cli-#{version}.zip"
-  sha256 "e3889e7843b58540f964aa5cc494e512b580a39bfca0273b7f56756cc1b0b5b3"
+  sha256 "6442de6e4b30ad508560ea7b881aa6cc20f179940e5e8889dfcbdbd4bebb3987"
   license "Apache-2.0"
 
   depends_on macos: :tahoe
