@@ -17,9 +17,9 @@
 class BithumanCli < Formula
   desc "On-device voice + video chat CLI for macOS (ASR + LLM + TTS + avatar, all local)"
   homepage "https://github.com/bithuman-product/homebrew-bithuman"
-  version "0.9.2"
+  version "0.10.0"
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v#{version}/bithuman-cli-#{version}.zip"
-  sha256 "d3af6025437de5dc48dc901aec1684a0fbc99bfa987bc81db95ab66898e5b5d6"
+  sha256 "df8763951c7a1501450a3b31ff11794051d00342537cecc752538ab5830c73ba"
   license "Apache-2.0"
 
   depends_on macos: :tahoe
@@ -29,11 +29,14 @@ class BithumanCli < Formula
     # The release zip layout is flat: the binary plus its sibling
     # resource bundles + frameworks all live at the top level. MLX's
     # bundle lookup is RELATIVE to the binary, and libwebrtc loads
-    # WebRTC.framework via `@executable_path` rpath, so we install
-    # everything into libexec and put a tiny exec-wrapper in bin so
-    # the binary's runtime neighbours are still next to it after
-    # Homebrew links. (As of 0.7.0, `*.framework` covers libwebrtc
-    # for the new `voice --openai` backend.)
+    # LiveKitWebRTC.framework via `@executable_path` rpath, so we
+    # install everything into libexec and put a tiny exec-wrapper in
+    # bin so the binary's runtime neighbours are still next to it
+    # after Homebrew links. (`*.framework` covers libwebrtc — as of
+    # 0.10.0 we use LiveKit's `webrtc-xcframework` instead of
+    # stasel/WebRTC, since LiveKit's macOS slice exposes
+    # `RTCAudioRenderer` which the new `avatar --openai` lipsync
+    # tap needs.)
     libexec.install Dir["bithuman-cli", "*.bundle", "*.framework"]
     (bin/"bithuman-cli").write <<~EOS
       #!/bin/bash
