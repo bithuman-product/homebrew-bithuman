@@ -237,12 +237,12 @@ as good as the cloud services you're used to — without sending your
 audio anywhere.
 
 bithuman-cli is one piece of the bitHuman product family, alongside the
-Halo desktop and iPad companion apps.
+Mac, iPad, and iPhone reference apps.
 
 - 🌐 [www.bithuman.ai](https://www.bithuman.ai)
 - 📦 [github.com/bithuman-product](https://github.com/bithuman-product)
-- 🪟 Halo (full desktop companion app):
-  [github.com/bithuman-product/bithuman-halo-macos](https://github.com/bithuman-product/bithuman-halo-macos)
+- 🍎 Reference apps (Mac / iPad / iPhone):
+  [github.com/bithuman-product/bithuman-apps](https://github.com/bithuman-product/bithuman-apps)
 
 ## Contributing & source
 
