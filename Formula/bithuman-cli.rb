@@ -72,9 +72,41 @@ class BithumanCli < Formula
     end
   end
 
+  def caveats
+    <<~EOS
+      Quick start:
+        bithuman-cli            # voice chat (the default)
+        bithuman-cli text       # type instead of speak
+        bithuman-cli avatar     # voice + lip-synced animated face
+        bithuman-cli doctor     # check what your machine can run
+        bithuman-cli --help     # full reference
+
+      Cloud (instant, no downloads):
+        export OPENAI_API_KEY=sk-...
+        bithuman-cli            # auto-picks the cloud backend
+
+      Fully on-device (private, slower first run):
+        bithuman-cli voice  --local      # ~5 GB first-run download
+        bithuman-cli text   --local      # ~2 GB first-run download
+        bithuman-cli avatar --local      # ~7 GB first-run download
+
+      Avatar mode also needs a free bitHuman API key — get one at
+      https://www.bithuman.ai/#developer and either export it as
+      BITHUMAN_API_KEY or save to:
+        ~/Library/Application Support/com.bithuman.cli/bithuman-api-key
+
+      Run `bithuman-cli cleanup` to wipe cached downloads if you
+      want a fresh start.
+
+      Docs: https://github.com/bithuman-product/homebrew-bithuman
+    EOS
+  end
+
   test do
     # --help exits 0 with non-trivial output. Mic permissions can't
     # be granted from `brew test`, so a real boot is out of scope.
     assert_match "bithuman-cli", shell_output("#{bin}/bithuman-cli --help")
+    # --version is a stable contract since 0.19.3.
+    assert_match version.to_s, shell_output("#{bin}/bithuman-cli --version")
   end
 end
