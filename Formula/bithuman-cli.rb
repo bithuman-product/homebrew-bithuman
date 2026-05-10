@@ -17,9 +17,9 @@
 class BithumanCli < Formula
   desc "On-device voice + video chat CLI for macOS (ASR + LLM + TTS + avatar, all local)"
   homepage "https://github.com/bithuman-product/homebrew-bithuman"
-  version "0.19.2"
+  version "0.19.3"
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v#{version}/bithuman-cli-#{version}.zip"
-  sha256 "6d022e8e0a46d61c584796d25f0b06e7e4e23bb8ae7872228f0161b64341319e"
+  sha256 "15b725d5a33350a4969621499e3ae2dfb676fda4f8efe683cb53c1b0ba25cbd2"
   license "Apache-2.0"
 
   depends_on macos: :tahoe
@@ -106,8 +106,10 @@ class BithumanCli < Formula
     # --help exits 0 with non-trivial output. Mic permissions can't
     # be granted from `brew test`, so a real boot is out of scope.
     assert_match "bithuman-cli", shell_output("#{bin}/bithuman-cli --help")
-    # The --version contract lands in 0.19.3 — uncomment once that
-    # binary ships:
-    #   assert_match version.to_s, shell_output("#{bin}/bithuman-cli --version")
+    # --version landed in 0.19.3. Pins the contract: the binary's
+    # stamped version string must match the formula's version, so
+    # release.sh's CLIVersion.swift sed-injection can't silently
+    # drift from the published tag.
+    assert_match version.to_s, shell_output("#{bin}/bithuman-cli --version")
   end
 end
