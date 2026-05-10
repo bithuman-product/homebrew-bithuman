@@ -106,7 +106,8 @@ class BithumanCli < Formula
     # --help exits 0 with non-trivial output. Mic permissions can't
     # be granted from `brew test`, so a real boot is out of scope.
     assert_match "bithuman-cli", shell_output("#{bin}/bithuman-cli --help")
-    # --version is a stable contract since 0.19.3.
-    assert_match version.to_s, shell_output("#{bin}/bithuman-cli --version")
+    # The --version contract lands in 0.19.3 — uncomment once that
+    # binary ships:
+    #   assert_match version.to_s, shell_output("#{bin}/bithuman-cli --version")
   end
 end
