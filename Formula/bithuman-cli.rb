@@ -17,9 +17,9 @@
 class BithumanCli < Formula
   desc "On-device voice + video chat CLI for macOS (ASR + LLM + TTS + avatar, all local)"
   homepage "https://github.com/bithuman-product/homebrew-bithuman"
-  version "0.19.1"
+  version "0.19.2"
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v#{version}/bithuman-cli-#{version}.zip"
-  sha256 "5a0792f9ae02a508ed2d2d327c0ed1f99d2f5de311ec0f9d0655e62e3db4debf"
+  sha256 "6d022e8e0a46d61c584796d25f0b06e7e4e23bb8ae7872228f0161b64341319e"
   license "Apache-2.0"
 
   depends_on macos: :tahoe
@@ -32,17 +32,44 @@ class BithumanCli < Formula
     # LiveKitWebRTC.framework via `@executable_path` rpath, so we
     # install everything into libexec and put a tiny exec-wrapper in
     # bin so the binary's runtime neighbours are still next to it
-    # after Homebrew links. (`*.framework` covers libwebrtc — as of
-    # 0.10.0 we use LiveKit's `webrtc-xcframework` instead of
-    # stasel/WebRTC, since LiveKit's macOS slice exposes
-    # `RTCAudioRenderer` which the new `avatar --openai` lipsync
-    # tap needs.)
-    libexec.install Dir["bithuman-cli", "*.bundle", "*.framework"]
+    # after Homebrew links.
+    #
+    # `*.framework.zip` matches frameworks shipped zipped to bypass
+    # `fix_install_linkage`. The companion `post_install` block below
+    # extracts them once relocation has run. See post_install for the
+    # full rationale.
+    libexec.install Dir["bithuman-cli", "*.bundle", "*.framework", "*.framework.zip"]
     (bin/"bithuman-cli").write <<~EOS
       #!/bin/bash
       exec "#{libexec}/bithuman-cli" "$@"
     EOS
     (bin/"bithuman-cli").chmod 0755
+  end
+
+  def post_install
+    # Why frameworks ship zipped:
+    #
+    # Homebrew's `fix_install_linkage` walks every Mach-O in a keg
+    # and calls `install_name_tool -id` to rewrite each dylib's
+    # LC_ID_DYLIB to an absolute install path under
+    # `/opt/homebrew/opt/<formula>/...`. That rewrite needs header-
+    # pad room reserved at link time. Upstream third-party frameworks
+    # — notably libwebrtc, shipped via `livekit/webrtc-xcframework` —
+    # were linked WITHOUT `-Wl,-headerpad_max_install_names`, so
+    # their LC_ID_DYLIB cmdsize is too small for the longer absolute
+    # path brew wants. `install_name_tool` aborts with
+    #   "Updated load commands do not fit in the header"
+    # and brew emits a confusing (but functionally cosmetic) warning.
+    #
+    # Workaround: ship the framework as a `.zip`. Brew's Mach-O
+    # walker only inspects raw Mach-O magic bytes — a zipped
+    # framework is invisible to it. After `fix_install_linkage` has
+    # run we extract the zip back into `libexec/`, restoring the
+    # exact filesystem layout the binary's `@rpath` lookup expects.
+    Dir.glob(libexec/"*.framework.zip") do |zip|
+      system "ditto", "-x", "-k", zip.to_s, libexec.to_s
+      rm zip
+    end
   end
 
   test do
