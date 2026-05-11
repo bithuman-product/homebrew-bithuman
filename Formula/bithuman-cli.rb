@@ -17,9 +17,9 @@
 class BithumanCli < Formula
   desc "On-device voice + video chat CLI for macOS (ASR + LLM + TTS + avatar, all local)"
   homepage "https://github.com/bithuman-product/homebrew-bithuman"
-  version "0.19.6"
+  version "0.19.8"
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v#{version}/bithuman-cli-#{version}.zip"
-  sha256 "d878ce3d8aab8cacac3b833c48dbda2b530473222870451c9129ee489a3f2015"
+  sha256 "5a9b4dd84c0e4a935c073debade7004280eeb94dee9ae6e2ae6375c15650cea3"
   license "Apache-2.0"
 
   depends_on macos: :tahoe
