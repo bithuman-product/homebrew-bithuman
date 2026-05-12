@@ -23,9 +23,9 @@
 class Bithuman < Formula
   desc "On-device avatar runtime CLI for the bitHuman SDK (voice/text/avatar, all local)"
   homepage "https://github.com/bithuman-product/bithuman-sdk"
-  url "https://github.com/bithuman-product/bithuman-sdk/releases/download/libessence-v0.1.0/bithuman-aarch64-apple-darwin.tar.gz"
-  version "0.1.0"
-  sha256 "84312d92646c5e39346e5bc0300564861da43a7a0ac665004d397f0058d26055"
+  url "https://github.com/bithuman-product/bithuman-sdk/releases/download/libessence-v1.12.1/bithuman-aarch64-apple-darwin.tar.gz"
+  version "1.12.1"
+  sha256 "34850748122ba70d40bc57b3cb1536764e1d8a724ace7657679d495a529e5637"
   license "Apache-2.0"
 
   depends_on arch: :arm64
