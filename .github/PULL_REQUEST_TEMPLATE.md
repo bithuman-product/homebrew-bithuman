@@ -3,7 +3,7 @@ Heads up: this repo is just the Homebrew tap. The CLI source is private and
 the formula version/URL/sha256 are bumped by release automation.
 
 PRs we merge: README fixes, formula caveats, llms.txt, appcast docs, tap docs.
-PRs we'll usually close: hand-edited version bumps in Formula/bithuman-cli.rb.
+PRs we'll usually close: hand-edited version bumps in Formula/bithuman.rb.
 
 See CONTRIBUTING.md for the full picture.
 -->
@@ -26,7 +26,7 @@ What problem does this solve?
 
 ## How I tested it
 
-- [ ] `brew audit --strict bithuman-product/bithuman/bithuman-cli` is clean
+- [ ] `brew audit --strict bithuman-product/bithuman/bithuman` is clean
 - [ ] `brew install --build-from-source` completes (for formula tweaks)
 - [ ] Rendered README looks right on GitHub
 - [ ] N/A — text-only / metadata change

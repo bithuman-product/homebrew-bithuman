@@ -1,6 +1,6 @@
 ---
 name: Tap / install bug
-about: Something about installing or upgrading bithuman-cli is broken
+about: Something about installing or upgrading bithuman is broken
 title: ''
 labels: bug
 ---
@@ -25,7 +25,7 @@ One paragraph.
 ### Exact command and output
 
 ```
-$ brew install bithuman-cli
+$ brew install bithuman
 ... paste the full output here, including any download URLs and sha256 lines ...
 ```
 

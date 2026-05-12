@@ -15,7 +15,7 @@ keywords: voice-chat, on-device, local-llm, voice-cloning, lip-sync, avatar, age
   </a>
 </p>
 
-<h1 align="center">bithuman-cli</h1>
+<h1 align="center">bithuman</h1>
 
 <p align="center">
   <strong>Talk to your Mac. Or type. 100% on-device.</strong><br>
@@ -24,7 +24,7 @@ keywords: voice-chat, on-device, local-llm, voice-cloning, lip-sync, avatar, age
 </p>
 
 <p align="center">
-  <a href="#install"><img alt="brew install" src="https://img.shields.io/badge/brew-install%20bithuman--cli-orange?style=flat-square"></a>
+  <a href="#install"><img alt="brew install" src="https://img.shields.io/badge/brew-install%20bithuman-orange?style=flat-square"></a>
   <a href="#"><img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-blue?style=flat-square"></a>
   <a href="#"><img alt="Apple Silicon" src="https://img.shields.io/badge/Apple%20Silicon-only-green?style=flat-square"></a>
   <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-lightgrey?style=flat-square"></a>
@@ -34,7 +34,7 @@ keywords: voice-chat, on-device, local-llm, voice-cloning, lip-sync, avatar, age
 
 ## What it does
 
-`bithuman-cli` turns your Mac into a real-time conversational assistant.
+`bithuman` turns your Mac into a real-time conversational assistant.
 Speak, type, or both — it transcribes, thinks, and replies out loud. In
 **video mode**, a small floating face in a circular window moves its
 lips in sync with the bot's voice. You can interrupt mid-sentence and
@@ -43,8 +43,11 @@ it cuts off within ~50 ms.
 **Everything runs locally.** No data leaves your machine. No API keys.
 No cloud round-trip. Works offline once the models are cached.
 
-> Previously known as `bitchat`. If you have the old formula installed,
-> run `brew uninstall bitchat && brew untap bithuman-product/bitchat`,
+> Previously known as `bitchat`, then `bithuman-cli`. The formula name
+> was shortened to `bithuman` for the libessence v0.1.0 unified SDK
+> release; `brew install bithuman-cli` still resolves via a deprecated
+> alias. If you have the legacy `bitchat` formula installed, run
+> `brew uninstall bitchat && brew untap bithuman-product/bitchat`,
 > then follow the install steps below.
 
 ## Install
@@ -53,9 +56,9 @@ Requires **macOS 26 (Tahoe) or later** on **Apple Silicon (M3+)** — the avatar
 
 ```sh
 brew tap bithuman-product/bithuman
-brew install bithuman-cli
-bithuman-cli                  # voice (default)
-bithuman-cli video            # voice + animated face
+brew install bithuman
+bithuman                  # voice (default)
+bithuman video            # voice + animated face
 ```
 
 That's it. First launch downloads the models (a few GB depending on mode)
@@ -65,20 +68,20 @@ to `~/.cache/huggingface/hub/`. Every launch after is offline.
 
 | Mode | What you get | First-run download |
 |---|---|---|
-| `text` | Typed chat in the terminal. Pipe-friendly: `echo "hi" \| bithuman-cli text`. | ~2 GB |
+| `text` | Typed chat in the terminal. Pipe-friendly: `echo "hi" \| bithuman text`. | ~2 GB |
 | `voice` *(default)* | Spoken conversation through your speakers. Voice cloning from a 10 s clip. | ~3 GB |
 | `video` | Voice + a floating circular window with a talking face. 8 bundled agents, drop-in face swap, voice gallery, prompt editor. | ~7 GB |
 
 ```sh
-bithuman-cli                                  # voice — pure audio chat
-bithuman-cli text                             # text-only repl
-bithuman-cli video                            # video chat with the default agent
-bithuman-cli video --image ~/Desktop/me.jpg   # video chat with your face
+bithuman                                  # voice — pure audio chat
+bithuman text                             # text-only repl
+bithuman video                            # video chat with the default agent
+bithuman video --image ~/Desktop/me.jpg   # video chat with your face
 ```
 
 ## ✨ Video mode — the centerpiece
 
-`bithuman-cli video` opens a small floating circular avatar window.
+`bithuman video` opens a small floating circular avatar window.
 **Right-click the avatar** to customize.
 
 ### 8 bundled agents
@@ -128,7 +131,7 @@ A label below echoes the same.
 
 The avatar holds its idle motion via a small in-memory loop — after ~10 s
 of warm-up the GPU drops to near-zero usage until you speak again. Leave
-bithuman-cli running for hours without spinning the fans or draining the
+bithuman running for hours without spinning the fans or draining the
 battery.
 
 ## Talk *or* type
@@ -144,13 +147,13 @@ all shut down cleanly.
 ## Quick start
 
 ```sh
-bithuman-cli voice --voice Aiden              # voice mode: Qwen3 preset speaker
-bithuman-cli voice --voice ~/voices/me.wav    # voice mode: clone your own voice (auto-transcribed)
-bithuman-cli video --voice am_michael         # video mode: Kokoro preset speaker
-bithuman-cli voice --locale ja-JP             # listen + reply in Japanese
-bithuman-cli text --prompt "Be a deadpan ship's computer."
-bithuman-cli video --image ~/Desktop/me.jpg   # your face, default voice
-echo "summarise this:" | bithuman-cli text    # use as a shell pipe
+bithuman voice --voice Aiden              # voice mode: Qwen3 preset speaker
+bithuman voice --voice ~/voices/me.wav    # voice mode: clone your own voice (auto-transcribed)
+bithuman video --voice am_michael         # video mode: Kokoro preset speaker
+bithuman voice --locale ja-JP             # listen + reply in Japanese
+bithuman text --prompt "Be a deadpan ship's computer."
+bithuman video --image ~/Desktop/me.jpg   # your face, default voice
+echo "summarise this:" | bithuman text    # use as a shell pipe
 ```
 
 | flag | what it does |
@@ -164,11 +167,11 @@ echo "summarise this:" | bithuman-cli text    # use as a shell pipe
 ## Why bitHuman?
 
 - **Truly local.** No API keys, no per-token billing, no audio leaving
-  your Mac. If your laptop's offline, bithuman-cli still works.
+  your Mac. If your laptop's offline, bithuman still works.
 - **Real-time, with barge-in.** The bot stops within ~50 ms of you
   starting to speak — both audio and the avatar's mouth.
 - **Voice cloning out of the box.** Drop in a 10-second clip and
-  bithuman-cli uses it as the bot's voice (voice mode).
+  bithuman uses it as the bot's voice (voice mode).
 - **Drop-in face swap.** Drag any portrait onto the avatar and it
   becomes the new face after a quick on-device encode (video mode). No
   retraining, no upload.
@@ -194,7 +197,7 @@ No swap pressure during normal conversation in any mode.
 
 ## For developers
 
-bithuman-cli ships as a Swift library too — `bitHumanKit` — embeddable
+bithuman ships as a Swift library too — `bitHumanKit` — embeddable
 via Swift Package Manager. Build a custom voice / video assistant in a
 few lines:
 
@@ -225,18 +228,18 @@ if you'd like access.
   model-loading internals (tensor counts, dtype breakdowns) while
   debugging. Silent by default.
 - **First launch downloads ~3–7 GB of models** depending on mode. Plan
-  for it on a slow connection — the rest of bithuman-cli then works
+  for it on a slow connection — the rest of bithuman then works
   offline.
 
 ## About bitHuman
 
-bithuman-cli is built and maintained by
+bithuman is built and maintained by
 [**bitHuman**](https://www.bithuman.ai), the team behind real-time
 on-device avatar engines. We make local-first voice and avatar AI feel
 as good as the cloud services you're used to — without sending your
 audio anywhere.
 
-bithuman-cli is one piece of the bitHuman product family, alongside the
+bithuman is one piece of the bitHuman product family, alongside the
 Mac, iPad, and iPhone reference apps.
 
 - 🌐 [www.bithuman.ai](https://www.bithuman.ai)
@@ -252,7 +255,7 @@ This repo (`bithuman-product/homebrew-bithuman`) hosts the **release artefacts**
 
 Full SDK and CLI documentation: **[docs.bithuman.ai](https://docs.bithuman.ai)**.
 
-- [bithuman-cli reference](https://docs.bithuman.ai/swift-sdk/cli)
+- [bithuman CLI reference](https://docs.bithuman.ai/swift-sdk/cli)
 - [Swift SDK overview](https://docs.bithuman.ai/swift-sdk/overview) — embed in your own Mac/iPad/iPhone app
 - [Authentication](https://docs.bithuman.ai/getting-started/authentication) — only needed for avatar mode (audio-only is unmetered, no key required)
 - [Pricing & credits](https://docs.bithuman.ai/getting-started/pricing)
@@ -260,8 +263,8 @@ Full SDK and CLI documentation: **[docs.bithuman.ai](https://docs.bithuman.ai)**
 ## Agents and LLMs
 
 This repo publishes [`llms.txt`](llms.txt) — a structured manifest aimed
-at AI coding assistants discovering and using bithuman-cli. Agents
-trying to install or invoke bithuman-cli on a user's machine should
+at AI coding assistants discovering and using bithuman. Agents
+trying to install or invoke bithuman on a user's machine should
 start there.
 
 ## License

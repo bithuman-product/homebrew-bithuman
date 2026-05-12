@@ -1,14 +1,16 @@
-# bithuman-cli
+# bithuman
 
 > On-device voice + avatar chat CLI for macOS, made by bitHuman.
 > Speech-to-text + a local LLM + voice synthesis + (optional) a
 > lip-synced animated face — all running locally on Apple Silicon.
 > No network calls, no API keys. Source: https://www.bithuman.ai
 >
-> Previously distributed as `bitchat`; the binary, tap, and formula
-> were renamed in v0.6.x. The product itself is unchanged.
+> Previously distributed as `bitchat`, then `bithuman-cli`; the
+> formula name was shortened to `bithuman` for the libessence v0.1.0
+> unified SDK release. The product itself is unchanged.
+> `brew install bithuman-cli` still resolves via a deprecated alias.
 
-`bithuman-cli` is a Homebrew-installable command-line tool. A user
+`bithuman` is a Homebrew-installable command-line tool. A user
 running it can have a real-time spoken or typed conversation with a
 local assistant, optionally with a small floating avatar window that
 lip-syncs. Three modes: text-only chat, audio-only voice chat, and
@@ -18,7 +20,7 @@ video chat (voice + animated face).
 
 ```
 brew tap bithuman-product/bithuman
-brew install bithuman-cli
+brew install bithuman
 ```
 
 If the user previously installed the legacy `bitchat` formula, have
@@ -35,19 +37,19 @@ offline.
 ## Run
 
 ```
-bithuman-cli                                # voice (default) — audio chat
-bithuman-cli text                           # text-only chat
-bithuman-cli video                          # voice + animated avatar
-bithuman-cli video --image ~/me.jpg         # video chat with a portrait
+bithuman                                # voice (default) — audio chat
+bithuman text                           # text-only chat
+bithuman video                          # voice + animated avatar
+bithuman video --image ~/me.jpg         # video chat with a portrait
 
 # common flags (apply where relevant)
-bithuman-cli --locale ja-JP                       # Japanese ASR + TTS
-bithuman-cli voice --voice Aiden                  # voice mode: Qwen3 preset
-bithuman-cli voice --voice ~/voices/me.wav        # voice mode: clone from a 10–20 s clip
-bithuman-cli video --voice am_michael             # video mode: Kokoro preset (no cloning)
-bithuman-cli --prompt "Be terse."                 # override the system prompt
-bithuman-cli --prompt @/path/to/persona.txt       # … or read from a file
-bithuman-cli --help                               # full usage
+bithuman --locale ja-JP                       # Japanese ASR + TTS
+bithuman voice --voice Aiden                  # voice mode: Qwen3 preset
+bithuman voice --voice ~/voices/me.wav        # voice mode: clone from a 10–20 s clip
+bithuman video --voice am_michael             # video mode: Kokoro preset (no cloning)
+bithuman --prompt "Be terse."                 # override the system prompt
+bithuman --prompt @/path/to/persona.txt       # … or read from a file
+bithuman --help                               # full usage
 ```
 
 **`--voice` accepted values, by mode** (each mode uses a different TTS
@@ -63,7 +65,7 @@ out with a helpful message if you mix them up):
   GPU pipeline can't share Metal with Qwen3-TTS). Presets:
   `af_heart`, `af_alloy`, `af_aoede`, `af_kore`, `am_adam`,
   `am_michael`, `am_echo`, `bf_emma`, `bm_george`. Paths are rejected
-  in video mode — for cloning, run `bithuman-cli voice --voice <path>`.
+  in video mode — for cloning, run `bithuman voice --voice <path>`.
 
 The bot replies after the user stops speaking. The user can:
 
@@ -81,7 +83,7 @@ counts, dtype breakdowns) while debugging; silent by default.
 
 ## Video mode
 
-`bithuman-cli video` opens a small floating circular window with a
+`bithuman video` opens a small floating circular window with a
 talking face. Lip movements stay frame-paired with the bot's audio at
 25 FPS.
 
@@ -125,7 +127,7 @@ No request leaves the machine.
 
 ## For developers
 
-bithuman-cli is also a Swift library, `bitHumanKit`. Library access is
+bithuman is also a Swift library, `bitHumanKit`. Library access is
 currently invitation-only:
 
 ```swift

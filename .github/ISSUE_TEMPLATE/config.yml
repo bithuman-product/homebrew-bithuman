@@ -1,6 +1,6 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Bug in bithuman-cli itself (not the install)
+  - name: Bug in bithuman itself (not the install)
     url: mailto:support@bithuman.ai
     about: The CLI source is private. For runtime bugs (crashes, audio, avatar, voice cloning), email support — your report reaches the engineers who can fix it.
   - name: Feature requests for the CLI

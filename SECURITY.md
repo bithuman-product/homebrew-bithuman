@@ -1,13 +1,13 @@
 # Security Policy
 
-This repo is the Homebrew tap for `bithuman-cli`. The CLI binary is built from a private source repo and notarized by Apple before being attached to a GitHub Release. This tap just publishes the formula that points at those artifacts.
+This repo is the Homebrew tap for `bithuman` (formerly `bithuman-cli`). The CLI binary is built from a private source repo and notarized by Apple before being attached to a GitHub Release. This tap just publishes the formula that points at those artifacts.
 
 ## Reporting a vulnerability
 
 **Please don't file a public GitHub issue.** Email **security@bithuman.ai** with:
 
 - A description of the issue and what an attacker could do.
-- Reproduction steps. For tap / installation issues, include `brew config` output and the exact command that triggered it. For runtime CLI issues, include the `bithuman-cli --version` output and OS / hardware.
+- Reproduction steps. For tap / installation issues, include `brew config` output and the exact command that triggered it. For runtime CLI issues, include the `bithuman --version` output and OS / hardware.
 - The release tag or commit where you observed the problem.
 - Your name or handle if you'd like public credit in the advisory.
 
@@ -15,7 +15,7 @@ This repo is the Homebrew tap for `bithuman-cli`. The CLI binary is built from a
 
 - Tampering or supply-chain concerns with the published formula, release artifacts, or `appcast.xml`.
 - A formula post-install or caveats message that could trick users into running unsafe commands.
-- Issues with the way `bithuman-cli` is signed or notarized in releases attached here.
+- Issues with the way `bithuman` is signed or notarized in releases attached here.
 
 ## Out of scope (please email support@bithuman.ai instead)
 

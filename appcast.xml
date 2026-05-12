@@ -51,7 +51,7 @@
             <description><![CDATA[
                 <p>First signed release of the bitHuman desktop app.</p>
                 <ul>
-                    <li>Same on-device engine as <code>bithuman-cli</code> (Gemma 4 E2B LLM, Qwen3-TTS / Kokoro, bitHuman expression engine)</li>
+                    <li>Same on-device engine as <code>bithuman</code> (Gemma 4 E2B LLM, Qwen3-TTS / Kokoro, bitHuman expression engine)</li>
                     <li>Floating circular avatar window — drag-drop a portrait to swap the face, right-click for the agent gallery / voice / prompt pickers</li>
                     <li>8 bundled agents (Diego, Nova, Einstein, Riya, Lena, Rae, Dr. Maya, Mason)</li>
                     <li>Apple Silicon M3+ on macOS 26 (Tahoe) or later</li>
