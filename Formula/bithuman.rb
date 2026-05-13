@@ -29,9 +29,9 @@ class Bithuman < Formula
   # (which downloads anonymously, not via API) cannot fetch from there.
   # We mirror to the tap repo, which IS public, so `brew install` works
   # without any credentials.
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v1.12.4/bithuman-aarch64-apple-darwin.tar.gz"
-  version "1.12.4"
-  sha256 "3696190fde55d714760313f3962c7eefadfc74a07210a6e2bcedf30df897778e"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v1.13.0/bithuman-aarch64-apple-darwin.tar.gz"
+  version "1.13.0"
+  sha256 "40aee346a74a8fb329c291287aad1ad2118cc7a1f3c9180816fe97fd25360f18"
   license "Apache-2.0"
 
   depends_on arch: :arm64
