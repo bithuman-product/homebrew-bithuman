@@ -23,7 +23,13 @@
 class Bithuman < Formula
   desc "On-device avatar runtime CLI for the bitHuman SDK (voice/text/avatar, all local)"
   homepage "https://github.com/bithuman-product/bithuman-sdk"
-  url "https://github.com/bithuman-product/bithuman-sdk/releases/download/libessence-v1.12.4/bithuman-aarch64-apple-darwin.tar.gz"
+  # Tarball mirrored to the public homebrew-bithuman tap repo's own
+  # Releases. The upstream bithuman-sdk repo is private, which gates
+  # anonymous downloads of its release assets with HTTP 404 — so brew
+  # (which downloads anonymously, not via API) cannot fetch from there.
+  # We mirror to the tap repo, which IS public, so `brew install` works
+  # without any credentials.
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v1.12.4/bithuman-aarch64-apple-darwin.tar.gz"
   version "1.12.4"
   sha256 "3696190fde55d714760313f3962c7eefadfc74a07210a6e2bcedf30df897778e"
   license "Apache-2.0"
