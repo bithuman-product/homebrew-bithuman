@@ -1,6 +1,6 @@
 # Contributing
 
-This repo is the **Homebrew tap** for `bithuman` (formerly `bithuman-cli`). It hosts the formula and the notarized release artifacts; that's it. The CLI source itself lives in a private repo, and the formula is bumped automatically when we cut a new release.
+This repo is the **Homebrew tap** for `bithuman` (formerly `bithuman-cli`). It hosts the formula and the notarized release artifacts — that's it. The formula is bumped automatically when we cut a new release; the CLI itself is distributed as a signed binary attached to those releases.
 
 A short orientation:
 
@@ -14,9 +14,9 @@ A short orientation:
 
 ## Where to send what
 
-### Don't file CLI bug reports here
+### Don't file CLI runtime bug reports here
 
-The CLI source is private and the engineers who can fix bugs don't watch this repo. If `bithuman` crashes, hangs, mis-transcribes, picks the wrong voice, or otherwise misbehaves at runtime, please email **support@bithuman.ai** (or post in the [community forum](https://www.bithuman.ai/community)) so the report routes to the right team.
+This tap is watched by the release / packaging team, not the CLI engineers. If `bithuman` itself crashes, hangs, mis-transcribes, picks the wrong voice, or otherwise misbehaves at runtime, please email **support@bithuman.ai** (or post in the [community forum](https://www.bithuman.ai/community)) so the report reaches the team that can fix it.
 
 ### Do file an issue here when…
 

@@ -249,7 +249,7 @@ Mac, iPad, and iPhone reference apps.
 
 ## Contributing & source
 
-This repo (`bithuman-product/homebrew-bithuman`) hosts the **release artefacts**: the Homebrew formula and notarised binaries. The Swift source for the underlying SDK is private; the public binary distribution lives at [`bithuman-sdk-public`](https://github.com/bithuman-product/bithuman-sdk-public). Use that to embed the SDK in your own app.
+This repo (`bithuman-product/homebrew-bithuman`) hosts the **release artefacts** — the Homebrew formula and notarised binaries. To embed the underlying SDK (`bitHumanKit`) in your own Mac/iPad/iPhone app, head to [`bithuman-sdk-public`](https://github.com/bithuman-product/bithuman-sdk-public), which is the public SwiftPM distribution.
 
 ## Docs
 
