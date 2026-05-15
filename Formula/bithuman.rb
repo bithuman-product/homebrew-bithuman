@@ -31,7 +31,7 @@ class Bithuman < Formula
   # without any credentials.
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v1.17.0/bithuman-aarch64-apple-darwin.tar.gz"
   version "1.17.0"
-  sha256 "6b7d2e509a19c296a788ff9c232121233a7ff8ced502c6a3d95c91ee91ea03bf"
+  sha256 "b0c7809262ab0fb9aa66955e6bcd32e18202487dc670f68d6ce42a5050dbea9f"
   license "Apache-2.0"
 
   depends_on arch: :arm64
