@@ -6,7 +6,7 @@
 #   brew install bithuman
 #   bithuman --help
 #
-# Engine: libessence v1.17.3 — the unified bitHuman SDK release. Voice
+# Engine: libessence v1.17.5 — the unified bitHuman SDK release. Voice
 # / text / avatar all run on-device (ASR + LLM + TTS + bitHuman
 # expression engine); cloud backends are optional.
 #
@@ -16,7 +16,7 @@
 #   alias for users with the old name in scripts / muscle memory.
 #
 # This formula installs a prebuilt Rust binary from the
-# bithuman-product/bithuman-sdk libessence-v1.17.3 GitHub Release.
+# bithuman-product/bithuman-sdk libessence-v1.17.5 GitHub Release.
 # First launch downloads ~3 GB of model weights to ~/.cache/huggingface/hub/
 # only if you opt into `--local` mode (cloud mode is the default and
 # needs no on-disk weights).
@@ -29,29 +29,35 @@ class Bithuman < Formula
   # (which downloads anonymously, not via API) cannot fetch from there.
   # We mirror to the tap repo, which IS public, so `brew install` works
   # without any credentials.
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v1.17.3/bithuman-aarch64-apple-darwin.tar.gz"
-  version "1.17.3"
-  sha256 "bfebac579e9f8d053246587029f793f32ea3780c3642e7e1072c6f4d8a5d7551"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v1.17.5/bithuman-aarch64-apple-darwin.tar.gz"
+  version "1.17.5"
+  sha256 "117d42c29a2a43f517f9b84b744d22d0af44213f98de2d2ed2a49f05ca4b5f49"
   license "Apache-2.0"
 
   depends_on arch: :arm64
   depends_on macos: :sonoma
 
-  # Runtime dylib deps the Rust CLI links against. Homebrew resolves
-  # these transitively so `brew install bithuman` pulls them in if the
-  # user doesn't already have them.
-  depends_on "ffmpeg"
-  depends_on "hdf5"
-  depends_on "jpeg-turbo"
-  depends_on "onnxruntime"
-  depends_on "webp"
+  # No runtime `depends_on` dylibs. As of 1.17.5 the macOS tarball is
+  # self-contained: the `bithuman` binary references every third-party
+  # dylib (ONNX Runtime, HDF5, FFmpeg, libjpeg-turbo, libwebp, the
+  # libcurl chain — 106 dylibs total) via @loader_path/lib/<name>, and
+  # those dylibs travel inside the tarball's lib/ directory. `otool -L`
+  # on the binary and all 106 bundled dylibs shows 0 /opt/homebrew
+  # references; the only external links are macOS system frameworks and
+  # OS-provided /usr/lib/* (libSystem, libc++, libz, libcurl, libiconv).
+  # Dropping the Homebrew runtime deps makes `brew install` lighter and
+  # removes the version-pin breakage that comes from Homebrew bumping
+  # e.g. onnxruntime/ffmpeg out from under a binary linked at a fixed
+  # soname.
 
   def install
-    # Tarball contains a single `bithuman` binary at the root. The
-    # Rust CLI looks up its runtime dylibs via `@rpath` baked at link
-    # time pointing at /opt/homebrew/opt/<dep>/lib — the
-    # depends_on declarations above guarantee those paths resolve.
-    bin.install "bithuman"
+    # Self-contained tarball: ./bithuman + ./lib/*.dylib, binary linked
+    # with @loader_path/lib. Keep that relative layout intact by
+    # installing the whole bundle under libexec and exposing a thin
+    # symlink on PATH — @loader_path resolves through the symlink to
+    # the real binary in libexec, so the bundled lib/ is found.
+    libexec.install "bithuman", "lib"
+    bin.install_symlink libexec/"bithuman"
   end
 
   def caveats
