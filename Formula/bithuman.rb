@@ -6,7 +6,7 @@
 #   brew install bithuman
 #   bithuman --help
 #
-# Engine: libessence v1.17.1 — the unified bitHuman SDK release. Voice
+# Engine: libessence v1.17.2 — the unified bitHuman SDK release. Voice
 # / text / avatar all run on-device (ASR + LLM + TTS + bitHuman
 # expression engine); cloud backends are optional.
 #
@@ -16,7 +16,7 @@
 #   alias for users with the old name in scripts / muscle memory.
 #
 # This formula installs a prebuilt Rust binary from the
-# bithuman-product/bithuman-sdk libessence-v1.17.1 GitHub Release.
+# bithuman-product/bithuman-sdk libessence-v1.17.2 GitHub Release.
 # First launch downloads ~3 GB of model weights to ~/.cache/huggingface/hub/
 # only if you opt into `--local` mode (cloud mode is the default and
 # needs no on-disk weights).
@@ -29,9 +29,9 @@ class Bithuman < Formula
   # (which downloads anonymously, not via API) cannot fetch from there.
   # We mirror to the tap repo, which IS public, so `brew install` works
   # without any credentials.
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v1.17.1/bithuman-aarch64-apple-darwin.tar.gz"
-  version "1.17.1"
-  sha256 "1b7b2f1fffde2f75e969abb62164945c44cc5b9f1522b094432a5fb664ac7155"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v1.17.2/bithuman-aarch64-apple-darwin.tar.gz"
+  version "1.17.2"
+  sha256 "1e2591187d517e53fb6e864f9bc975c964f60d7e5d05a8866738ab5d9dbfa78f"
   license "Apache-2.0"
 
   depends_on arch: :arm64
