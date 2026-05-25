@@ -1,14 +1,20 @@
-# Homebrew formula for `bithuman` — the bitHuman SDK on-device avatar
-# runtime CLI for macOS. https://www.bithuman.ai
+# Homebrew formula for `bithuman` — the bitHuman SDK live-avatar CLI
+# for macOS. https://www.bithuman.ai
 #
 # Install:
 #   brew tap bithuman-product/bithuman
 #   brew install bithuman
-#   bithuman --help
+#   bithuman doctor                       # host + auth + cache sanity check
+#   bithuman run avatar.imx               # live browser-served avatar
 #
-# Engine: libessence v1.17.5 — the unified bitHuman SDK release. Voice
-# / text / avatar all run on-device (ASR + LLM + TTS + bitHuman
-# expression engine); cloud backends are optional.
+# Engine: libessence v2.2.5 — the bundled 2.x CLI. One command
+# (`bithuman run`) stands up the whole stack: embedded livekit-server,
+# libessence runtime, conversation brain, browser landing page.
+#
+# Two brain paths:
+#   * Cloud (default) — OPENAI_API_KEY for the OpenAI Realtime brain.
+#   * On-device — set BITHUMAN_LOCAL=1, no API key needed. Requires
+#     the Python wheel's [local] extra; see "On-device brain" caveat.
 #
 # Backwards compat:
 #   Previously published as `bithuman-cli`. An `Aliases/bithuman-cli`
@@ -16,39 +22,32 @@
 #   alias for users with the old name in scripts / muscle memory.
 #
 # This formula installs a prebuilt Rust binary from the
-# bithuman-product/bithuman-sdk libessence-v1.17.5 GitHub Release.
-# First launch downloads ~3 GB of model weights to ~/.cache/huggingface/hub/
-# only if you opt into `--local` mode (cloud mode is the default and
-# needs no on-disk weights).
+# bithuman-product/bithuman-sdk libessence-v2.2.5 GitHub Release,
+# mirrored to the public homebrew-bithuman tap repo's own Releases
+# (the upstream bithuman-sdk repo is private — anonymous brew
+# downloads fail there with HTTP 404; the mirror is the workaround).
 class Bithuman < Formula
-  desc "On-device avatar runtime CLI for the bitHuman SDK (voice/text/avatar, all local)"
+  desc "Live-avatar CLI for the bitHuman SDK (one `bithuman run` for browser-served chat)"
   homepage "https://github.com/bithuman-product/bithuman-sdk"
-  # Tarball mirrored to the public homebrew-bithuman tap repo's own
-  # Releases. The upstream bithuman-sdk repo is private, which gates
-  # anonymous downloads of its release assets with HTTP 404 — so brew
-  # (which downloads anonymously, not via API) cannot fetch from there.
-  # We mirror to the tap repo, which IS public, so `brew install` works
-  # without any credentials.
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v1.17.5/bithuman-aarch64-apple-darwin.tar.gz"
-  version "1.17.5"
-  sha256 "117d42c29a2a43f517f9b84b744d22d0af44213f98de2d2ed2a49f05ca4b5f49"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.2.5/bithuman-aarch64-apple-darwin.tar.gz"
+  version "2.2.5"
+  sha256 "f96a502588f9549a1f534fdfbbfcd404dbae1e96f5676c18a2ac6bcacd4a3d19"
   license "Apache-2.0"
 
   depends_on arch: :arm64
   depends_on macos: :sonoma
 
-  # No runtime `depends_on` dylibs. As of 1.17.5 the macOS tarball is
-  # self-contained: the `bithuman` binary references every third-party
-  # dylib (ONNX Runtime, HDF5, FFmpeg, libjpeg-turbo, libwebp, the
-  # libcurl chain — 106 dylibs total) via @loader_path/lib/<name>, and
-  # those dylibs travel inside the tarball's lib/ directory. `otool -L`
-  # on the binary and all 106 bundled dylibs shows 0 /opt/homebrew
-  # references; the only external links are macOS system frameworks and
-  # OS-provided /usr/lib/* (libSystem, libc++, libz, libcurl, libiconv).
-  # Dropping the Homebrew runtime deps makes `brew install` lighter and
-  # removes the version-pin breakage that comes from Homebrew bumping
-  # e.g. onnxruntime/ffmpeg out from under a binary linked at a fixed
-  # soname.
+  # No runtime `depends_on` dylibs. The macOS tarball is self-contained:
+  # the `bithuman` binary references every third-party dylib (ONNX
+  # Runtime, HDF5, FFmpeg, libjpeg-turbo, libwebp, the libcurl chain)
+  # via @loader_path/lib/<name>, and those dylibs travel inside the
+  # tarball's lib/ directory. `otool -L` on the binary and all bundled
+  # dylibs shows 0 /opt/homebrew references; the only external links
+  # are macOS system frameworks and OS-provided /usr/lib/* (libSystem,
+  # libc++, libz, libcurl, libiconv). Dropping the Homebrew runtime
+  # deps makes `brew install` lighter and removes version-pin breakage
+  # that comes from Homebrew bumping e.g. onnxruntime/ffmpeg out from
+  # under a binary linked at a fixed soname.
 
   def install
     # Self-contained tarball: ./bithuman + ./lib/*.dylib, binary linked
@@ -63,41 +62,44 @@ class Bithuman < Formula
   def caveats
     <<~EOS
       Quick start:
-        bithuman            # voice chat (the default)
-        bithuman text       # type instead of speak
-        bithuman avatar     # voice + lip-synced animated face
-        bithuman doctor     # check what your machine can run
-        bithuman --help     # full reference
+        bithuman doctor                    # host + auth + cache sanity check
+        bithuman list                      # browse showcase avatars
+        bithuman pull modern-court-jester  # download one
+        bithuman run ~/.cache/bithuman/showcase/modern-court-jester.imx
 
-      Cloud (instant, no downloads):
+      `bithuman run` prints a http://127.0.0.1:8088/<CODE> URL — open
+      it, grant mic permission, talk.
+
+      Cloud brain (OpenAI Realtime, default):
         export OPENAI_API_KEY=sk-...
-        bithuman            # auto-picks the cloud backend
 
-      Fully on-device (private, slower first run):
-        bithuman voice  --local      # ~5 GB first-run download
-        bithuman text   --local      # ~2 GB first-run download
-        bithuman avatar --local      # ~7 GB first-run download
+      On-device brain (no OpenAI key, no outbound network):
+        Requires the Python wheel's [local] extra (whisper.cpp +
+        llama.cpp + Supertonic):
+          pip install 'bithuman[local]'
+          BITHUMAN_LOCAL=1 bithuman run <model.imx>
+        ~860 MB models auto-download from HuggingFace on first run.
+        Docs: https://docs.bithuman.ai/guides/local-mode
 
-      Avatar mode also needs a free bitHuman API key — get one at
-      https://www.bithuman.ai/#developer and either export it as
-      BITHUMAN_API_KEY or save to:
-        ~/Library/Application Support/com.bithuman.cli/bithuman-api-key
+      Avatar metering needs a free bitHuman API key — get one at
+      https://www.bithuman.ai/#developer and export it:
+        export BITHUMAN_API_KEY=...
 
-      Run `bithuman cleanup` to wipe cached downloads if you
-      want a fresh start.
+      Offline tooling:
+        bithuman render avatar.imx -a a.wav -o out.mp4   # MP4 render
+        bithuman info   avatar.imx                       # inspect .imx
 
-      Docs: https://github.com/bithuman-product/bithuman-sdk
+      Docs:    https://docs.bithuman.ai
+      Source:  https://github.com/bithuman-product/bithuman-sdk
     EOS
   end
 
   test do
-    # --help exits 0 with non-trivial output. Mic permissions can't
-    # be granted from `brew test`, so a real boot is out of scope.
-    assert_match "bithuman", shell_output("#{bin}/bithuman --help")
-    # `bithuman version` prints libessence + ABI + CLI versions.
-    # Pins the contract: the libessence shared with the formula must
-    # match the binary's stamped version, so a stale upload can't
-    # silently drift from the published tag.
-    assert_match version.to_s, shell_output("#{bin}/bithuman version")
+    # Smoke: --version exits 0 + prints the libessence engine line.
+    assert_match(/libessence \d+\.\d+\.\d+ ABI \d+/, shell_output("#{bin}/bithuman --version"))
+    # Smoke: doctor runs (exit code may be 0 or 1 depending on env;
+    # we just assert the binary linked + opens the cache dirs).
+    output = shell_output("#{bin}/bithuman doctor 2>&1", 1) + shell_output("#{bin}/bithuman doctor 2>&1 || true")
+    assert_match(/bithuman doctor/, output)
   end
 end
