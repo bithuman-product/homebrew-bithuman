@@ -1,0 +1,122 @@
+# Auto-bump this Homebrew tap to a new libessence-v* release.
+#
+# Manual trigger: workflow_dispatch with version input (e.g. "2.2.5").
+# The job:
+#   1. Downloads bithuman-aarch64-apple-darwin.tar.gz + .sha256 from the
+#      bithuman-product/bithuman-sdk libessence-v<version> release.
+#      The sdk repo is private — the BITHUMAN_RELEASE_PAT secret is a
+#      fine-grained PAT scoped to "Contents: Read" on bithuman-sdk only.
+#   2. Mirrors both to this tap repo's own v<version> release (the
+#      public download surface — `brew install` is anonymous).
+#   3. Replaces url + version + sha256 in Formula/bithuman.rb.
+#   4. Commits + pushes (uses the default GITHUB_TOKEN; one-file commit
+#      authored as bitHuman <hello@bithuman.ai>).
+#
+# Idempotent: re-runs against an existing v<version> tap release replace
+# the assets (gh release upload --clobber) and re-write the formula.
+# Workflow-injection-safe: the version input is bound to env and
+# validated by regex before any shell interpolation; no inputs land
+# directly inside `run:` blocks.
+
+name: Bump Homebrew tap
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "libessence version to bump to (without the 'v' prefix, e.g. 2.2.5)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    name: Mirror + bump
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ inputs.version }}
+      SDK_REPO: bithuman-product/bithuman-sdk
+      TAP_REPO: ${{ github.repository }}
+      ASSET: bithuman-aarch64-apple-darwin.tar.gz
+    steps:
+      - name: Validate version string
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([a-z0-9]+)?$ ]]; then
+            echo "::error::version '$VERSION' doesn't look like a semver tag"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download libessence-v${{ env.VERSION }} macOS arm64 asset
+        env:
+          GH_TOKEN: ${{ secrets.BITHUMAN_RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          mkdir -p stage
+          cd stage
+          gh release download "libessence-v${VERSION}" \
+            --repo "$SDK_REPO" \
+            -p "$ASSET" \
+            -p "${ASSET}.sha256"
+          echo "-- staged --"
+          ls -la
+          echo "-- sha (recomputed) --"
+          shasum -a 256 "$ASSET"
+
+      - name: Mirror to tap release v${{ env.VERSION }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd stage
+          # gh release create errors if the release exists; gh release
+          # upload --clobber handles both cases idempotently. Probe + branch.
+          if gh release view "v${VERSION}" --repo "$TAP_REPO" >/dev/null 2>&1; then
+            echo "tap release v${VERSION} exists — uploading assets with --clobber"
+            gh release upload "v${VERSION}" "$ASSET" "${ASSET}.sha256" \
+              --repo "$TAP_REPO" --clobber
+          else
+            echo "creating tap release v${VERSION}"
+            gh release create "v${VERSION}" "$ASSET" "${ASSET}.sha256" \
+              --repo "$TAP_REPO" \
+              --title "v${VERSION}" \
+              --notes "Mirror of libessence-v${VERSION} release assets — anonymous brew install surface. Source: https://github.com/${SDK_REPO}/releases/tag/libessence-v${VERSION}"
+          fi
+
+      - name: Patch Formula/bithuman.rb
+        run: |
+          set -euo pipefail
+          SHA=$(shasum -a 256 "stage/${ASSET}" | awk '{print $1}')
+          URL="https://github.com/${TAP_REPO}/releases/download/v${VERSION}/${ASSET}"
+          export VERSION SHA URL
+          python3 - <<'PY'
+          import os, re, pathlib
+          p = pathlib.Path("Formula/bithuman.rb")
+          s = p.read_text()
+          ver, sha, url = os.environ["VERSION"], os.environ["SHA"], os.environ["URL"]
+          s = re.sub(r'^(  url )".+"$',     rf'\1"{url}"', s, count=1, flags=re.MULTILINE)
+          s = re.sub(r'^(  version )".+"$', rf'\1"{ver}"', s, count=1, flags=re.MULTILINE)
+          s = re.sub(r'^(  sha256 )".+"$',  rf'\1"{sha}"', s, count=1, flags=re.MULTILINE)
+          p.write_text(s)
+          PY
+          echo "-- formula diff --"
+          git --no-pager diff Formula/bithuman.rb
+
+      - name: Commit + push
+        run: |
+          set -euo pipefail
+          git config user.name  "bitHuman"
+          git config user.email "hello@bithuman.ai"
+          if git diff --quiet Formula/bithuman.rb; then
+            echo "formula already at v${VERSION} — nothing to commit"
+            exit 0
+          fi
+          git add Formula/bithuman.rb
+          git commit -m "bithuman → ${VERSION} (auto via bump-tap workflow)"
+          git push origin HEAD:main
