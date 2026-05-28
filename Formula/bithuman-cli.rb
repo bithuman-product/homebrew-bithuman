@@ -42,7 +42,7 @@ class BithumanCli < Formula
   homepage "https://github.com/bithuman-product/bithuman-sdk"
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.3.0/bithuman-aarch64-apple-darwin.tar.gz"
   version "2.3.0"
-  sha256 "fd1541393dc024c67375e9aaecd3ee6169bbe403aa46def6dbf8feed958e59ea"
+  sha256 "f9dd829e794a97d8ad5acb68846e07406a3f87ba88cecf48da6a1dee8afeb76a"
   license "Apache-2.0"
 
   depends_on arch: :arm64
