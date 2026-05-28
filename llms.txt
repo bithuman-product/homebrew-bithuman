@@ -5,10 +5,11 @@
 > lip-synced animated face — all running locally on Apple Silicon.
 > No network calls, no API keys. Source: https://www.bithuman.ai
 >
-> Previously distributed as `bitchat`, then `bithuman-cli`; the
-> formula name was shortened to `bithuman` for the libessence v0.1.0
-> unified SDK release. The product itself is unchanged.
-> `brew install bithuman-cli` still resolves via a deprecated alias.
+> Previously distributed as `bitchat`, then `bithuman-cli`, then
+> briefly `bithuman`. The formula name is now `bithuman-cli` again to
+> match the PyPI `pip install bithuman-cli` convention. The product
+> itself is unchanged. `brew install bithuman` still resolves via a
+> deprecated alias.
 
 `bithuman` is a Homebrew-installable command-line tool. A user
 running it can have a real-time spoken or typed conversation with a
@@ -20,7 +21,7 @@ video chat (voice + animated face).
 
 ```
 brew tap bithuman-product/bithuman
-brew install bithuman
+brew install bithuman-cli   # `brew install bithuman` works as a deprecated alias
 ```
 
 If the user previously installed the legacy `bitchat` formula, have

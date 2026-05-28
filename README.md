@@ -24,7 +24,7 @@ keywords: voice-chat, on-device, local-llm, voice-cloning, lip-sync, avatar, age
 </p>
 
 <p align="center">
-  <a href="#install"><img alt="brew install" src="https://img.shields.io/badge/brew-install%20bithuman-orange?style=flat-square"></a>
+  <a href="#install"><img alt="brew install" src="https://img.shields.io/badge/brew-install%20bithuman--cli-orange?style=flat-square"></a>
   <a href="#"><img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-blue?style=flat-square"></a>
   <a href="#"><img alt="Apple Silicon" src="https://img.shields.io/badge/Apple%20Silicon-only-green?style=flat-square"></a>
   <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-lightgrey?style=flat-square"></a>
@@ -43,10 +43,11 @@ it cuts off within ~50 ms.
 **Everything runs locally.** No data leaves your machine. No API keys.
 No cloud round-trip. Works offline once the models are cached.
 
-> Previously known as `bitchat`, then `bithuman-cli`. The formula name
-> was shortened to `bithuman` for the libessence v0.1.0 unified SDK
-> release; `brew install bithuman-cli` still resolves via a deprecated
-> alias. If you have the legacy `bitchat` formula installed, run
+> Previously known as `bitchat`, then `bithuman-cli`, then briefly
+> `bithuman`. The formula name is now `bithuman-cli` again to match
+> the PyPI `pip install bithuman-cli` convention; `brew install bithuman`
+> still resolves via a deprecated alias. If you have the legacy
+> `bitchat` formula installed, run
 > `brew uninstall bitchat && brew untap bithuman-product/bitchat`,
 > then follow the install steps below.
 
@@ -56,9 +57,9 @@ Requires **macOS 26 (Tahoe) or later** on **Apple Silicon (M3+)** — the avatar
 
 ```sh
 brew tap bithuman-product/bithuman
-brew install bithuman
-bithuman                  # voice (default)
-bithuman video            # voice + animated face
+brew install bithuman-cli   # `brew install bithuman` works as a deprecated alias
+bithuman                    # voice (default)
+bithuman video              # voice + animated face
 ```
 
 That's it. First launch downloads the models (a few GB depending on mode)

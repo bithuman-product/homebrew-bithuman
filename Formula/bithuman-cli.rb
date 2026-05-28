@@ -1,11 +1,20 @@
-# Homebrew formula for `bithuman` — the bitHuman SDK live-avatar CLI
-# for macOS. https://www.bithuman.ai
+# Homebrew formula for `bithuman-cli` — the bitHuman SDK live-avatar
+# CLI for macOS. https://www.bithuman.ai
 #
 # Install:
 #   brew tap bithuman-product/bithuman
-#   brew install bithuman
+#   brew install bithuman-cli
 #   bithuman doctor                       # host + auth + cache sanity check
 #   bithuman run avatar.imx               # live browser-served avatar
+#
+# The installed binary is named `bithuman` (so users still type
+# `bithuman run`, `bithuman doctor`, etc.). Only the Homebrew package
+# name carries the `-cli` suffix, matching the PyPI convention:
+#
+#   pip install bithuman          # Python SDK (library)
+#   pip install bithuman-cli      # Python CLI bundle
+#   brew install bithuman-cli     # CLI (Homebrew)        <-- canonical
+#   brew install bithuman         # CLI (deprecated alias)
 #
 # Engine: libessence v2.2.6 — the bundled 2.x CLI. One command
 # (`bithuman run`) stands up the whole stack: embedded livekit-server,
@@ -17,9 +26,10 @@
 #     the Python wheel's [local] extra; see "On-device brain" caveat.
 #
 # Backwards compat:
-#   Previously published as `bithuman-cli`. An `Aliases/bithuman-cli`
-#   symlink keeps `brew install bithuman-cli` working as a deprecated
-#   alias for users with the old name in scripts / muscle memory.
+#   Previously published as `bithuman` (which itself was a rename from
+#   the original `bithuman-cli`). The `Aliases/bithuman` symlink keeps
+#   `brew install bithuman` working as a deprecated alias for users
+#   with the old name in scripts / muscle memory.
 #
 # This formula installs a prebuilt Rust binary built from
 # bithuman-product/bithuman-apps (CLI source) against
@@ -27,8 +37,8 @@
 # mirrored to the public homebrew-bithuman tap repo's own Releases
 # (both upstream repos are private — anonymous brew downloads fail
 # there with HTTP 404; the mirror is the workaround).
-class Bithuman < Formula
-  desc "Live-avatar CLI for the bitHuman SDK (one `bithuman run` for browser-served chat)"
+class BithumanCli < Formula
+  desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://github.com/bithuman-product/bithuman-sdk"
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.3.0/bithuman-aarch64-apple-darwin.tar.gz"
   version "2.3.0"
