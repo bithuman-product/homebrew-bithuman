@@ -7,7 +7,7 @@
 #   bithuman doctor                       # host + auth + cache sanity check
 #   bithuman run avatar.imx               # live browser-served avatar
 #
-# Engine: libessence v2.2.5 — the bundled 2.x CLI. One command
+# Engine: libessence v2.2.6 — the bundled 2.x CLI. One command
 # (`bithuman run`) stands up the whole stack: embedded livekit-server,
 # libessence runtime, conversation brain, browser landing page.
 #
@@ -21,17 +21,18 @@
 #   symlink keeps `brew install bithuman-cli` working as a deprecated
 #   alias for users with the old name in scripts / muscle memory.
 #
-# This formula installs a prebuilt Rust binary from the
-# bithuman-product/bithuman-sdk libessence-v2.2.5 GitHub Release,
+# This formula installs a prebuilt Rust binary built from
+# bithuman-product/bithuman-apps (CLI source) against
+# bithuman-product/bithuman-sdk (libessence engine v2.2.6),
 # mirrored to the public homebrew-bithuman tap repo's own Releases
-# (the upstream bithuman-sdk repo is private — anonymous brew
-# downloads fail there with HTTP 404; the mirror is the workaround).
+# (both upstream repos are private — anonymous brew downloads fail
+# there with HTTP 404; the mirror is the workaround).
 class Bithuman < Formula
   desc "Live-avatar CLI for the bitHuman SDK (one `bithuman run` for browser-served chat)"
   homepage "https://github.com/bithuman-product/bithuman-sdk"
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.2.5/bithuman-aarch64-apple-darwin.tar.gz"
-  version "2.2.5"
-  sha256 "f96a502588f9549a1f534fdfbbfcd404dbae1e96f5676c18a2ac6bcacd4a3d19"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.2.6/bithuman-aarch64-apple-darwin.tar.gz"
+  version "2.2.6"
+  sha256 "a2ac89ad51e1a3d68cbb94b053ff552510fd0f237b47051ddd3947782965afdf"
   license "Apache-2.0"
 
   depends_on arch: :arm64
