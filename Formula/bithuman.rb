@@ -30,9 +30,9 @@
 class Bithuman < Formula
   desc "Live-avatar CLI for the bitHuman SDK (one `bithuman run` for browser-served chat)"
   homepage "https://github.com/bithuman-product/bithuman-sdk"
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.2.6/bithuman-aarch64-apple-darwin.tar.gz"
-  version "2.2.6"
-  sha256 "a2ac89ad51e1a3d68cbb94b053ff552510fd0f237b47051ddd3947782965afdf"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.3.0/bithuman-aarch64-apple-darwin.tar.gz"
+  version "2.3.0"
+  sha256 "fd1541393dc024c67375e9aaecd3ee6169bbe403aa46def6dbf8feed958e59ea"
   license "Apache-2.0"
 
   depends_on arch: :arm64
