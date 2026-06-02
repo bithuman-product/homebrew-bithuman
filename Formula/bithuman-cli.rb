@@ -16,7 +16,9 @@
 #   brew install bithuman-cli     # CLI (Homebrew)        <-- canonical
 #   brew install bithuman         # CLI (deprecated alias)
 #
-# Engine: libessence v2.2.6 — the bundled 2.x CLI. One command
+# Engine: libessence 1.19.1 (ABI v7) — the engine core bundled in this
+# CLI. Note the engine-core version is a SEPARATE axis from the CLI/SDK
+# version (2.3.x); they are not the same number. One command
 # (`bithuman run`) stands up the whole stack: embedded livekit-server,
 # libessence runtime, conversation brain, browser landing page.
 #
@@ -33,13 +35,18 @@
 #
 # This formula installs a prebuilt Rust binary built from
 # bithuman-product/bithuman-apps (CLI source) against
-# bithuman-product/bithuman-sdk (libessence engine v2.2.6),
+# bithuman-product/bithuman-sdk (libessence engine core 1.19.1, ABI v7),
 # mirrored to the public homebrew-bithuman tap repo's own Releases
 # (both upstream repos are private — anonymous brew downloads fail
 # there with HTTP 404; the mirror is the workaround).
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://github.com/bithuman-product/bithuman-sdk"
+  # NOTE: v2.3.0 is the current published release artifact (real, on the
+  # tap's Releases). The monorepo source (SDK/CLI) is already at 2.3.6;
+  # a release bump to 2.3.6 is pending. Until that artifact ships, keep
+  # url/version pointing at the published v2.3.0 tarball below.
+  # (Engine core stays libessence 1.19.1 / ABI v7 — a separate axis.)
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.3.0/bithuman-aarch64-apple-darwin.tar.gz"
   version "2.3.0"
   sha256 "f9dd829e794a97d8ad5acb68846e07406a3f87ba88cecf48da6a1dee8afeb76a"
@@ -107,6 +114,10 @@ class BithumanCli < Formula
 
   test do
     # Smoke: --version exits 0 + prints the libessence engine line.
+    # NOTE: this only asserts the engine-core line (libessence X ABI Y);
+    # it deliberately matches any version, so it CANNOT catch CLI/SDK
+    # version skew (e.g. a 2.3.0 binary vs 2.3.6 source). It verifies the
+    # engine-core axis is present, not that the CLI version is current.
     assert_match(/libessence \d+\.\d+\.\d+ ABI \d+/, shell_output("#{bin}/bithuman --version"))
     # Smoke: doctor runs (exit code may be 0 or 1 depending on env;
     # we just assert the binary linked + opens the cache dirs).
