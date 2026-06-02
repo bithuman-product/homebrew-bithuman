@@ -88,7 +88,15 @@ class BithumanCli < Formula
       `bithuman run` prints a http://127.0.0.1:8088/<CODE> URL — open
       it, grant mic permission, talk.
 
+      Conversational brain needs the Python bundle:
+        This brew binary alone serves the avatar, NOT the brain. The
+        brain (cloud OR on-device) runs from the Python wheel, so
+        `bithuman run`'s chat requires a `pip install` alongside brew:
+          pip install bithuman-cli      # cloud (OpenAI) brain
+          pip install 'bithuman[local]' # on-device brain
+
       Cloud brain (OpenAI Realtime, default):
+        pip install bithuman-cli
         export OPENAI_API_KEY=sk-...
 
       On-device brain (no OpenAI key, no outbound network):
