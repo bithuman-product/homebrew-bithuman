@@ -44,9 +44,9 @@ class BithumanCli < Formula
   homepage "https://github.com/bithuman-product/bithuman-sdk"
   # Current published release: v2.3.7 (adds `bithuman login`). Apple Silicon (arm64).
   # (Engine core stays libessence 1.19.1 / ABI v7 — a separate axis.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.3.7/bithuman-aarch64-apple-darwin.tar.gz"
-  version "2.3.7"
-  sha256 "144241976f19b6161c2886e397d734154b164afff34e17a0b68cb26def1f10fa"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.3.8/bithuman-aarch64-apple-darwin.tar.gz"
+  version "2.3.8"
+  sha256 "d1b119f4678aafdb3a316351fe5d55fabd4b9f733d044c3bf724fffe4586d74d"
   license "Apache-2.0"
 
   depends_on arch: :arm64
