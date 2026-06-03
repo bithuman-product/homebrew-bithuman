@@ -42,11 +42,11 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://github.com/bithuman-product/bithuman-sdk"
-  # Current published release: v2.3.13 (bithuman run works out-of-box: bundled encoder + auto-bootstrap). Apple Silicon (arm64).
+  # Current published release: v2.3.14 (run out-of-box; bundled-encoder symlink fix). Apple Silicon (arm64).
   # (Engine core stays libessence 1.19.1 / ABI v7 — a separate axis.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.3.13/bithuman-aarch64-apple-darwin.tar.gz"
-  version "2.3.13"
-  sha256 "ca1b5f4b20dd2af769c02b84957789d7f1466ec2d57a9bdb1f65cebdf6b6fe6c"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.3.14/bithuman-aarch64-apple-darwin.tar.gz"
+  version "2.3.14"
+  sha256 "574c362233a9cca0a618f6b048da2ffa8e551c4accd5c097bcf82986987d24b0"
   license "Apache-2.0"
 
   depends_on arch: :arm64
