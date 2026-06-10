@@ -14,4 +14,4 @@ contact_links:
     about: Ask the community, share use cases, get help.
   - name: Security disclosure
     url: https://github.com/bithuman-product/homebrew-bithuman/blob/main/SECURITY.md
-    about: Found a security issue? Please email security@bithuman.ai instead of filing a public issue.
+    about: Found a security issue? Please email hello@bithuman.ai instead of filing a public issue.

@@ -4,7 +4,7 @@ This repo is the Homebrew tap for `bithuman` (formerly `bithuman-cli`). The CLI 
 
 ## Reporting a vulnerability
 
-**Please don't file a public GitHub issue.** Email **security@bithuman.ai** with:
+**Please don't file a public GitHub issue.** Email **hello@bithuman.ai** with:
 
 - A description of the issue and what an attacker could do.
 - Reproduction steps. For tap / installation issues, include `brew config` output and the exact command that triggered it. For runtime CLI issues, include the `bithuman --version` output and OS / hardware.
