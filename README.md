@@ -11,7 +11,7 @@ keywords: voice-chat, on-device, local-llm, voice-cloning, lip-sync, avatar, age
 
 <p align="center">
   <a href="https://www.bithuman.ai">
-    <img alt="bitHuman" src="https://www.bithuman.ai/og.png" width="220">
+    <img alt="bitHuman" src="https://docs.bithuman.ai/og-image.jpg" width="220">
   </a>
 </p>
 
@@ -245,8 +245,8 @@ Mac, iPad, and iPhone reference apps.
 
 - 🌐 [www.bithuman.ai](https://www.bithuman.ai)
 - 📦 [github.com/bithuman-product](https://github.com/bithuman-product)
-- 🍎 Reference apps (Mac / iPad / iPhone):
-  [github.com/bithuman-product/bithuman-apps](https://github.com/bithuman-product/bithuman-apps)
+- 🍎 Reference apps (Mac / iPad / iPhone): built on the public Swift SDK —
+  see [bithuman-sdk-public Examples](https://github.com/bithuman-product/bithuman-sdk-public/tree/main/Examples)
 
 ## Contributing & source
 
@@ -256,8 +256,8 @@ This repo (`bithuman-product/homebrew-bithuman`) hosts the **release artefacts**
 
 Full SDK and CLI documentation: **[docs.bithuman.ai](https://docs.bithuman.ai)**.
 
-- [bithuman CLI reference](https://docs.bithuman.ai/swift-sdk/cli)
-- [Swift SDK overview](https://docs.bithuman.ai/swift-sdk/overview) — embed in your own Mac/iPad/iPhone app
+- [bithuman CLI reference](https://docs.bithuman.ai/cli/overview)
+- [Swift SDK overview](https://docs.bithuman.ai/sdk/swift) — embed in your own Mac/iPad/iPhone app
 - [Authentication](https://docs.bithuman.ai/getting-started/authentication) — only needed for avatar mode (audio-only is unmetered, no key required)
 - [Pricing & credits](https://docs.bithuman.ai/getting-started/pricing)
 

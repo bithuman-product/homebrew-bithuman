@@ -16,7 +16,7 @@
 #   brew install bithuman-cli     # CLI (Homebrew)        <-- canonical
 #   brew install bithuman         # CLI (deprecated alias)
 #
-# Engine: libessence 1.19.1 (ABI v7) — the engine core bundled in this
+# Engine: libessence 2.3.6 (ABI v7) — the engine core bundled in this
 # CLI. Note the engine-core version is a SEPARATE axis from the CLI/SDK
 # version (2.3.x); they are not the same number. One command
 # (`bithuman run`) stands up the whole stack: embedded livekit-server,
@@ -35,13 +35,13 @@
 #
 # This formula installs a prebuilt Rust binary built from
 # bithuman-product/bithuman-apps (CLI source) against
-# bithuman-product/bithuman-sdk (libessence engine core 1.19.1, ABI v7),
+# bithuman-product/bithuman-sdk (libessence engine core 2.3.6, ABI v7),
 # mirrored to the public homebrew-bithuman tap repo's own Releases
 # (both upstream repos are private — anonymous brew downloads fail
 # there with HTTP 404; the mirror is the workaround).
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
-  homepage "https://github.com/bithuman-product/bithuman-sdk"
+  homepage "https://github.com/bithuman-product/bithuman-sdk-public"
   # Current published release: v2.3.25 (visual polish: gh-like clap anstyle help styling, --no-color leak fix, tabled tables for list/usage, styled error/hint, login spinner). Apple Silicon (arm64).
   # (Engine core stays libessence 2.3.6 / ABI v7 — a separate axis.)
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.3.25/bithuman-aarch64-apple-darwin.tar.gz"
@@ -110,7 +110,7 @@ class BithumanCli < Formula
         bithuman info   avatar.imx                       # inspect .imx
 
       Docs:    https://docs.bithuman.ai
-      Source:  https://github.com/bithuman-product/bithuman-sdk
+      Source:  https://github.com/bithuman-product/bithuman-sdk-public
     EOS
   end
 

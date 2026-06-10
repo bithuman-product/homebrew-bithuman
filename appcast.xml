@@ -34,7 +34,7 @@
                     <li><strong>Pre-chat warm-up gate</strong> with progress arc + agent portrait. Agent swap fades the new face in mid-warm-up and silences the previous voice mid-sentence.</li>
                     <li><strong>TTS-friendly LLM prompt suffix</strong> — no emoji / markdown / decorative symbols in spoken output.</li>
                 </ul>
-                <p>See the <a href="https://github.com/bithuman-product/bithuman-kit/releases/tag/v0.8.1">v0.8.1 SDK release</a> for the underlying changes.</p>
+                <p>See the <a href="https://github.com/bithuman-product/bithuman-sdk-public/releases/tag/v0.8.1">v0.8.1 SDK release</a> for the underlying changes.</p>
             ]]></description>
             <enclosure
                 url="https://github.com/bithuman-product/homebrew-bithuman/releases/download/v0.8.1-mac/bitHuman-0.8.1.dmg"
