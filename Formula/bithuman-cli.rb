@@ -35,7 +35,7 @@
 #
 # This formula installs a prebuilt Rust binary built from
 # bithuman-product/bithuman-apps (CLI source) against
-# bithuman-product/bithuman-sdk (libessence engine core 2.3.6, ABI v7),
+# bithuman-product/bithuman-sdk-internal (libessence engine core 2.3.6, ABI v7),
 # mirrored to the public homebrew-bithuman tap repo's own Releases
 # (both upstream repos are private — anonymous brew downloads fail
 # there with HTTP 404; the mirror is the workaround).
