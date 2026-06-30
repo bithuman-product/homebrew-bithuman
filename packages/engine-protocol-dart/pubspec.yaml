@@ -2,7 +2,7 @@ name: bithuman_engine_protocol
 description: "Shared Dart contract (EngineDescriptor + registry) for the bitHuman unified multi-engine architecture (Layer 0)."
 version: 0.1.0
 homepage: https://www.bithuman.ai
-repository: https://github.com/bithuman-product/bithuman-engine-protocol
+repository: https://github.com/bithuman-product/homebrew-bithuman
 
 environment:
   sdk: ^3.11.5

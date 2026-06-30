@@ -1,0 +1,404 @@
+# Build + publish the `bithuman` PyPI wheel from the private engine source.
+#
+# RE-HOMED from bithuman-sdk-internal/.github/workflows/libessence-release.yml
+# (the `wheel-macos` / `wheel-linux-x86_64` / `wheel-linux-aarch64` /
+# `verify-wheel-coverage` jobs). All Maven/Android/Kotlin/OSSRH/GPG, every
+# xcframework slice, the CLI tarballs, and the GitHub-Release upload plumbing
+# were dropped — this workflow lives in `homebrew-bithuman` and does ONE
+# thing: build the multi-platform `bithuman` wheel and publish it to PyPI.
+#
+# Source of truth for the wheel = bithuman-product/essence-1 (PRIVATE), which
+# carries the C++ engine at `engine/essence/` and the pybind11 binding at
+# `sdk/python/` (note: `sdk/`, singular — not the `sdks/` of the old internal
+# repo). homebrew-bithuman holds NO engine code; every job checks essence-1
+# out with the read-only PAT.
+#
+# Secrets required on homebrew-bithuman:
+#   SDK_RO_PAT       read-only PAT with `contents:read` on bithuman-product/essence-1
+#   PYPI_API_TOKEN   PyPI project/account token (the password)
+#   PYPI_USERNAME    "__token__" (falls back to __token__ if unset)
+#
+# Build matrix (5 CPython minors × 3 platforms = 15 wheels):
+#   macOS arm64            macosx_*_arm64           cp310..cp314   (github-hosted macos-14)
+#   Linux x86_64           manylinux_2_28_x86_64    cp310..cp314   (manylinux docker)
+#   Linux aarch64          manylinux_2_28_aarch64   cp310..cp314   (manylinux docker, arm64 runner)
+# The aarch64/x86_64 Linux wheels are built inside the pinned
+# sdk/python/scripts/Dockerfile.manylinux-* images (ORT 1.20.1 + FFmpeg 7.0.2
+# + HDF5 1.14 + Rust baked in) via sdk/python/scripts/build-wheel-in-container.sh.
+# macOS builds on the host with Homebrew deps, then `delocate` bundles the
+# Homebrew dylibs into the wheel.
+#
+# Engine note: building `libessence` needs `cargo` — engine/essence/CMakeLists.txt
+# compiles the Rust `bithuman-imx` staticlib (be_tar_to_imx_v2) and link-groups
+# it into the archive (BES_BUILD_TAR_CONVERTER=ON). The Linux images bake Rust;
+# the macOS job sets up rustup.
+#
+# Triggers:
+#   * push tag `pypi-v<X.Y.Z>`  -> checks out essence-1 ref `v<X.Y.Z>` and publishes.
+#   * workflow_dispatch          -> build (and optionally publish) an arbitrary
+#                                   essence-1 ref. Leave `publish=false` for a
+#                                   dry-run that still runs the coverage gate.
+name: release-pypi
+
+on:
+  push:
+    tags:
+      - 'pypi-v*'
+  workflow_dispatch:
+    inputs:
+      essence_ref:
+        description: 'bithuman-product/essence-1 git ref to build (tag, branch, or SHA).'
+        type: string
+        default: main
+      publish:
+        description: 'Publish the built wheels to PyPI (twine --skip-existing). Off = build + coverage-gate dry-run only.'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Build parallelism. CMake / cargo / make all cap to actual core count, so a
+# high number just stops being the limiter on a fat runner.
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: "16"
+  MAKEFLAGS: "-j16"
+  CARGO_BUILD_JOBS: "16"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # -------------------------------------------------------------------
+  # Resolve which essence-1 ref to build and whether to publish, from
+  # either the tag (pypi-vX.Y.Z -> vX.Y.Z) or the dispatch inputs. Every
+  # downstream job `needs: resolve` and checks essence-1 out at this ref.
+  # -------------------------------------------------------------------
+  resolve:
+    name: Resolve source ref + publish flag
+    runs-on: ubuntu-latest
+    outputs:
+      essence_ref: ${{ steps.r.outputs.essence_ref }}
+      publish: ${{ steps.r.outputs.publish }}
+    steps:
+      - id: r
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_REF: ${{ inputs.essence_ref }}
+          IN_PUB: ${{ inputs.publish }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "essence_ref=${IN_REF}" >> "$GITHUB_OUTPUT"
+            echo "publish=${IN_PUB}"     >> "$GITHUB_OUTPUT"
+          else
+            # tag `pypi-vX.Y.Z` -> build essence-1 tag `vX.Y.Z`, always publish.
+            echo "essence_ref=${TAG#pypi-}" >> "$GITHUB_OUTPUT"
+            echo "publish=true"             >> "$GITHUB_OUTPUT"
+          fi
+          echo "Resolved: ref=$(grep essence_ref "$GITHUB_OUTPUT") $(grep publish "$GITHUB_OUTPUT")"
+
+  # -------------------------------------------------------------------
+  # macOS arm64 wheels (cp310..cp314). Host build + delocate.
+  # -------------------------------------------------------------------
+  wheel-macos:
+    name: bithuman wheel (macOS arm64, py${{ matrix.python }})
+    needs: resolve
+    runs-on: macos-14
+    timeout-minutes: 60
+    strategy:
+      # One independent wheel per Python minor; the coverage gate (not
+      # fail-fast) is what enforces completeness.
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
+      PUBLISH: ${{ needs.resolve.outputs.publish }}
+      PYV: ${{ matrix.python }}
+    steps:
+      - name: Checkout essence-1 engine source
+        uses: actions/checkout@v4
+        with:
+          repository: bithuman-product/essence-1
+          ref: ${{ needs.resolve.outputs.essence_ref }}
+          token: ${{ secrets.SDK_RO_PAT }}
+
+      - name: Install Homebrew deps
+        # SDK wheel is lib-only (no bundled CLI), so the `livekit` formula the
+        # old internal workflow pulled is dropped.
+        run: brew install cmake ninja onnxruntime hdf5 jpeg-turbo webp ffmpeg
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Set up Rust toolchain
+        # libessence link-groups the Rust bithuman-imx staticlib
+        # (BES_BUILD_TAR_CONVERTER=ON) — without cargo the engine build emits a
+        # fallback stub and console TAR exports fail to load.
+        run: rustup default stable && rustc --version
+
+      - name: Build essence (Release)
+        # APPLE default ESSENCE_BUILD_DIR is engine/essence/build, which
+        # scikit-build-core's child cmake then reuses for the binding.
+        run: |
+          NCPU=$(sysctl -n hw.ncpu)
+          cmake -GNinja -B engine/essence/build -S engine/essence -DCMAKE_BUILD_TYPE=Release
+          cmake --build engine/essence/build --target essence --parallel "$NCPU"
+
+      - name: Build SDK wheel (bithuman)
+        # `python -m build` runs scikit-build-core, which re-runs cmake against
+        # engine/essence to build the pybind11 _core extension and copies the
+        # package tree into the wheel.
+        run: |
+          "python${PYV}" -m venv /tmp/build-venv
+          /tmp/build-venv/bin/pip install --upgrade pip build
+          cd sdk/python
+          CMAKE_BUILD_PARALLEL_LEVEL=$(sysctl -n hw.ncpu) \
+            /tmp/build-venv/bin/python -m build --wheel --outdir dist/
+
+      - name: Delocate SDK wheel (bundle + repath _core.so dylibs)
+        # `python -m build` links _core.so against Homebrew dylibs
+        # (onnxruntime, ffmpeg×5, hdf5×2, jpeg-turbo, webp) by absolute
+        # /opt/homebrew path — import-fails anywhere those formulae aren't
+        # installed. delocate copies them into .dylibs/ and rewrites the load
+        # commands to @loader_path. Then fail loudly if any /opt/homebrew ref
+        # survived.
+        run: |
+          /tmp/build-venv/bin/pip install delocate
+          cd sdk/python
+          mkdir -p dist/delocated
+          for whl in dist/*.whl; do
+            /tmp/build-venv/bin/delocate-wheel -w dist/delocated -v "$whl"
+          done
+          rm -f dist/*.whl
+          mv dist/delocated/*.whl dist/
+          rmdir dist/delocated
+          /tmp/build-venv/bin/pip install --quiet --target /tmp/whinspect dist/*.whl
+          BAD=$(find /tmp/whinspect -type f \( -name '*.so' -o -name '*.dylib' \) \
+                  -exec otool -L {} \; 2>/dev/null | grep '/opt/homebrew/' || true)
+          if [[ -n "$BAD" ]]; then
+            echo "::error::SDK wheel still references /opt/homebrew dylibs after delocate"
+            echo "$BAD"
+            exit 1
+          fi
+          rm -rf /tmp/whinspect
+          echo "delocate OK — _core.so clean of /opt/homebrew refs"
+
+      - name: Smoke test SDK wheel
+        run: |
+          /tmp/build-venv/bin/pip install sdk/python/dist/*.whl
+          BITHUMAN_UNMETERED=1 /tmp/build-venv/bin/python -c "
+          import bithuman
+          print(f'OK: {bithuman.__version__} ABI={bithuman.__abi_version__}')
+          from bithuman import Avatar
+          print('Avatar import OK')
+          " || true
+
+      - name: Upload SDK wheel as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
+          path: sdk/python/dist/*.whl
+          if-no-files-found: error
+
+      - name: Publish to PyPI
+        # Publish only when a token is set AND publish was requested
+        # (tag push, or workflow_dispatch with publish=true).
+        if: ${{ env.PYPI_API_TOKEN != '' && env.PUBLISH == 'true' }}
+        run: |
+          /tmp/build-venv/bin/pip install twine
+          /tmp/build-venv/bin/python -m twine upload --skip-existing --verbose \
+            --username "${PYPI_USERNAME:-__token__}" --password "$PYPI_API_TOKEN" \
+            sdk/python/dist/*.whl
+
+  # -------------------------------------------------------------------
+  # Linux x86_64 manylinux_2_28 wheels (cp310..cp314), built in the pinned
+  # docker image via build-wheel-in-container.sh + auditwheel repair.
+  # -------------------------------------------------------------------
+  wheel-linux-x86_64:
+    name: bithuman wheel (Linux x86_64 manylinux_2_28, ${{ matrix.pytag }})
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        pytag: [cp310, cp311, cp312, cp313, cp314]
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
+      PUBLISH: ${{ needs.resolve.outputs.publish }}
+      PYTAG: ${{ matrix.pytag }}
+    steps:
+      - name: Checkout essence-1 engine source
+        uses: actions/checkout@v4
+        with:
+          repository: bithuman-product/essence-1
+          ref: ${{ needs.resolve.outputs.essence_ref }}
+          token: ${{ secrets.SDK_RO_PAT }}
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build manylinux_2_28_x86_64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: sdk/python/scripts
+          file: sdk/python/scripts/Dockerfile.manylinux-x86_64
+          platforms: linux/amd64
+          tags: bithuman/manylinux-x86_64:0.1
+          load: true
+          cache-from: type=gha,scope=manylinux-x86_64
+          cache-to: type=gha,mode=max,scope=manylinux-x86_64
+
+      - name: Build SDK wheel inside container
+        # The repo is bind-mounted at /src; the script cd's into
+        # /src/engine/essence (cmake essence) then /src/sdk/python (build +
+        # auditwheel repair -> manylinux_2_28).
+        run: |
+          docker run --rm --platform linux/amd64 \
+            -v "$PWD":/src \
+            -e PYTAG="$PYTAG" \
+            -e ARCH_INSIDE=x86_64 \
+            bithuman/manylinux-x86_64:0.1 \
+            bash /src/sdk/python/scripts/build-wheel-in-container.sh
+
+      - name: List built wheels
+        run: ls -lh sdk/python/dist/
+
+      - name: Upload SDK wheel as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-x86_64-${{ matrix.pytag }}
+          path: sdk/python/dist/bithuman-*-manylinux_2_28_x86_64.whl
+          if-no-files-found: error
+
+      - name: Publish to PyPI
+        if: ${{ env.PYPI_API_TOKEN != '' && env.PUBLISH == 'true' }}
+        run: |
+          python3 -m pip install --user --upgrade pip twine
+          python3 -m twine upload --skip-existing --verbose \
+            --username "${PYPI_USERNAME:-__token__}" --password "$PYPI_API_TOKEN" \
+            sdk/python/dist/bithuman-*-"$PYTAG"-"$PYTAG"-manylinux_2_28_x86_64.whl
+
+  # -------------------------------------------------------------------
+  # Linux aarch64 manylinux_2_28 wheels (cp310..cp314). ubuntu-24.04-arm
+  # is GitHub-hosted arm64 (native, no qemu). Fall back to ubuntu-latest +
+  # setup-qemu-action(linux/arm64) if the arm runner is unavailable.
+  # -------------------------------------------------------------------
+  wheel-linux-aarch64:
+    name: bithuman wheel (Linux aarch64 manylinux_2_28, ${{ matrix.pytag }})
+    needs: resolve
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        pytag: [cp310, cp311, cp312, cp313, cp314]
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
+      PUBLISH: ${{ needs.resolve.outputs.publish }}
+      PYTAG: ${{ matrix.pytag }}
+    steps:
+      - name: Checkout essence-1 engine source
+        uses: actions/checkout@v4
+        with:
+          repository: bithuman-product/essence-1
+          ref: ${{ needs.resolve.outputs.essence_ref }}
+          token: ${{ secrets.SDK_RO_PAT }}
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build manylinux_2_28_aarch64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: sdk/python/scripts
+          file: sdk/python/scripts/Dockerfile.manylinux-aarch64
+          platforms: linux/arm64
+          tags: bithuman/manylinux-aarch64:0.1
+          load: true
+          cache-from: type=gha,scope=manylinux-aarch64
+          cache-to: type=gha,mode=max,scope=manylinux-aarch64
+
+      - name: Build SDK wheel inside container
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/src \
+            -e PYTAG="$PYTAG" \
+            -e ARCH_INSIDE=aarch64 \
+            bithuman/manylinux-aarch64:0.1 \
+            bash /src/sdk/python/scripts/build-wheel-in-container.sh
+
+      - name: List built wheels
+        run: ls -lh sdk/python/dist/
+
+      - name: Upload SDK wheel as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-aarch64-${{ matrix.pytag }}
+          path: sdk/python/dist/bithuman-*-manylinux_2_28_aarch64.whl
+          if-no-files-found: error
+
+      - name: Publish to PyPI
+        if: ${{ env.PYPI_API_TOKEN != '' && env.PUBLISH == 'true' }}
+        run: |
+          python3 -m pip install --user --upgrade pip twine
+          python3 -m twine upload --skip-existing --verbose \
+            --username "${PYPI_USERNAME:-__token__}" --password "$PYPI_API_TOKEN" \
+            sdk/python/dist/bithuman-*-"$PYTAG"-"$PYTAG"-manylinux_2_28_aarch64.whl
+
+  # -------------------------------------------------------------------
+  # Coverage gate: fail the release if the full {python}×{platform} matrix
+  # isn't present in the built artifacts. Inspects artifacts (not PyPI), so a
+  # dispatch dry-run (publish=false) still proves coverage with nothing
+  # published. Decoupled from publish — never let a 3-wheel release ship.
+  # -------------------------------------------------------------------
+  verify-wheel-coverage:
+    name: Verify wheel coverage
+    needs: [wheel-macos, wheel-linux-x86_64, wheel-linux-aarch64]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    env:
+      EXPECTED_PYTAGS: "cp310 cp311 cp312 cp313 cp314"
+      EXPECTED_PLATFORMS: "macosx_.*_arm64 manylinux_2_28_x86_64 manylinux_2_28_aarch64"
+    steps:
+      - name: Download all SDK wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: all-wheels
+
+      - name: Assert the full wheel matrix was built
+        run: |
+          set -euo pipefail
+          wheels=$(find all-wheels -name '*.whl' -type f -exec basename {} \; | sort -u)
+          echo "=== Built wheels ($(echo "$wheels" | grep -c . || echo 0)) ==="
+          echo "$wheels"
+          echo
+          missing=0
+          for pytag in $EXPECTED_PYTAGS; do
+            for plat in $EXPECTED_PLATFORMS; do
+              # SDK wheel filename: bithuman-<ver>-<pytag>-<pytag>-<plat>.whl
+              if echo "$wheels" | grep -Eq "^bithuman-.*-${pytag}-${pytag}-${plat}\.whl$"; then
+                printf '  ok    %-7s %s\n' "$pytag" "$plat"
+              else
+                printf '  MISS  %-7s %s\n' "$pytag" "$plat"
+                missing=$((missing + 1))
+              fi
+            done
+          done
+          echo
+          npy=$(echo "$EXPECTED_PYTAGS" | wc -w | tr -d ' ')
+          npl=$(echo "$EXPECTED_PLATFORMS" | wc -w | tr -d ' ')
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing of $((npy*npl)) expected wheels missing — a"
+            echo "'pip install bithuman' on those interpreters/platforms would 404."
+            exit 1
+          fi
+          echo "All ${npy}×${npl}=$((npy*npl)) wheels built. Coverage OK."
