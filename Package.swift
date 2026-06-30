@@ -56,8 +56,8 @@ import PackageDescription
 
 // Pin the binary slice to a release tag. When the Layer-1 engine products are
 // published they should share this tag so a `from:` bump moves them in lockstep.
-let releaseTag = "v0.8.1"
-let releaseBase = "https://github.com/bithuman-product/bithuman-sdk-public/releases/download/\(releaseTag)"
+let releaseTag = "v2.4.0"
+let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(releaseTag)"
 
 let package = Package(
     name: "bithuman",
