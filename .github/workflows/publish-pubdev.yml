@@ -1,30 +1,25 @@
-# Publish the two Dart packages in this monorepo to pub.dev via Automated
-# Publishing (GitHub Actions OIDC). NO stored token / secret: pub.dev mints a
+# Publish the `bithuman` Flutter plugin (iOS + macOS) to pub.dev via Automated
+# Publishing (GitHub Actions OIDC). NO stored token/secret: pub.dev mints a
 # short-lived credential after verifying a GitHub OIDC id-token whose claims
-# match the (repository, tag-pattern) tuple configured once per package at:
+# match the (repository, tag-pattern) tuple configured once at:
 #
-#   bithuman_engine_protocol:
-#     https://pub.dev/packages/bithuman_engine_protocol/admin   (Automated publishing)
-#       Repository:   bithuman-product/homebrew-bithuman
-#       Tag pattern:  dart-v{{version}}
-#   bithuman:
-#     https://pub.dev/packages/bithuman/admin                   (Automated publishing)
+#   https://pub.dev/packages/bithuman/admin   (Automated publishing)
 #       Repository:   bithuman-product/homebrew-bithuman
 #       Tag pattern:  flutter-v{{version}}
 #
-# The pub client auto-detects the GitHub Actions OIDC environment (it reads the
-# ACTIONS_ID_TOKEN_REQUEST_* env vars that `id-token: write` exposes, fetches an
-# id-token with audience https://pub.dev, and exchanges it for a temporary
-# publishing credential). No explicit auth step is required.
+# The Layer-0 engine contract is INLINED in the plugin (lib/src/engine_protocol.dart,
+# re-exported by lib/engine_registry.dart) — there is no separate
+# `bithuman_engine_protocol` pub.dev package to publish first. One package, one tag.
 #
-# Release flow (run each independently):
-#   Protocol (publish this FIRST — the plugin depends on it as a hosted dep):
-#     1. Bump `version` in packages/engine-protocol-dart/pubspec.yaml on main.
-#     2. git tag dart-v0.1.0 && git push origin dart-v0.1.0
-#   Flutter plugin:
-#     1. Bump `version` in packages/flutter-plugin/pubspec.yaml on main.
-#     2. git tag flutter-v2.3.3 && git push origin flutter-v2.3.3
-#   The tag's version MUST equal the pubspec version (the guard step enforces it).
+# The pub client auto-detects the GitHub Actions OIDC environment (reads the
+# ACTIONS_ID_TOKEN_REQUEST_* env vars that `id-token: write` exposes, fetches an
+# id-token with audience https://pub.dev, exchanges it for a temporary publishing
+# credential) — no explicit auth step.
+#
+# Release flow:
+#   1. Bump `version` in packages/flutter-plugin/pubspec.yaml on main.
+#   2. git tag flutter-v2.3.3 && git push origin flutter-v2.3.3
+#   The tag's version MUST equal the pubspec version (the guard enforces it).
 #
 # WARNING: pub.dev publishes are PERMANENT and immutable — a version can never be
 # overwritten or deleted (at most "retracted"). Tag deliberately.
@@ -33,49 +28,12 @@ name: Publish to pub.dev
 on:
   push:
     tags:
-      - 'dart-v*'      # → bithuman_engine_protocol
       - 'flutter-v*'   # → bithuman
 
-# Default to read-only; each job opts into id-token: write for OIDC.
 permissions:
   contents: read
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Layer-0 pure-Dart contract package. Runs only for dart-v* tags.
-  # ---------------------------------------------------------------------------
-  publish-engine-protocol:
-    if: startsWith(github.ref, 'refs/tags/dart-v')
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write          # required to mint the pub.dev OIDC credential
-    defaults:
-      run:
-        working-directory: packages/engine-protocol-dart
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dart-lang/setup-dart@v1
-
-      - name: Verify tag matches pubspec version
-        run: |
-          PKG_VERSION=$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')
-          TAG_VERSION="${GITHUB_REF_NAME#dart-v}"
-          echo "package=$PKG_VERSION tag=$TAG_VERSION"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match pubspec version $PKG_VERSION"
-            exit 1
-          fi
-
-      - name: Install dependencies
-        run: dart pub get
-
-      - name: Publish to pub.dev
-        run: dart pub publish --force
-
-  # ---------------------------------------------------------------------------
-  # Flutter umbrella plugin (iOS + macOS). Runs only for flutter-v* tags.
-  # ---------------------------------------------------------------------------
   publish-flutter-plugin:
     if: startsWith(github.ref, 'refs/tags/flutter-v')
     runs-on: ubuntu-latest
@@ -105,6 +63,4 @@ jobs:
         run: flutter pub get
 
       - name: Publish to pub.dev
-        # `dart` ships with the Flutter SDK and is on PATH after flutter-action;
-        # it performs the same OIDC handshake as the pure-Dart job above.
         run: dart pub publish --force

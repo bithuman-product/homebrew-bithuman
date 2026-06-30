@@ -15,14 +15,11 @@ dependencies:
     sdk: flutter
   plugin_platform_interface: ^2.0.2
   web_socket_channel: ^3.0.3
-  # Layer-0 shared engine contract (EngineDescriptor + kEngineRegistry). The
-  # umbrella git-deps the canonical protocol package; lib/engine_registry.dart
-  # re-exports it so the app reaches the registry via package:bithuman/… with the
-  # frozen slugs as the single source of truth (design §1.2, M2).
-  bithuman_engine_protocol:
-    git:
-      url: https://github.com/bithuman-product/bithuman-engine-protocol.git
-      ref: main
+  # The Layer-0 engine contract (EngineDescriptor + kEngineRegistry) is now
+  # inlined at lib/src/engine_protocol.dart and re-exported by
+  # lib/engine_registry.dart — no separate pub.dev package, so the plugin is
+  # self-contained (one package to publish). The Swift half stays a product in
+  # the homebrew-bithuman SwiftPM package for the engine SDKs.
 
 dev_dependencies:
   flutter_test:
