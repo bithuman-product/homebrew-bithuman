@@ -89,11 +89,20 @@ let package = Package(
             url: "\(releaseBase)/bitHumanKit.xcframework.zip",
             checksum: "5c536e37919b693591dff234db8627c01952ae24ae58651aeacbd875bd78e9db"
         ),
-        .target(name: "BithumanEngineProtocol", path: "Sources/BithumanEngineProtocol"),
+        // Protocol was authored for swift-tools 5.9; pin it to Swift 5 language
+        // mode so the package-wide 6.0 toolchain doesn't impose Swift 6 strict
+        // concurrency on it (its EngineCapabilities statics aren't Sendable-clean
+        // — unchanged from the standalone engine-protocol repo).
+        .target(
+            name: "BithumanEngineProtocol",
+            path: "Sources/BithumanEngineProtocol",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .testTarget(
             name: "BithumanEngineProtocolTests",
             dependencies: ["BithumanEngineProtocol"],
-            path: "Tests/BithumanEngineProtocolTests"
+            path: "Tests/BithumanEngineProtocolTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
 )
