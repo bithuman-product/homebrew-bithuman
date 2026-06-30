@@ -85,15 +85,20 @@ target="${arch}-${os}"
 version="${BITHUMAN_VERSION:-}"
 if [ -z "$version" ]; then
   info "querying latest release..."
-  api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
-  # Grep + sed is POSIX-portable; no jq dep.
-  version=$(curl -fsSL "$api_url" \
+  # Tag taxonomy in this repo: the CLI publishes under `cli-v*`; the bare `v*`
+  # namespace is reserved for the Swift SDK (SwiftPM-resolved); the Sparkle Mac
+  # app uses `*-mac`. Prefer the newest `cli-v*` release; fall back to the newest
+  # bare `v<semver>` CLI release (pre-migration tags like v2.3.25), and never the
+  # `*-mac` app feed. Grep + sed is POSIX-portable; no jq dep.
+  api_url="https://api.github.com/repos/${GITHUB_REPO}/releases"
+  tags=$(curl -fsSL "$api_url" \
     | grep '"tag_name"' \
-    | head -1 \
     | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+  version=$(printf '%s\n' "$tags" | grep '^cli-v' | head -1)
+  [ -z "$version" ] && version=$(printf '%s\n' "$tags" | grep -E '^v[0-9]' | grep -v -- '-mac$' | head -1)
   if [ -z "$version" ]; then
-    err "could not determine latest version from $api_url"
-    err "set BITHUMAN_VERSION=vX.Y.Z to pin a specific release."
+    err "could not determine latest CLI release from $api_url"
+    err "set BITHUMAN_VERSION=cli-vX.Y.Z (or vX.Y.Z) to pin a specific release."
     exit 1
   fi
 fi
