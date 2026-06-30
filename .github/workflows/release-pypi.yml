@@ -18,7 +18,7 @@
 #   PYPI_API_TOKEN   PyPI project/account token (the password)
 #   PYPI_USERNAME    "__token__" (falls back to __token__ if unset)
 #
-# Build matrix (5 CPython minors × 3 platforms = 15 wheels):
+# Build matrix (3 CPython minors (3.11-3.13) × 3 platforms = 9 wheels):
 #   macOS arm64            macosx_*_arm64           cp310..cp314   (github-hosted macos-14)
 #   Linux x86_64           manylinux_2_28_x86_64    cp310..cp314   (manylinux docker)
 #   Linux aarch64          manylinux_2_28_aarch64   cp310..cp314   (manylinux docker, arm64 runner)
@@ -110,7 +110,7 @@ jobs:
       # fail-fast) is what enforces completeness.
       fail-fast: false
       matrix:
-        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        python: ['3.11', '3.12', '3.13']
     env:
       PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
       PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
@@ -364,7 +364,7 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
-      EXPECTED_PYTAGS: "cp310 cp311 cp312 cp313 cp314"
+      EXPECTED_PYTAGS: "cp311 cp312 cp313"
       EXPECTED_PLATFORMS: "macosx_.*_arm64 manylinux_2_28_x86_64 manylinux_2_28_aarch64"
     steps:
       - name: Download all SDK wheel artifacts
