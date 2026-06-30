@@ -1,33 +1,36 @@
 ---
-name: Tap-level feature / docs request
-about: Suggest an improvement to this tap (formula, README, llms.txt, appcast)
+name: Feature request
+about: Suggest an improvement to the examples, docs, or packaging
 title: ''
 labels: enhancement
 ---
 
 <!--
-This template is for changes we can land in this repo: README, formula caveats,
-llms.txt, appcast wiring, etc.
+This template is for changes we can actually merge from a PR — improvements to
+Examples/, docs/, packaging, or repo metadata.
 
-For new CLI features (modes, voices, flags, agents) please email
-support@bithuman.ai or post in the community forum — the CLI source is
-private, so feature work happens there.
+For SDK API or runtime feature requests (new VoiceChat options, new TTS engines,
+hardware support, etc.), please email hello@bithuman.ai or post in our
+community forum. The SDK source is private, so feature work happens there.
 -->
 
-### What's the use case
+### Use case
 
-A short story is more useful than an abstract description.
+What are you trying to do? A short story is more useful than an abstract description.
 
 ### Proposal
 
-What would you like changed in this tap?
+What would you like added or changed?
 
-- [ ] README clarification or addition
-- [ ] Formula caveats / post-install message
-- [ ] `llms.txt` improvement
-- [ ] `appcast.xml` fix or addition
-- [ ] Other (describe)
+- [ ] New example under `Examples/`
+- [ ] New / improved docs page
+- [ ] Packaging improvement (SwiftPM, Python wheel, release flow)
+- [ ] Other
 
-### Alternatives you considered
+### Alternatives considered
 
 What did you try first, and why didn't it work?
+
+### Are you willing to PR this?
+
+If yes, great — see [CONTRIBUTING.md](../../CONTRIBUTING.md) for what we accept.

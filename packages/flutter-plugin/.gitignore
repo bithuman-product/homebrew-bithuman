@@ -1,0 +1,45 @@
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.pub-cache/
+.pub/
+pubspec.lock
+**/Pods/
+**/Pods.lock
+
+# IDE
+*.iml
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Bundled sample .imx is too large for GitHub (>100MB).
+# Fetched at runtime from the public tap-repo release.
+
+# Native deps + models fetched by scripts/bootstrap.sh — not committed,
+# regenerated per-clone (embody Release vendor bundle, or a sibling
+# bithuman-sdk checkout for SDK contributors).
+# libconverse.xcframework (the on-device brain) + onnxruntime.xcframework (its
+# Supertonic ORT, iOS) land under <platform>/Frameworks/. The per-agent embody
+# CoreML models land under Assets/embody/ (bundled into the app by the podspec).
+macos/Frameworks/*.xcframework
+ios/Frameworks/*.xcframework
+ios/Vendor/third_party
+Assets/embody/
+
+# Staged engine SDK surfaces (M1) — copied per-clone by scripts/bootstrap.sh
+# from each engine repo (essence-2/sdk, …); never committed.
+macos/Engines/
+ios/Engines/
+
+# bootstrap-staged engine artifacts — never commit (see scripts/bootstrap.sh)
+ios/Vendor/*
+!ios/Vendor/.gitkeep
+macos/Vendor/*
+!macos/Vendor/.gitkeep
+**/Assets/audio_encoder.onnx

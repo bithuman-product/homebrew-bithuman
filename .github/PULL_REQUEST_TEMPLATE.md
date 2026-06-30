@@ -1,37 +1,37 @@
 <!--
-Heads up: this repo is just the Homebrew tap. The CLI source is private and
-the formula version/URL/sha256 are bumped by release automation.
+Thanks for sending a PR! A few notes before you submit:
 
-PRs we merge: README fixes, formula caveats, llms.txt, appcast docs, tap docs.
-PRs we'll usually close: hand-edited version bumps in Formula/bithuman.rb.
-
-See CONTRIBUTING.md for the full picture.
+- This repo accepts PRs for Examples/, docs/, README, and packaging metadata.
+- PRs that bump SDK versions, edit binaryTarget URLs, or change release
+  artifacts will usually be closed — those are managed by release automation.
+- See CONTRIBUTING.md for the full picture.
 -->
 
 ## What this changes
 
-One paragraph. Link the issue if there is one (`Fixes #123`).
+A one-paragraph summary. Link the issue this fixes if there is one (`Fixes #123`).
 
 ## Why
 
-What problem does this solve?
+What problem does this solve, or what gap does it fill?
 
 ## Area
 
-- [ ] `README.md`
-- [ ] Formula caveats / post-install (not version/url/sha256)
-- [ ] `llms.txt`
-- [ ] `appcast.xml`
-- [ ] Repo docs / metadata
+- [ ] `Examples/`
+- [ ] `docs/`
+- [ ] `README.md` / repo metadata
+- [ ] Packaging (`Package.swift`, Python wheel)
+- [ ] Other
 
 ## How I tested it
 
-- [ ] `brew audit --strict bithuman-product/bithuman/bithuman` is clean
-- [ ] `brew install --build-from-source` completes (for formula tweaks)
-- [ ] Rendered README looks right on GitHub
-- [ ] N/A — text-only / metadata change
+- [ ] Built locally (Xcode version: ____)
+- [ ] Ran the example end-to-end on (hardware: ____)
+- [ ] Verified docs render with `mintlify dev`
+- [ ] N/A — docs/text-only change
 
 ## Checklist
 
-- [ ] My change doesn't hand-edit version, URL, or sha256 in the formula
-- [ ] Diff is focused and minimal
+- [ ] My change is focused (one example, one doc page, one fix)
+- [ ] I matched the surrounding tone and formatting
+- [ ] I'm not committing API keys, model weights, or other secrets

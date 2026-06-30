@@ -1,0 +1,397 @@
+{
+  "generated": "2026-06-11T21:05:00-05:00",
+  "git_rev": "f685375",
+  "build": "rollback fca8827 + governor 0820ae0 + gate f685375 (app content identical through c4135ad)",
+  "note": "AUTHORITATIVE gate baseline. tier1 + macOS session flow + iOS-sim scenarios + Android-emu scenarios ran unattended at f685375 (pre-GUI-gate); macOS scenario engine truth from the attended bring-up run (see per-scenario notes). darwin-storm-sim engine truth is SKIPPED-sim by design (MLX cannot run on the iOS simulator) \u2014 engine truth lives in darwin-storm (macOS).",
+  "scenarios": [
+    {
+      "scenario": "android-governor",
+      "status": "pass",
+      "measurements": {
+        "governor_decisions": 1,
+        "stride_sequence": [
+          3
+        ],
+        "stride_changes": 0,
+        "stride_changes_per_min": 0.0
+      },
+      "checks": [
+        {
+          "name": "stride_changes_per_min",
+          "ok": true,
+          "value": 0.0,
+          "limit": "<=6"
+        },
+        {
+          "name": "strides_in_range_1..8",
+          "ok": true,
+          "value": "all",
+          "limit": "1..8"
+        }
+      ]
+    },
+    {
+      "scenario": "android-mouthgate",
+      "status": "pass",
+      "measurements": {
+        "talking_flip_latency_ms": [
+          223.0,
+          28.0
+        ],
+        "idle_flip_latency_ms": [
+          1990.0,
+          419.0
+        ],
+        "setSpeaking_true": 2,
+        "setSpeaking_false": 2
+      },
+      "checks": [
+        {
+          "name": "talking_flips>=",
+          "ok": true,
+          "value": 2,
+          "limit": ">=2"
+        },
+        {
+          "name": "idle_flips>=",
+          "ok": true,
+          "value": 2,
+          "limit": ">=2"
+        },
+        {
+          "name": "talking_flip_ms[0]",
+          "ok": true,
+          "value": 223.0,
+          "limit": "<=3500"
+        },
+        {
+          "name": "talking_flip_ms[1]",
+          "ok": true,
+          "value": 28.0,
+          "limit": "<=3500"
+        },
+        {
+          "name": "idle_flip_ms[0]",
+          "ok": true,
+          "value": 1990.0,
+          "limit": "<=3500"
+        },
+        {
+          "name": "idle_flip_ms[1]",
+          "ok": true,
+          "value": 419.0,
+          "limit": "<=3500"
+        }
+      ]
+    },
+    {
+      "scenario": "android-pacing",
+      "status": "pass",
+      "measurements": {
+        "perf_windows": 5,
+        "slot_rate_per_window": [
+          24.9,
+          24.99,
+          24.95,
+          25.11,
+          25.06
+        ],
+        "slot_rate_aggregate": 25.005,
+        "displayed_fps_mean": 7.46,
+        "skipped_per_window": [
+          0,
+          0,
+          0,
+          0,
+          1
+        ],
+        "stalls_per_window": [
+          0,
+          57,
+          24,
+          44,
+          55
+        ],
+        "strides": [
+          3
+        ],
+        "render_ms_mean": 96.8,
+        "dropped_slots_per_s": 0.04
+      },
+      "checks": [
+        {
+          "name": "slot_rate_aggregate\u224825/s",
+          "ok": true,
+          "value": 25.005,
+          "limit": "25\u00b12.0%"
+        }
+      ]
+    },
+    {
+      "scenario": "darwin-idle-sim",
+      "status": "pass",
+      "measurements": {
+        "utterance_lines": 0,
+        "slip_clusters": 0,
+        "speaker_gate_lines": 0,
+        "interrupt_ramps": 0,
+        "transition_ramps": 0,
+        "dims_switches": 0,
+        "idle_hold_flaps": 0,
+        "engine_create_failures": 0,
+        "ws_reconnects": 0,
+        "cadence_lines": 17,
+        "cadence_interval_median_s": 5.0,
+        "cadence_interval_p95_s": 5.0
+      },
+      "checks": [
+        {
+          "name": "utterance_lines",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "slip_clusters",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "speaker_gate_lines",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "interrupt_ramps",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "transition_ramps",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "dims_switches",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "idle_hold_flaps",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "engine_create_failures",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "ws_reconnects",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "cadence_line_count>=",
+          "ok": true,
+          "value": 17,
+          "limit": 7
+        },
+        {
+          "name": "cadence_median_s",
+          "ok": true,
+          "value": 5.0,
+          "limit": "[4.0,7.0]"
+        },
+        {
+          "name": "cadence_p95_s",
+          "ok": true,
+          "value": 5.0,
+          "limit": "<=9.0"
+        }
+      ]
+    },
+    {
+      "scenario": "darwin-storm-sim",
+      "status": "pass",
+      "measurements": {
+        "crash_markers": 0,
+        "engine_truth": "SKIPPED-sim (idle-only engine)"
+      },
+      "checks": [
+        {
+          "name": "crash_markers",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        }
+      ]
+    },
+    {
+      "scenario": "darwin-idle",
+      "status": "pass",
+      "measurements": {
+        "utterance_lines": 0,
+        "slip_clusters": 0,
+        "speaker_gate_lines": 0,
+        "interrupt_ramps": 0,
+        "transition_ramps": 0,
+        "dims_switches": 0,
+        "idle_hold_flaps": 0,
+        "engine_create_failures": 0,
+        "ws_reconnects": 0,
+        "life_markers": 2
+      },
+      "checks": [
+        {
+          "name": "utterance_lines",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "slip_clusters",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "speaker_gate_lines",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "interrupt_ramps",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "transition_ramps",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "dims_switches",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "idle_hold_flaps",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "engine_create_failures",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "ws_reconnects",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "life_markers>=1",
+          "ok": true,
+          "value": 2,
+          "limit": ">=1"
+        }
+      ],
+      "note": "provenance: measured in the ATTENDED bring-up run (2026-06-11 ~20:05, /tmp/bh-gate-dev2) on Darwin sources byte-identical to f685375 (commits after the fca8827 rollback touch only Android Kotlin/app_config/e2e). Unattended macOS GUI legs are policy-skipped since c4135ad (E2E_ALLOW_GUI=1 to re-run attended)."
+    },
+    {
+      "scenario": "darwin-storm",
+      "status": "pass",
+      "measurements": {
+        "crash_markers": 0,
+        "gate_holds": 2,
+        "gate_release_onset_ms": [
+          2348.0,
+          2229.0
+        ],
+        "ungated_utterance_starts": 0,
+        "barge_count": 1,
+        "utterances_on_texture": 2,
+        "max_queue_frames": 2,
+        "max_behind_frames": 0,
+        "max_skew_ms": 0,
+        "utterance_max_frames": [
+          500,
+          100
+        ]
+      },
+      "checks": [
+        {
+          "name": "crash_markers",
+          "ok": true,
+          "value": 0,
+          "limit": 0
+        },
+        {
+          "name": "gate_holds_all_released",
+          "ok": true,
+          "value": "holds=2 releases=2",
+          "limit": "equal"
+        },
+        {
+          "name": "gate_release_ms[0]",
+          "ok": true,
+          "value": 2348.0,
+          "limit": "<=4000"
+        },
+        {
+          "name": "gate_release_ms[1]",
+          "ok": true,
+          "value": 2229.0,
+          "limit": "<=4000"
+        },
+        {
+          "name": "barge_count>=1",
+          "ok": true,
+          "value": 1,
+          "limit": ">=1"
+        },
+        {
+          "name": "utterances_on_texture>=2",
+          "ok": true,
+          "value": 2,
+          "limit": ">=2"
+        },
+        {
+          "name": "second_utterance_sustained_frames",
+          "ok": true,
+          "value": 100,
+          "limit": ">=50"
+        },
+        {
+          "name": "max_queue_frames",
+          "ok": true,
+          "value": 2,
+          "limit": "<=50"
+        },
+        {
+          "name": "max_skew_ms",
+          "ok": true,
+          "value": 0,
+          "limit": "<=1500"
+        }
+      ],
+      "note": "provenance: measured in the ATTENDED bring-up run (2026-06-11 ~20:05, /tmp/bh-gate-dev2) on Darwin sources byte-identical to f685375 (commits after the fca8827 rollback touch only Android Kotlin/app_config/e2e). Unattended macOS GUI legs are policy-skipped since c4135ad (E2E_ALLOW_GUI=1 to re-run attended)."
+    }
+  ]
+}

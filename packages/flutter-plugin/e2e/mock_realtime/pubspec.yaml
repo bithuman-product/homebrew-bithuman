@@ -1,0 +1,10 @@
+name: mock_realtime
+description: >-
+  Hermetic mock of the OpenAI Realtime WebSocket API for the bitHuman e2e
+  harness. Pure Dart (no Flutter dependency) — usable from widget tests,
+  integration tests (in-process), or standalone via bin/serve.dart.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.11.5

@@ -1,52 +1,55 @@
 ---
-name: Tap / install bug
-about: Something about installing or upgrading bithuman is broken
+name: Bug report
+about: Something in this repo (the binary distribution, examples, or docs) is broken
 title: ''
 labels: bug
 ---
 
 <!--
-Heads up: this repo is just the Homebrew tap. The CLI source is private.
+Heads up: the bitHumanKit *source* is private. This template is for problems
+with what's published in THIS repo: the binary release artifact, Package.swift,
+the Examples/, the docs/, or the Python wheel packaging.
 
-For bugs in the CLI ITSELF (it crashes, mis-transcribes, picks the wrong voice,
-the avatar window misbehaves, etc.) please email support@bithuman.ai so the
-report reaches the engineers who can fix it.
-
-This template is for problems with `brew tap`, `brew install`, `brew upgrade`,
-the formula caveats, or the appcast feed.
+For runtime SDK bugs (lipsync, audio, model loading, API behavior), please
+email hello@bithuman.ai — those engineers will reach the right team faster
+than a public issue here can.
 
 For security issues, see SECURITY.md — DO NOT file a public issue.
 -->
 
-### What went wrong
+### What's broken
 
-One paragraph.
+A clear, one-paragraph description.
 
-### Exact command and output
+### Where it's broken
 
-```
-$ brew install bithuman
-... paste the full output here, including any download URLs and sha256 lines ...
-```
-
-### `brew config` output
-
-<details>
-<summary>brew config</summary>
-
-```
-$ brew config
-... paste here ...
-```
-</details>
+- [ ] `Package.swift` / binaryTarget / release artifact
+- [ ] An example under `Examples/`
+- [ ] Documentation under `docs/`
+- [ ] Python wheel packaging
+- [ ] Other (describe)
 
 ### Environment
 
-- macOS version:
-- Architecture (Apple Silicon / Intel — we only support Apple Silicon, but worth confirming):
-- Homebrew prefix (`brew --prefix`):
-- Did you previously have the legacy `bitchat` formula installed? (yes / no)
+- bitHumanKit version (tag or `Package.resolved` entry):
+- macOS / iOS / iPadOS version:
+- Xcode version:
+- Hardware (e.g. M3 MacBook Pro 14", iPhone 16 Pro):
 
-### Expected vs. actual
+### Steps to reproduce
 
-What you expected `brew` to do, vs. what happened.
+1.
+2.
+3.
+
+### Expected behavior
+
+What you thought would happen.
+
+### Actual behavior
+
+What actually happened. Logs, screenshots, or a sample project link are very welcome.
+
+### Anything else?
+
+Anything we should know — workarounds you found, recent changes on your end, etc.

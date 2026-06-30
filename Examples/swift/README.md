@@ -1,0 +1,101 @@
+# Swift SDK (Apple Platforms)
+
+The Swift SDK (`bitHumanKit`) runs all inference on-device: STT, LLM, TTS, and lip-sync animation. No server, no cloud GPU, no Docker. Import the package, point it at a model, and ship a native app.
+
+bitHumanKit is distributed as a SwiftPM binary package with zero transitive Swift dependencies.
+
+## Examples
+
+| Example | Platform | Model | API key? | What it shows |
+|---------|----------|-------|----------|---------------|
+| [macos-voice/](macos-voice/) | macOS | -- (audio only) | No | Minimal voice agent: `VoiceChat` + `VoiceChatConfig`. No avatar, no billing. |
+| [macos-avatar/](macos-avatar/) | macOS | Expression | Yes (2 cr/min) | Voice agent with lip-synced avatar: `ExpressionWeights`, `AvatarConfig`, `AvatarCoordinator`, `FramePump`, `AvatarRendererView` via `NSViewRepresentable`. |
+| [ios-avatar/](ios-avatar/) | iOS / iPadOS | Expression | Yes (2 cr/min) | Same avatar pipeline on iPhone/iPad: `HardwareCheck.evaluate()` gate, `UIViewRepresentable`, memory entitlements. |
+| [essence-playback/](essence-playback/) | macOS / iPad | Essence | Yes (1 cr/min) | Essence `.imx` model: `Bithuman.createRuntime(modelPath:)`, `EssenceRuntime.pushAudio()`, `frames()` AsyncStream. |
+
+Each example is a standalone SPM project. Clone, open in Xcode (or `swift run` from the terminal), and go.
+
+## Developer tools
+
+These are lower-level harnesses (benchmarks, A/B comparisons, a server daemon) carried over from the SDK's own development. They show how to consume the individual engine products directly.
+
+| Example | Consumes | What it shows |
+|---------|----------|---------------|
+| [hello-voice-chat/](hello-voice-chat/) | `bitHumanKit` | The smallest possible SPM executable embedding the SDK: `VoiceChat` + `VoiceChatConfig`, no avatar, no billing. |
+| [compare-quality/](compare-quality/) | `Expression` | Render a WAV → lip-synced MP4 to A/B fp16 vs int4 animator quality. Targets the Layer-1 Expression engine directly. |
+| [compare-llm/](compare-llm/) | upstream MLX OSS | Load each on-device LLM (iOS vs macOS split) on a fixed prompt set. No bitHuman binary — same OSS path as `LLMClient`. |
+| [compare-tts/](compare-tts/) | `Voice` (private source) | Load Kokoro + Qwen3-TTS and synthesize a fixed utterance. **Requires the private bithuman-sdk-internal sibling checkout** (see its README). |
+| [bench-essence/](bench-essence/) | `bitHumanKit` | Essence runtime perf + correctness bench. Full correctness path needs an internal test seam (see its README). |
+| [essence-server/](essence-server/) | `bitHumanKit` + LiveKit + Hummingbird | Native Swift LiveKit avatar service: hosts N runtimes behind HTTP `/launch`, republishes video + audio. |
+
+## SwiftPM products
+
+The published package exposes three library products. Most apps want the umbrella; the two engine products are for when you need one layer without the rest.
+
+| Product | `import` | What it is |
+|---------|----------|------------|
+| `bitHumanKit` | `import bitHumanKit` | Umbrella SDK — STT + LLM + TTS + both avatar engines. |
+| `Expression` | `import Expression` | Layer-1 avatar engine only (speech encoder → animator → face decoder → face renderer). Home of the `Bithuman` actor, `Bithuman.Quality`, `AvatarConfig`. |
+| `Bithuman` | `import Bithuman` | Layer-1 Essence engine only (libessence; audio → BGR frames from an `.imx`). CPU-only, any Apple Silicon. |
+
+## Supported models
+
+- **Expression** -- AI-generated facial animation from any face image, powered by the on-device Swift daemon.
+- **Essence** -- CPU-based lip sync from pre-built `.imx` model files. Supported on Apple Silicon via the same Swift SDK.
+
+## Hardware floor
+
+| Platform | Minimum device | OS |
+|----------|---------------|----|
+| Mac | Apple Silicon M3+ | macOS 26+ |
+| iPad | M4+ iPad Pro (16 GB) | iPadOS 26+ |
+| iPhone | iPhone 16 Pro+ | iOS 26+ |
+
+M1 and M2 Macs are not supported for Expression (the SDK raises `ExpressionModelNotSupported`). Essence works on any Apple Silicon Mac.
+
+## Links
+
+| Resource | URL |
+|----------|-----|
+| SwiftPM package | [github.com/bithuman-product/bithuman-sdk-public](https://github.com/bithuman-product/bithuman-sdk-public) |
+| Overview docs | [docs.bithuman.ai/sdks/swift](https://docs.bithuman.ai/sdks/swift) |
+| Quickstart | [docs.bithuman.ai/sdks/swift](https://docs.bithuman.ai/sdks/swift) |
+| CLI (no-code) | [docs.bithuman.ai/getting-started/cli](https://docs.bithuman.ai/getting-started/cli) |
+
+## Integration
+
+Add the package to your Xcode project or `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/bithuman-product/bithuman-sdk-public.git", from: "0.8.1")
+]
+```
+
+Then `import bitHumanKit` in your source files.
+
+## CLI (no-code path)
+
+For quick testing without writing code, install the CLI via Homebrew:
+
+```bash
+brew install bithuman-product/bithuman/bithuman-cli
+bithuman run
+```
+
+See [docs.bithuman.ai/getting-started/cli](https://docs.bithuman.ai/getting-started/cli) for usage.
+
+## Reference apps
+
+Reference apps (Mac, iPad, iPhone) live in the private `bithuman-apps` repo (collaborator-only). They consume the SDK via the published SwiftPM binary package — the same way any external developer would. Prebuilt binaries are linked from the [quickstart docs](https://docs.bithuman.ai/sdks/swift).
+
+## Python SDK on Apple Silicon
+
+For developers who prefer Python, the `bithuman` PyPI package includes a macOS arm64 wheel with the bundled Swift daemon. See the [deployment guide](https://docs.bithuman.ai/guides/deployment) for running Expression on Mac from Python -- no Xcode required.
+
+## Documentation
+
+- [Swift SDK overview](https://docs.bithuman.ai/sdks/swift)
+- [Quickstart](https://docs.bithuman.ai/sdks/swift)
+- [CLI reference](https://docs.bithuman.ai/getting-started/cli)
+- [Models overview](https://docs.bithuman.ai/getting-started/models)

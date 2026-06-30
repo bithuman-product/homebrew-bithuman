@@ -1,0 +1,6 @@
+bithuman>=2.3
+livekit-agents[openai]~=1.5
+fastrtc>=0.0.18
+gradio>=4.0
+numpy>=1.24
+python-dotenv~=1.1
