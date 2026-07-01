@@ -16,7 +16,7 @@
 #   brew install bithuman-cli     # CLI (Homebrew)        <-- canonical
 #   brew install bithuman         # CLI (deprecated alias)
 #
-# Engine: libessence 2.3.6 (ABI v7) — the engine core bundled in this
+# Engine: libessence 2.3.8 (ABI 7) — the engine core bundled in this
 # CLI. Note the engine-core version is a SEPARATE axis from the CLI/SDK
 # version (2.3.x); they are not the same number. One command
 # (`bithuman run`) stands up the whole stack: embedded livekit-server,
@@ -33,20 +33,20 @@
 #   `brew install bithuman` working as a deprecated alias for users
 #   with the old name in scripts / muscle memory.
 #
-# This formula installs a prebuilt Rust binary built from
-# bithuman-product/bithuman-apps (CLI source) against
-# bithuman-product/bithuman-sdk-internal (libessence engine core 2.3.6, ABI v7),
+# This formula installs a prebuilt Rust binary built from the standalone
+  # bithuman-product/bithuman-cli against bithuman-product/essence-1
+  # (libessence engine core 2.3.8, ABI 7),
 # mirrored to the public homebrew-bithuman tap repo's own Releases
 # (both upstream repos are private — anonymous brew downloads fail
 # there with HTTP 404; the mirror is the workaround).
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
-  homepage "https://github.com/bithuman-product/bithuman-sdk-public"
-  # Current published release: v2.3.25 (visual polish: gh-like clap anstyle help styling, --no-color leak fix, tabled tables for list/usage, styled error/hint, login spinner). Apple Silicon (arm64).
+  homepage "https://www.bithuman.ai"
+  # Current published release: cli-v2.3.26 (first cli-v* release; standalone bithuman-cli vs reconciled essence-1 v2.3.11 / libessence 2.3.8). Apple Silicon (arm64).
   # (Engine core stays libessence 2.3.6 / ABI v7 — a separate axis.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/v2.3.25/bithuman-aarch64-apple-darwin.tar.gz"
-  version "2.3.25"
-  sha256 "87d6c3c8675fe9616c71f9708bcc7a5a2926f0d382da30b257195657497db24b"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.3.26/bithuman-aarch64-apple-darwin.tar.gz"
+  version "2.3.26"
+  sha256 "46c391d822faa00911de564883b5c1b64fba05c74a5a393f2cba40b5bd3bfc0a"
   license "Apache-2.0"
 
   depends_on arch: :arm64
@@ -110,7 +110,7 @@ class BithumanCli < Formula
         bithuman info   avatar.imx                       # inspect .imx
 
       Docs:    https://docs.bithuman.ai
-      Source:  https://github.com/bithuman-product/bithuman-sdk-public
+      Source:  https://github.com/bithuman-product/homebrew-bithuman
     EOS
   end
 
