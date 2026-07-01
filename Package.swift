@@ -11,8 +11,9 @@
 // on this package URL.
 //
 // NOTE: bithuman-sdk-internal was ARCHIVED on 2026-06-30; its trees are now
-// consolidated into the engine SDK repos (expression-2, essence-1/essence-2).
-// The bithuman-sdk-internal references below are historical provenance only.
+// consolidated into the private engine monorepo bithuman-product/bithuman-models
+// (models/expression-2, models/essence-1, models/essence-2). The
+// bithuman-sdk-internal references below are historical provenance only.
 //
 // All third-party deps (MLX, HuggingFace, Tokenizers, …) are
 // statically linked into the framework binaries, so consumers
@@ -67,7 +68,8 @@ let package = Package(
     name: "bithuman",
     platforms: [
         // Floor lowered to host the source-only BithumanEngineProtocol product,
-        // which the engine SDKs (expression-2/sdk, essence-2/sdk) consume at
+        // which the engine SDKs (bithuman-models models/expression-2/sdk,
+        // models/essence-2/sdk) consume at
         // macOS 13 / iOS 16. bitHumanKit's real macOS-26 floor is enforced at
         // runtime via HardwareCheck.evaluate() (a polite refusal below it), not
         // by the package manifest. (Consolidated from bithuman-engine-protocol +

@@ -10,5 +10,5 @@ contact_links:
     url: https://docs.bithuman.ai
     about: Full SDK docs, quickstarts, and deployment guides.
   - name: Security disclosure
-    url: https://github.com/bithuman-product/bithuman-sdk-public/blob/main/SECURITY.md
+    url: https://github.com/bithuman-product/homebrew-bithuman/blob/main/SECURITY.md
     about: Found a security issue? Please email hello@bithuman.ai instead of filing a public issue.

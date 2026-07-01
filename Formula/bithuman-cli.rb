@@ -34,15 +34,15 @@
 #   with the old name in scripts / muscle memory.
 #
 # This formula installs a prebuilt Rust binary built from the standalone
-  # bithuman-product/bithuman-cli against bithuman-product/essence-1
-  # (libessence engine core 2.3.8, ABI 7),
+  # bithuman-product/bithuman-cli against the bithuman-product/bithuman-models
+  # engine monorepo, models/essence-1 (libessence engine core 2.3.8, ABI 7),
 # mirrored to the public homebrew-bithuman tap repo's own Releases
 # (both upstream repos are private — anonymous brew downloads fail
 # there with HTTP 404; the mirror is the workaround).
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.3.26 (first cli-v* release; standalone bithuman-cli vs reconciled essence-1 v2.3.11 / libessence 2.3.8). Apple Silicon (arm64).
+  # Current published release: cli-v2.3.26 (first cli-v* release; standalone bithuman-cli vs reconciled bithuman-models essence1-v2.3.11 / libessence 2.3.8). Apple Silicon (arm64).
   # (Engine core stays libessence 2.3.6 / ABI v7 — a separate axis.)
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.3.26/bithuman-aarch64-apple-darwin.tar.gz"
   version "2.3.26"

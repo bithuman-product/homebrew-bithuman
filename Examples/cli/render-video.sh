@@ -21,7 +21,7 @@ MODEL="${1:?Usage: ./render-video.sh <model.imx>}"
 
 # Download sample audio if you don't have one
 if [ ! -f speech.wav ]; then
-  curl -sO https://raw.githubusercontent.com/bithuman-product/bithuman-sdk-public/main/Examples/python/local-essence/speech.wav
+  curl -sO https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/Examples/python/local-essence/speech.wav
 fi
 
 # Render: .imx + audio -> MP4

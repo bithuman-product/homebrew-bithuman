@@ -33,9 +33,10 @@
 # Two modes:
 #   • SELF-CONTAINED (default): download + sha256-verify the libconverse vendor
 #     bundle from the embody Release, then run each engine SDK's bootstrap.
-#   • DEV override: BITHUMAN_SDK_DIR=/path/to/bithuman-sdk symlinks libconverse
-#     from a sibling SDK vendor surface; embody models load from ~/embody-ane at
-#     runtime; each engine SDK bootstrap runs in its own DEV mode.
+#   • DEV override: BITHUMAN_SDK_DIR=/path/to/bithuman-models/models/essence-1
+#     symlinks libconverse from that checkout's sdk/swift/vendor surface; embody
+#     models load from ~/embody-ane at runtime; each engine SDK bootstrap runs
+#     in its own DEV mode.
 #
 # Nothing under <plat>/Frameworks/, <plat>/Engines/, or Assets/embody/ is
 # committed. Re-running is safe. Apache-2.0; (c) bitHuman.
@@ -44,8 +45,8 @@ set -euo pipefail
 
 PLUGIN_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
-EMBODY_VENDOR_TAG="${EMBODY_VENDOR_TAG:-vendor-v1}"
-EMBODY_VENDOR_REPO="${EMBODY_VENDOR_REPO:-bithuman-product/expression-2}"
+EXPRESSION2_VENDOR_TAG="${EXPRESSION2_VENDOR_TAG:-expression2-vendor-v1}"
+EXPRESSION2_VENDOR_REPO="${EXPRESSION2_VENDOR_REPO:-bithuman-product/bithuman-models}"
 
 # The STATIC, non-SME2 ONNX Runtime 1.26.0 the essence2 (a2x) decoder's le_a2x
 # GEMM runs on. Built from source so it never emits SME2 instructions (those
@@ -54,8 +55,8 @@ EMBODY_VENDOR_REPO="${EMBODY_VENDOR_REPO:-bithuman-product/expression-2}"
 # bundled dylibs, so it is staged to the iOS Frameworks dir ONLY. Published as a
 # GitHub release (onnxruntime.xcframework.zip + .sha256). A dev override
 # (ORT_XCFRAMEWORK_DIR=/path/to/onnxruntime.xcframework) skips the download.
-ORT_VENDOR_TAG="${ORT_VENDOR_TAG:-ort-vendor-1.26.0}"
-ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/essence-2}"
+ORT_VENDOR_TAG="${ORT_VENDOR_TAG:-essence2-ort-vendor-1.26.0}"
+ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 
 log()  { printf '\033[1;36m[bootstrap]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[bootstrap]\033[0m %s\n' "$*" >&2; }
@@ -75,40 +76,46 @@ relink() {
 }
 
 # ------------------------------------------------- generic engine SDK locator
-# Locate one engine's Layer-1 sdk/ by: (1) BITHUMAN_<ENGINE>_DIR dev override,
-# (2) a sibling checkout next to this repo, (3) a shallow gh clone into a cache.
+# Every engine's Layer-1 sdk/ lives in the PRIVATE engine monorepo
+# bithuman-product/bithuman-models under models/<engine>/sdk. Locate one
+# engine's sdk/ by: (1) BITHUMAN_<ENGINE>_DIR dev override, (2) a sibling
+# bithuman-models checkout next to this repo, (3) ONE shared shallow gh clone
+# of the monorepo into a cache (serves every engine).
 # Sets ENGINE_SDK to the resolved sdk/ path (empty if not found).
-#   $1 = slug (EXPRESSION2|ESSENCE2)  $2 = org/repo  $3 = sibling dir name
-#   $4 = override env VALUE           $5 = ref
+#   $1 = slug (EXPRESSION2|ESSENCE2)  $2 = models/ dir name (expression-2|essence-2)
+#   $3 = override env VALUE           $4 = ref
+MODELS_REPO="${BITHUMAN_MODELS_REPO:-bithuman-product/bithuman-models}"
+MODELS_CACHE="$HOME/.cache/bithuman/bithuman-models"
 ENGINE_SDK=""
 locate_engine_sdk() {
-    local slug="$1" repo="$2" dir="$3" override="$4" ref="${5:-main}"
-    local cache="$HOME/.cache/bithuman/$dir"
+    local slug="$1" model="$2" override="$3" ref="${4:-main}"
+    local cache="$MODELS_CACHE"
     ENGINE_SDK=""
-    # 1. explicit dev override (repo root OR its sdk/).
+    # 1. explicit dev override (engine dir root OR its sdk/).
     if [ -n "$override" ]; then
         if [ -f "$override/scripts/bootstrap.sh" ]; then ENGINE_SDK="$override"; return 0; fi
         if [ -f "$override/sdk/scripts/bootstrap.sh" ]; then ENGINE_SDK="$override/sdk"; return 0; fi
         warn "BITHUMAN_${slug}_DIR=$override has no (sdk/)scripts/bootstrap.sh"
     fi
-    # 2. sibling checkout next to this umbrella repo.
-    if [ -f "$PLUGIN_ROOT/../$dir/sdk/scripts/bootstrap.sh" ]; then
-        ENGINE_SDK="$(cd "$PLUGIN_ROOT/../$dir/sdk" && pwd)"; return 0
+    # 2. sibling bithuman-models checkout next to this umbrella repo.
+    if [ -f "$PLUGIN_ROOT/../bithuman-models/models/$model/sdk/scripts/bootstrap.sh" ]; then
+        ENGINE_SDK="$(cd "$PLUGIN_ROOT/../bithuman-models/models/$model/sdk" && pwd)"; return 0
     fi
-    # 3. shallow git clone into a cache (private repo → prefer gh's auth).
-    if [ ! -f "$cache/sdk/scripts/bootstrap.sh" ]; then
+    # 3. one shared shallow clone of the monorepo into a cache (private repo →
+    # prefer gh's auth). Re-used across engines and runs.
+    if [ ! -d "$cache/models" ]; then
         mkdir -p "$(dirname "$cache")"; rm -rf "$cache"
-        log "Cloning $repo ($ref) → $cache"
+        log "Cloning $MODELS_REPO ($ref) → $cache"
         if command -v gh >/dev/null 2>&1; then
-            gh repo clone "$repo" "$cache" -- --depth 1 -b "$ref" >/dev/null 2>&1 \
-              || git clone --depth 1 -b "$ref" "https://github.com/$repo.git" "$cache" >/dev/null 2>&1 || true
+            gh repo clone "$MODELS_REPO" "$cache" -- --depth 1 -b "$ref" >/dev/null 2>&1 \
+              || git clone --depth 1 -b "$ref" "https://github.com/$MODELS_REPO.git" "$cache" >/dev/null 2>&1 || true
         else
-            git clone --depth 1 -b "$ref" "https://github.com/$repo.git" "$cache" >/dev/null 2>&1 || true
+            git clone --depth 1 -b "$ref" "https://github.com/$MODELS_REPO.git" "$cache" >/dev/null 2>&1 || true
         fi
     else
         ( cd "$cache" && git fetch -q --depth 1 origin "$ref" && git checkout -q FETCH_HEAD ) >/dev/null 2>&1 || true
     fi
-    [ -f "$cache/sdk/scripts/bootstrap.sh" ] && { ENGINE_SDK="$cache/sdk"; return 0; }
+    [ -f "$cache/models/$model/sdk/scripts/bootstrap.sh" ] && { ENGINE_SDK="$cache/models/$model/sdk"; return 0; }
     return 1
 }
 
@@ -120,8 +127,8 @@ locate_engine_sdk() {
 stage_expression2() {
     local extra_env="${1:-}"
     rm -rf "$PLUGIN_ROOT/macos/Engines/expression2" "$PLUGIN_ROOT/ios/Engines/expression2"
-    if ! locate_engine_sdk EXPRESSION2 "bithuman-product/expression-2" "expression-2" "${BITHUMAN_EXPRESSION2_DIR:-}"; then
-        die "expression-2/sdk not found (set BITHUMAN_EXPRESSION2_DIR, place a sibling checkout, or allow a git clone) — expression2 is the DEFAULT engine and is REQUIRED"
+    if ! locate_engine_sdk EXPRESSION2 "expression-2" "${BITHUMAN_EXPRESSION2_DIR:-}"; then
+        die "bithuman-models models/expression-2/sdk not found (set BITHUMAN_EXPRESSION2_DIR, place a sibling bithuman-models checkout, or allow a git clone) — expression2 is the DEFAULT engine and is REQUIRED"
     fi
     local sdk="$ENGINE_SDK"
     log "Staging expression2 (embody) engine SDK from $sdk"
@@ -164,8 +171,8 @@ stage_essence2_plat() {  # $1=plat, $2=slice .a path, $3=resources dir, $4=sdk p
 
 stage_essence2() {
     rm -rf "$PLUGIN_ROOT/macos/Engines/essence2" "$PLUGIN_ROOT/ios/Engines/essence2"
-    if ! locate_engine_sdk ESSENCE2 "bithuman-product/essence-2" "essence-2" "${BITHUMAN_ESSENCE2_DIR:-}"; then
-        warn "essence-2/sdk not found (set BITHUMAN_ESSENCE2_DIR, place a sibling checkout, or allow a git clone) — essence2 disabled (embody-only)"
+    if ! locate_engine_sdk ESSENCE2 "essence-2" "${BITHUMAN_ESSENCE2_DIR:-}"; then
+        warn "bithuman-models models/essence-2/sdk not found (set BITHUMAN_ESSENCE2_DIR, place a sibling bithuman-models checkout, or allow a git clone) — essence2 disabled (embody-only)"
         return 0
     fi
     local sdk="$ENGINE_SDK"
@@ -254,8 +261,10 @@ refresh_engine_protocol
 
 # ===================================================================== DEV mode
 if [ -n "${BITHUMAN_SDK_DIR:-}" ]; then
-    SDK_VENDOR="$BITHUMAN_SDK_DIR/sdks/swift/vendor"
-    [ -d "$SDK_VENDOR" ] || die "BITHUMAN_SDK_DIR set but vendor surface not found at $SDK_VENDOR"
+    # BITHUMAN_SDK_DIR points at a bithuman-models models/essence-1 checkout dir
+    # (its sdk/swift/vendor surface is populated by a dev build).
+    SDK_VENDOR="$BITHUMAN_SDK_DIR/sdk/swift/vendor"
+    [ -d "$SDK_VENDOR" ] || die "BITHUMAN_SDK_DIR set but vendor surface not found at $SDK_VENDOR (expected a bithuman-models models/essence-1 checkout with a built sdk/swift/vendor)"
     log "DEV mode — symlinking libconverse from $BITHUMAN_SDK_DIR (embody models come from ~/embody-ane/build_A42)"
     relink "$SDK_VENDOR/libconverse.xcframework" "$MAC_FW/libconverse.xcframework"
     relink "$SDK_VENDOR/libconverse.xcframework" "$IOS_FW/libconverse.xcframework"
@@ -276,14 +285,14 @@ command -v gh >/dev/null 2>&1 \
     || die "gh CLI required for the self-contained bootstrap (brew install gh), or set BITHUMAN_SDK_DIR for a sibling SDK checkout"
 
 # 1. libconverse (the brain) — fetch + verify + extract from the embody Release.
-log "Fetching libconverse vendor bundle '$EMBODY_VENDOR_TAG' from $EMBODY_VENDOR_REPO …"
+log "Fetching libconverse vendor bundle '$EXPRESSION2_VENDOR_TAG' from $EXPRESSION2_VENDOR_REPO …"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-gh release download "$EMBODY_VENDOR_TAG" --repo "$EMBODY_VENDOR_REPO" \
+gh release download "$EXPRESSION2_VENDOR_TAG" --repo "$EXPRESSION2_VENDOR_REPO" \
     --pattern 'embody-vendor.tar.gz*' --dir "$TMP" --clobber \
-    || die "gh release download failed (tag $EMBODY_VENDOR_TAG, repo $EMBODY_VENDOR_REPO)"
+    || die "gh release download failed (tag $EXPRESSION2_VENDOR_TAG, repo $EXPRESSION2_VENDOR_REPO)"
 [ -f "$TMP/embody-vendor.tar.gz" ] && [ -f "$TMP/embody-vendor.tar.gz.sha256" ] \
-    || die "release $EMBODY_VENDOR_TAG is missing embody-vendor.tar.gz(.sha256)"
+    || die "release $EXPRESSION2_VENDOR_TAG is missing embody-vendor.tar.gz(.sha256)"
 
 EXPECT="$(tr -d '[:space:]' < "$TMP/embody-vendor.tar.gz.sha256")"
 ACTUAL="$(shasum -a 256 "$TMP/embody-vendor.tar.gz" | cut -d' ' -f1)"
@@ -316,4 +325,4 @@ stage_expression2 "EMBODY_VENDOR_SRC=$SRC"
 stage_essence2
 
 log "Done. Self-contained — no sibling bithuman-sdk required."
-log "    the product app lives in the bithuman-app repo: github.com/bithuman-product/bithuman-app"
+log "    the product app lives in the bithuman-jarvis-app repo: github.com/bithuman-product/bithuman-jarvis-app"

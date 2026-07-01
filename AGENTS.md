@@ -10,7 +10,7 @@ bitHuman is a real-time avatar animation platform. You push audio in, and get li
 | Web app, custom face image | Cloud Expression (LiveKit plugin) | `pip install livekit-plugins-bithuman` | `Examples/python/cloud-essence/` (same plugin; create an Expression agent) |
 | Kiosk / 24-7 / edge box | Self-hosted Essence (CPU) | `pip install bithuman` | `Examples/python/local-essence/` |
 | On-prem NVIDIA GPU | Self-hosted Expression (Docker) | `docker pull bithuman/expression-avatar:latest` | [docs: deployment](https://docs.bithuman.ai/guides/deployment) |
-| macOS / iPad / iPhone app | Swift SDK (on-device) | SwiftPM `bithuman-sdk-public` >= 0.8.1 | `Examples/swift/` |
+| macOS / iPad / iPhone app | Swift SDK (on-device) | SwiftPM `homebrew-bithuman` >= 0.8.1 | `Examples/swift/` |
 | Mac, no code | CLI | `brew install bithuman-product/bithuman/bithuman-cli` (or `pip install bithuman-cli`) | `Examples/cli/` |
 | Any language, HTTP only | REST API | `curl https://api.bithuman.ai/v1/...` | `Examples/rest-api/` |
 | 100% offline Mac | Ollama + Apple Speech + bitHuman | -- | `Examples/integrations/offline-mac/` |
@@ -46,7 +46,7 @@ export BITHUMAN_API_SECRET=your_secret
 
 ```swift
 // Package.swift
-.package(url: "https://github.com/bithuman-product/bithuman-sdk-public.git", from: "0.8.1")
+.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "0.8.1")
 
 // In code:
 import bitHumanKit
@@ -238,14 +238,14 @@ The bitHuman platform spans three repos, each owning one layer of the stack:
 |------|-----------|-------|------------------|
 | **bithuman-sdk-internal** | Private | Engine + SDKs | `libessence` engine + Python / Swift / Kotlin / Rust language bindings (source). Publishes the binary wheels / xcframework / AAR. |
 | **bithuman-apps** | Private | Apps | CLI (`bithuman-cli` on PyPI, Homebrew formula source), Flutter plugin, reference apps (Mac, iPad, iPhone). Each consumes the SDKs the same way any third-party would. |
-| **bithuman-sdk-public** | Public | Landing pages + examples | SwiftPM facade for the binary release, `python/` PyPI landing, runnable `Examples/`. (The `docs.bithuman.ai` site source now lives in the `bithuman-product/public-docs` repo, not here.) |
+| **homebrew-bithuman** | Public | Landing pages + examples | SwiftPM facade for the binary release, `python/` PyPI landing, runnable `Examples/`. (The `docs.bithuman.ai` site source now lives in the `bithuman-product/public-docs` repo, not here.) |
 
-Reference apps and the CLI do **not** live inside `bithuman-sdk-public` or `bithuman-sdk-internal`. They are in `bithuman-apps` and depend on the SDKs as normal downstream consumers.
+Reference apps and the CLI do **not** live inside `homebrew-bithuman` or `bithuman-sdk-internal`. They are in `bithuman-apps` and depend on the SDKs as normal downstream consumers.
 
-### bithuman-sdk-public
+### homebrew-bithuman
 
 ```
-bithuman-sdk-public/
+homebrew-bithuman/
 ├── AGENTS.md                 <-- You are here (AI agent discovery)
 ├── CLAUDE.md                 Claude Code instructions
 ├── .cursorrules              Cursor AI rules
@@ -299,14 +299,14 @@ bithuman-sdk-public/
 | LLM-optimized docs | https://docs.bithuman.ai/llms.txt |
 | Full LLM docs | https://docs.bithuman.ai/llms-full.txt |
 | Python SDK (PyPI) | https://pypi.org/project/bithuman/ |
-| Swift SDK (SwiftPM) | https://github.com/bithuman-product/bithuman-sdk-public |
-| Examples | https://github.com/bithuman-product/bithuman-sdk-public/tree/main/Examples |
+| Swift SDK (SwiftPM) | https://github.com/bithuman-product/homebrew-bithuman |
+| Examples | https://github.com/bithuman-product/homebrew-bithuman/tree/main/Examples |
 | Discord | https://discord.gg/ES953n7bPA |
 | Status page | https://status.bithuman.ai |
 
 ## What NOT To Do
 
-- **The SDK internals are closed-source.** Consume the binary distributions only: SwiftPM `bithuman-sdk-public` for Swift, `pip install bithuman` for Python, Maven `ai.bithuman:sdk` for Kotlin, the CLI installer for the binary. Do not attempt to fetch SDK source.
+- **The SDK internals are closed-source.** Consume the binary distributions only: SwiftPM `homebrew-bithuman` for Swift, `pip install bithuman` for Python, Maven `ai.bithuman:sdk` for Kotlin, the CLI installer for the binary. Do not attempt to fetch SDK source.
 - **Do NOT hardcode API keys** in source files. Always use environment variables (`BITHUMAN_API_SECRET` for Python/REST/CLI, `BITHUMAN_API_KEY` for Swift).
 - **Do NOT pin Swift SDK below 0.8.1** -- earlier versions have breaking API changes.
 - **Do NOT use `figure_id`** -- it is deprecated. Use `agent_code` everywhere.

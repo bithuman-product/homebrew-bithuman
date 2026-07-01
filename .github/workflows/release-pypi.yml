@@ -7,14 +7,17 @@
 # were dropped — this workflow lives in `homebrew-bithuman` and does ONE
 # thing: build the multi-platform `bithuman` wheel and publish it to PyPI.
 #
-# Source of truth for the wheel = bithuman-product/essence-1 (PRIVATE), which
-# carries the C++ engine at `engine/essence/` and the pybind11 binding at
-# `sdk/python/` (note: `sdk/`, singular — not the `sdks/` of the old internal
-# repo). homebrew-bithuman holds NO engine code; every job checks essence-1
-# out with the read-only PAT.
+# Source of truth for the wheel = bithuman-product/bithuman-models (PRIVATE
+# engine monorepo), which carries the essence-1 engine under
+# `models/essence-1/`: the C++ engine at `models/essence-1/engine/essence/`
+# and the pybind11 binding at `models/essence-1/sdk/python/` (note: `sdk/`,
+# singular — not the `sdks/` of the old internal repo). homebrew-bithuman
+# holds NO engine code; every job checks bithuman-models out with the
+# read-only PAT.
 #
 # Secrets required on homebrew-bithuman:
-#   SDK_RO_PAT       read-only PAT with `contents:read` on bithuman-product/essence-1
+#   SDK_RO_PAT       read-only PAT with `contents:read` on bithuman-product/bithuman-models
+#                    (probe it any time with the `preflight` workflow)
 #   PYPI_API_TOKEN   PyPI project/account token (the password)
 #   PYPI_USERNAME    "__token__" (falls back to __token__ if unset)
 #
@@ -23,7 +26,7 @@
 #   Linux x86_64           manylinux_2_28_x86_64    cp310..cp314   (manylinux docker)
 #   Linux aarch64          manylinux_2_28_aarch64   cp310..cp314   (manylinux docker, arm64 runner)
 # The aarch64/x86_64 Linux wheels are built inside the pinned
-# sdk/python/scripts/Dockerfile.manylinux-* images (ORT 1.20.1 + FFmpeg 7.0.2
+# models/essence-1/sdk/python/scripts/Dockerfile.manylinux-* images (ORT 1.20.1 + FFmpeg 7.0.2
 # + HDF5 1.14 + Rust baked in) via sdk/python/scripts/build-wheel-in-container.sh.
 # macOS builds on the host with Homebrew deps, then `delocate` bundles the
 # Homebrew dylibs into the wheel.
@@ -34,10 +37,12 @@
 # the macOS job sets up rustup.
 #
 # Triggers:
-#   * push tag `pypi-v<X.Y.Z>`  -> checks out essence-1 ref `v<X.Y.Z>` and publishes.
+#   * push tag `pypi-v<X.Y.Z>`  -> checks out bithuman-models ref
+#                                   `essence1-v<X.Y.Z>` and publishes.
 #   * workflow_dispatch          -> build (and optionally publish) an arbitrary
-#                                   essence-1 ref. Leave `publish=false` for a
-#                                   dry-run that still runs the coverage gate.
+#                                   bithuman-models ref. Leave `publish=false`
+#                                   for a dry-run that still runs the coverage
+#                                   gate.
 name: release-pypi
 
 on:
@@ -47,7 +52,7 @@ on:
   workflow_dispatch:
     inputs:
       essence_ref:
-        description: 'bithuman-product/essence-1 git ref to build (tag, branch, or SHA).'
+        description: 'bithuman-product/bithuman-models git ref to build (tag, branch, or SHA - e.g. essence1-v2.3.11).'
         type: string
         default: main
       publish:
@@ -68,9 +73,10 @@ env:
 
 jobs:
   # -------------------------------------------------------------------
-  # Resolve which essence-1 ref to build and whether to publish, from
-  # either the tag (pypi-vX.Y.Z -> vX.Y.Z) or the dispatch inputs. Every
-  # downstream job `needs: resolve` and checks essence-1 out at this ref.
+  # Resolve which bithuman-models ref to build and whether to publish, from
+  # either the tag (pypi-vX.Y.Z -> essence1-vX.Y.Z) or the dispatch inputs.
+  # Every downstream job `needs: resolve` and checks bithuman-models out at
+  # this ref.
   # -------------------------------------------------------------------
   resolve:
     name: Resolve source ref + publish flag
@@ -91,8 +97,9 @@ jobs:
             echo "essence_ref=${IN_REF}" >> "$GITHUB_OUTPUT"
             echo "publish=${IN_PUB}"     >> "$GITHUB_OUTPUT"
           else
-            # tag `pypi-vX.Y.Z` -> build essence-1 tag `vX.Y.Z`, always publish.
-            echo "essence_ref=${TAG#pypi-}" >> "$GITHUB_OUTPUT"
+            # tag `pypi-vX.Y.Z` -> build bithuman-models tag
+            # `essence1-vX.Y.Z`, always publish.
+            echo "essence_ref=essence1-${TAG#pypi-}" >> "$GITHUB_OUTPUT"
             echo "publish=true"             >> "$GITHUB_OUTPUT"
           fi
           echo "Resolved: ref=$(grep essence_ref "$GITHUB_OUTPUT") $(grep publish "$GITHUB_OUTPUT")"
@@ -117,10 +124,10 @@ jobs:
       PUBLISH: ${{ needs.resolve.outputs.publish }}
       PYV: ${{ matrix.python }}
     steps:
-      - name: Checkout essence-1 engine source
+      - name: Checkout bithuman-models engine source
         uses: actions/checkout@v4
         with:
-          repository: bithuman-product/essence-1
+          repository: bithuman-product/bithuman-models
           ref: ${{ needs.resolve.outputs.essence_ref }}
           token: ${{ secrets.SDK_RO_PAT }}
 
@@ -141,12 +148,14 @@ jobs:
         run: rustup default stable && rustc --version
 
       - name: Build essence (Release)
-        # APPLE default ESSENCE_BUILD_DIR is engine/essence/build, which
-        # scikit-build-core's child cmake then reuses for the binding.
+        # APPLE default ESSENCE_BUILD_DIR is engine/essence/build (relative to
+        # models/essence-1/), which scikit-build-core's child cmake then reuses
+        # for the binding.
         run: |
           NCPU=$(sysctl -n hw.ncpu)
-          cmake -GNinja -B engine/essence/build -S engine/essence -DCMAKE_BUILD_TYPE=Release
-          cmake --build engine/essence/build --target essence --parallel "$NCPU"
+          cmake -GNinja -B models/essence-1/engine/essence/build \
+                -S models/essence-1/engine/essence -DCMAKE_BUILD_TYPE=Release
+          cmake --build models/essence-1/engine/essence/build --target essence --parallel "$NCPU"
 
       - name: Build SDK wheel (bithuman)
         # `python -m build` runs scikit-build-core, which re-runs cmake against
@@ -155,7 +164,7 @@ jobs:
         run: |
           "python${PYV}" -m venv /tmp/build-venv
           /tmp/build-venv/bin/pip install --upgrade pip build
-          cd sdk/python
+          cd models/essence-1/sdk/python
           CMAKE_BUILD_PARALLEL_LEVEL=$(sysctl -n hw.ncpu) \
             /tmp/build-venv/bin/python -m build --wheel --outdir dist/
 
@@ -168,7 +177,7 @@ jobs:
         # survived.
         run: |
           /tmp/build-venv/bin/pip install delocate
-          cd sdk/python
+          cd models/essence-1/sdk/python
           mkdir -p dist/delocated
           for whl in dist/*.whl; do
             /tmp/build-venv/bin/delocate-wheel -w dist/delocated -v "$whl"
@@ -189,7 +198,7 @@ jobs:
 
       - name: Smoke test SDK wheel
         run: |
-          /tmp/build-venv/bin/pip install sdk/python/dist/*.whl
+          /tmp/build-venv/bin/pip install models/essence-1/sdk/python/dist/*.whl
           BITHUMAN_UNMETERED=1 /tmp/build-venv/bin/python -c "
           import bithuman
           print(f'OK: {bithuman.__version__} ABI={bithuman.__abi_version__}')
@@ -201,7 +210,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python }}
-          path: sdk/python/dist/*.whl
+          path: models/essence-1/sdk/python/dist/*.whl
           if-no-files-found: error
 
       - name: Publish to PyPI
@@ -212,7 +221,7 @@ jobs:
           /tmp/build-venv/bin/pip install twine
           /tmp/build-venv/bin/python -m twine upload --skip-existing --verbose \
             --username "${PYPI_USERNAME:-__token__}" --password "$PYPI_API_TOKEN" \
-            sdk/python/dist/*.whl
+            models/essence-1/sdk/python/dist/*.whl
 
   # -------------------------------------------------------------------
   # Linux x86_64 manylinux_2_28 wheels (cp310..cp314), built in the pinned
@@ -233,10 +242,10 @@ jobs:
       PUBLISH: ${{ needs.resolve.outputs.publish }}
       PYTAG: ${{ matrix.pytag }}
     steps:
-      - name: Checkout essence-1 engine source
+      - name: Checkout bithuman-models engine source
         uses: actions/checkout@v4
         with:
-          repository: bithuman-product/essence-1
+          repository: bithuman-product/bithuman-models
           ref: ${{ needs.resolve.outputs.essence_ref }}
           token: ${{ secrets.SDK_RO_PAT }}
 
@@ -246,8 +255,8 @@ jobs:
       - name: Build manylinux_2_28_x86_64 image
         uses: docker/build-push-action@v6
         with:
-          context: sdk/python/scripts
-          file: sdk/python/scripts/Dockerfile.manylinux-x86_64
+          context: models/essence-1/sdk/python/scripts
+          file: models/essence-1/sdk/python/scripts/Dockerfile.manylinux-x86_64
           platforms: linux/amd64
           tags: bithuman/manylinux-x86_64:0.1
           load: true
@@ -255,25 +264,26 @@ jobs:
           cache-to: type=gha,mode=max,scope=manylinux-x86_64
 
       - name: Build SDK wheel inside container
-        # The repo is bind-mounted at /src; the script cd's into
+        # The models/essence-1 subtree is bind-mounted at /src (so the
+        # in-container layout is unchanged); the script cd's into
         # /src/engine/essence (cmake essence) then /src/sdk/python (build +
         # auditwheel repair -> manylinux_2_28).
         run: |
           docker run --rm --platform linux/amd64 \
-            -v "$PWD":/src \
+            -v "$PWD/models/essence-1":/src \
             -e PYTAG="$PYTAG" \
             -e ARCH_INSIDE=x86_64 \
             bithuman/manylinux-x86_64:0.1 \
             bash /src/sdk/python/scripts/build-wheel-in-container.sh
 
       - name: List built wheels
-        run: ls -lh sdk/python/dist/
+        run: ls -lh models/essence-1/sdk/python/dist/
 
       - name: Upload SDK wheel as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: wheels-linux-x86_64-${{ matrix.pytag }}
-          path: sdk/python/dist/bithuman-*-manylinux_2_28_x86_64.whl
+          path: models/essence-1/sdk/python/dist/bithuman-*-manylinux_2_28_x86_64.whl
           if-no-files-found: error
 
       - name: Publish to PyPI
@@ -282,7 +292,7 @@ jobs:
           python3 -m pip install --user --upgrade pip twine
           python3 -m twine upload --skip-existing --verbose \
             --username "${PYPI_USERNAME:-__token__}" --password "$PYPI_API_TOKEN" \
-            sdk/python/dist/bithuman-*-"$PYTAG"-"$PYTAG"-manylinux_2_28_x86_64.whl
+            models/essence-1/sdk/python/dist/bithuman-*-"$PYTAG"-"$PYTAG"-manylinux_2_28_x86_64.whl
 
   # -------------------------------------------------------------------
   # Linux aarch64 manylinux_2_28 wheels (cp310..cp314). ubuntu-24.04-arm
@@ -304,10 +314,10 @@ jobs:
       PUBLISH: ${{ needs.resolve.outputs.publish }}
       PYTAG: ${{ matrix.pytag }}
     steps:
-      - name: Checkout essence-1 engine source
+      - name: Checkout bithuman-models engine source
         uses: actions/checkout@v4
         with:
-          repository: bithuman-product/essence-1
+          repository: bithuman-product/bithuman-models
           ref: ${{ needs.resolve.outputs.essence_ref }}
           token: ${{ secrets.SDK_RO_PAT }}
 
@@ -317,8 +327,8 @@ jobs:
       - name: Build manylinux_2_28_aarch64 image
         uses: docker/build-push-action@v6
         with:
-          context: sdk/python/scripts
-          file: sdk/python/scripts/Dockerfile.manylinux-aarch64
+          context: models/essence-1/sdk/python/scripts
+          file: models/essence-1/sdk/python/scripts/Dockerfile.manylinux-aarch64
           platforms: linux/arm64
           tags: bithuman/manylinux-aarch64:0.1
           load: true
@@ -328,20 +338,20 @@ jobs:
       - name: Build SDK wheel inside container
         run: |
           docker run --rm --platform linux/arm64 \
-            -v "$PWD":/src \
+            -v "$PWD/models/essence-1":/src \
             -e PYTAG="$PYTAG" \
             -e ARCH_INSIDE=aarch64 \
             bithuman/manylinux-aarch64:0.1 \
             bash /src/sdk/python/scripts/build-wheel-in-container.sh
 
       - name: List built wheels
-        run: ls -lh sdk/python/dist/
+        run: ls -lh models/essence-1/sdk/python/dist/
 
       - name: Upload SDK wheel as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: wheels-linux-aarch64-${{ matrix.pytag }}
-          path: sdk/python/dist/bithuman-*-manylinux_2_28_aarch64.whl
+          path: models/essence-1/sdk/python/dist/bithuman-*-manylinux_2_28_aarch64.whl
           if-no-files-found: error
 
       - name: Publish to PyPI
@@ -350,7 +360,7 @@ jobs:
           python3 -m pip install --user --upgrade pip twine
           python3 -m twine upload --skip-existing --verbose \
             --username "${PYPI_USERNAME:-__token__}" --password "$PYPI_API_TOKEN" \
-            sdk/python/dist/bithuman-*-"$PYTAG"-"$PYTAG"-manylinux_2_28_aarch64.whl
+            models/essence-1/sdk/python/dist/bithuman-*-"$PYTAG"-"$PYTAG"-manylinux_2_28_aarch64.whl
 
   # -------------------------------------------------------------------
   # Coverage gate: fail the release if the full {python}×{platform} matrix

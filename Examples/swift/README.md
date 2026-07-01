@@ -57,7 +57,7 @@ M1 and M2 Macs are not supported for Expression (the SDK raises `ExpressionModel
 
 | Resource | URL |
 |----------|-----|
-| SwiftPM package | [github.com/bithuman-product/bithuman-sdk-public](https://github.com/bithuman-product/bithuman-sdk-public) |
+| SwiftPM package | [github.com/bithuman-product/homebrew-bithuman](https://github.com/bithuman-product/homebrew-bithuman) |
 | Overview docs | [docs.bithuman.ai/sdks/swift](https://docs.bithuman.ai/sdks/swift) |
 | Quickstart | [docs.bithuman.ai/sdks/swift](https://docs.bithuman.ai/sdks/swift) |
 | CLI (no-code) | [docs.bithuman.ai/getting-started/cli](https://docs.bithuman.ai/getting-started/cli) |
@@ -68,7 +68,7 @@ Add the package to your Xcode project or `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/bithuman-product/bithuman-sdk-public.git", from: "0.8.1")
+    .package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "0.8.1")
 ]
 ```
 

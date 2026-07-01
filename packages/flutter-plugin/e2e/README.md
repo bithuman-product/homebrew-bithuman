@@ -96,7 +96,7 @@ CoreML compile — the test budgets for it (`E2E_LOAD_BUDGET_S`, default 240).
 
 `libessence2.xcframework` and `libconverse.xcframework` now vendor an
 **ios-arm64-simulator** slice (libessence + onnxruntime already had one) —
-built by `bithuman-sdk` `engine/{elevate,converse}/build-xcframework.sh`
+built from the engine trees now in `bithuman-models` (libessence2 from `models/essence-2`, libconverse via the expression2 vendor bundle)
 (arm64-only: Apple-Silicon hosts; Intel hosts would need x86_64 sim builds
 of every third-party dep, not provided). `run_all.sh` still probes for the
 slice and auto-skips on checkouts bootstrapped against an older SDK drop.
@@ -209,7 +209,7 @@ Reuse the SAME integration tests on hardware for what physically needs it:
 | Android emu | le-bundle dir (`~/bithuman/_elevate_runtime_lab/A63GVG1577.lebundle`) | `E2E_ANDROID_BUNDLE` → adb push `/data/local/tmp/e2e/bundle` |
 
 A SMALLER test bundle (e.g. ~60 drive frames) can be assembled with
-`bithuman-sdk/engine/elevate/runtime-cpu/tools/make_bundle.py` (slice the
+`bithuman-models/models/essence-2/engine/light/cpu` runtime tooling (make_bundle.py — slice the
 per-frame arrays + drive protocol and rewrite `NT` in the manifest) when the
 full bundles get too heavy for repeated emulator pushes — not needed on this
 machine (sims read the host assets in place; nothing is copied).

@@ -15,7 +15,7 @@ import PackageDescription
 // of this repo:
 //
 //     ~/code/bithuman-sdk-internal          (private; collaborator access)
-//     ~/code/bithuman-sdk-public   (this repo)
+//     ~/code/homebrew-bithuman   (this repo)
 //
 // The path dep below resolves engine/voice/ via that sibling layout. External
 // developers without private access should use the `Voice` API through

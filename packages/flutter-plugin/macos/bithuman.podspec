@@ -52,7 +52,7 @@ Pod::Spec.new do |s|
   s.homepage         = 'https://bithuman.ai'
   s.license          = { :type => 'Apache-2.0', :file => '../LICENSE' }
   s.author           = { 'bitHuman' => 'hello@bithuman.ai' }
-  s.source           = { :http => 'https://github.com/bithuman-product/expression-2' }
+  s.source           = { :http => 'https://github.com/bithuman-product/bithuman-models' }
   # Swift + the BHObjCException Obj-C @try/@catch shim (.h/.m). The shim lets
   # Swift recover from AVAudioEngine's uncatchable NSException raises during
   # device hot-swaps; public_header_files + DEFINES_MODULE=>YES make CocoaPods

@@ -18,12 +18,12 @@ this file is the operational overview that lives with the umbrella.
         (fetches CoreML models)                     (fetches + extracts libessence2.a)
                                   ▲                    ▲
                                   │  staged by the N-engine loop (bootstrap.sh)
-                       Layer 2 — bithuman-avatar-plugin  (THIS repo, the umbrella)
+                Layer 2 — homebrew-bithuman packages/flutter-plugin  (THIS package, the umbrella)
         engine-agnostic glue · EngineRegistry · RealtimeAudioIO · Converse*
         the ONE module-map xcframework: libconverse  ·  Engines/<engine>/*.a (static)
                                   ▲
                                   │  pinned git-dep (single dependency)
-                              bithuman-app  (macOS product app)
+                           bithuman-jarvis-app  (macOS product app)
         kEngineRegistry tab-per-engine gallery · OpenAI Realtime / on-device brain
 ```
 
@@ -42,7 +42,7 @@ Silicon) tier of each is what this umbrella + the app consume; the **cloud** tie
 are served by the platform via `?model=` dispatch and are listed here so the map
 is complete. Each engine's own `TIERS.md` is the master deploy map.
 
-### Expression 2 (embody) — `expression-2` repo · 3 tiers
+### Expression 2 (embody) — bithuman-models `models/expression-2/` · 3 tiers
 
 Gold path: `audio → wav2vec2 → student_v4 → TAEHV → 416×720 @ 20 fps`.
 
@@ -50,15 +50,15 @@ Gold path: `audio → wav2vec2 → student_v4 → TAEHV → 416×720 @ 20 fps`.
 |---|---|---|---|---|
 | **GPU** | `engine/gpu/` torch CUDA fp16 (`Expression2GpuEngine`) | `?model=embody-gpu` | lafayette 4090 (primary) · Cerebrium `expression2-gpu-worker` ADA_L40 (overflow) | cloud serving (platform) |
 | **CPU** | `engine/cpu/` C++ `libembody.so` (oneDNN/AMX int8) | `?model=embody-cpu` | Cerebrium Ice Lake | cloud serving (platform) |
-| **ANE** | `engine/ane/` CoreML export → `sdk/` runtime | n/a (no server) | Apple Silicon, **on-device** | **← consumed here** (Layer 1 = `expression-2/sdk`) |
+| **ANE** | `engine/ane/` CoreML export → `sdk/` runtime | n/a (no server) | Apple Silicon, **on-device** | **← consumed here** (Layer 1 = `models/expression-2/sdk`) |
 
-The **ANE** tier is `expression-2/sdk` (Layer 1): `Expression2Engine.swift` loads
+The **ANE** tier is `models/expression-2/sdk` (Layer 1): `Expression2Engine.swift` loads
 the CoreML graphs and streams frames on-device. **SOURCE-ONLY** — pure Swift +
 CoreML, no native static lib. Frozen on-device formats: `.model` (shared engine:
 w2v + taehv + warm) + `.avatar` (per-identity: student + atok + canon + idle.mp4
 + persona), ABI-versioned (`requires_engine_abi: 1`).
 
-### Essence 2 (Essence2 / a2x) — `essence-2` repo · 2-level taxonomy
+### Essence 2 (Essence2 / a2x) — bithuman-models `models/essence-2/` · 2-level taxonomy
 
 `quality` = GPU only (premium DiT); `light` = `gpu` + `ane` + `cpu` (distilled).
 
@@ -68,9 +68,9 @@ w2v + taehv + warm) + `.avatar` (per-identity: student + atok + canon + idle.mp4
 | **light · GPU** | `engine/light/gpu/` le_a2x + m4b director, ORT-CUDA | `?model=elevate-gpu-light` | Cerebrium `essence2-light-gpu-worker` (lafayette pool decommissioned 06-25) | cloud serving (platform) |
 | **light · CPU** | `engine/light/cpu/` C++ `lible_core.so` | `?model=elevate-cpu` | Cerebrium `essence2-light-cpu-worker` | cloud serving (deprioritized) |
 | **light · ANE (cloud)** | `engine/light/ane/ane/moraga_serve` native Mac-ANE | `?model=elevate-ane` | moraga `:8091` | cloud serving (owned HW overflow) |
-| **light · ANE (on-device)** | `engine/light/ane/` Essence2 Swift pkg → CoreML/ANE a2x | n/a (no server) | Apple Silicon, **on-device** | **← consumed here** (Layer 1 = `essence-2/sdk`) |
+| **light · ANE (on-device)** | `engine/light/ane/` Essence2 Swift pkg → CoreML/ANE a2x | n/a (no server) | Apple Silicon, **on-device** | **← consumed here** (Layer 1 = `models/essence-2/sdk`) |
 
-The on-device **light/ANE** tier is `essence-2/sdk` (Layer 1):
+The on-device **light/ANE** tier is `models/essence-2/sdk` (Layer 1):
 `Essence2Engine.swift` over the `be_essence2_*` C ABI, published as
 `libessence2.xcframework` (release `libessence2-v1.0-a2x`). Frozen on-device format:
 `.elevatedir` per-identity bundle (`requires_engine_abi: 2`), BGR-no-swap output,
@@ -83,7 +83,7 @@ embody-only.
 
 ---
 
-## Layer 0 — the shared contract (`bithuman-engine-protocol`)
+## Layer 0 — the shared contract (`BithumanEngineProtocol`, inlined in homebrew-bithuman)
 
 The zero-dependency interface both engines and this umbrella depend on:
 
@@ -120,7 +120,7 @@ Both engine repos expose an **identically-shaped** `sdk/` conforming to Layer 0:
 
 ```
 <engine-repo>/sdk/
-  Package.swift          # SwiftPM target → product the umbrella & CI consume; deps bithuman-engine-protocol
+  Package.swift          # SwiftPM target → product the umbrella & CI consume; deps BithumanEngineProtocol (homebrew-bithuman)
   Classes/<Engine>Engine.swift   # the adapter SOURCE conforming to BithumanEngine
   include/<c_abi>.h      # C ABI header — BINARY engines only (e.g. be_essence2.h)
   Vendor/                # bootstrap-fetched static lib + resources (GITIGNORED)
@@ -129,11 +129,11 @@ Both engine repos expose an **identically-shaped** `sdk/` conforming to Layer 0:
   README.md
 ```
 
-- **`expression-2/sdk`** — `Expression2Engine.swift` (source-only). `manifest.yaml`
+- **`models/expression-2/sdk`** — `Expression2Engine.swift` (source-only). `manifest.yaml`
   declares `native: { hasNativeLib: false }`; its bootstrap fetches the embody
   CoreML model bundle (no static lib), landing under the FROZEN `embody`
   subdirectory.
-- **`essence-2/sdk`** — `Essence2Engine.swift` + `include/be_essence2.h`. Its
+- **`models/essence-2/sdk`** — `Essence2Engine.swift` + `include/be_essence2.h`. Its
   bootstrap fetches the sha-pinned `libessence2-v1.0-a2x` release and extracts the
   per-platform `libessence2.a` + resources. `manifest.yaml` declares
   `native: { gate: ESSENCE2_AVAILABLE, vendoredLib: libessence2.a, umbrellaHeader:
@@ -243,7 +243,7 @@ The per-engine policy (`audioReleaseSeconds` / `maxAudioQueueSamples` /
 
 ---
 
-## The app (`bithuman-app`)
+## The app (`bithuman-jarvis-app`)
 
 A macOS Flutter app whose **single Flutter dependency** is this umbrella, pinned
 to a **fixed commit** (so a push to the umbrella or either engine cannot change
@@ -279,7 +279,7 @@ engine-specific code — only registration data:
      (pick a `driveModel` + the policy fields + `requiresEngineAbi`),
      `native{gate: VIVID_AVAILABLE, vendoredLib: libvivid.a, umbrellaHeader,
      release{…sha…}, resources[…]}`.
-   - `Package.swift` depending on `bithuman-engine-protocol`.
+   - `Package.swift` depending on `BithumanEngineProtocol` (from homebrew-bithuman).
 3. **Register with the umbrella (this repo):** add a `stage_vivid` call to
    `scripts/bootstrap.sh`'s engine loop + one `EngineRegistryDescriptor` (and a
    `make` branch) to `shared/Classes/EngineRegistry.swift`. The podspec
@@ -309,5 +309,5 @@ brain, or the audio IO.
 - **The a2x render path** + the release pin `libessence2-v1.0-a2x` (both sha256s).
 - **INVARIANT #1** — exactly one module-map xcframework per pod (`libconverse`);
   every engine core is a plain static `.a` with its header in the umbrella.
-- **The app pin** — `bithuman-app` git-deps this umbrella at a fixed commit; the
+- **The app pin** — `bithuman-jarvis-app` git-deps this umbrella at a fixed commit; the
   bootstrap chain stages `libconverse` + CoreML models + `libessence2.a`.

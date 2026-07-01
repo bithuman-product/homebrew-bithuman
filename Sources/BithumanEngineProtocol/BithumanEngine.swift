@@ -1,9 +1,11 @@
 // BithumanEngine.swift — the COMMON ENGINE INTERFACE (Layer 0).
 //
-// Canonical home: github.com/bithuman-product/bithuman-engine-protocol
-// (the `bithuman-engine-protocol` SwiftPM package, zero native deps; builds
-// macOS + iOS). Depended on by BOTH engine SDKs (expression-2/sdk +
-// essence-2/sdk) AND the umbrella Flutter plugin pod.
+// Canonical home: github.com/bithuman-product/homebrew-bithuman
+// (Sources/BithumanEngineProtocol — the `BithumanEngineProtocol` SwiftPM
+// product, zero native deps; builds macOS + iOS; inlined from the archived
+// bithuman-engine-protocol repo). Depended on by BOTH engine SDKs
+// (bithuman-models models/expression-2/sdk + models/essence-2/sdk) AND the
+// umbrella Flutter plugin pod.
 //
 // This is the canonicalization of the de-facto common interface that used to
 // live in expression-2/sdk as `AvatarRuntime`: it is renamed `BithumanEngine`
