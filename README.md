@@ -247,11 +247,11 @@ Mac, iPad, and iPhone reference apps.
 - 🌐 [www.bithuman.ai](https://www.bithuman.ai)
 - 📦 [github.com/bithuman-product](https://github.com/bithuman-product)
 - 🍎 Reference apps (Mac / iPad / iPhone): built on the public Swift SDK —
-  see [bithuman-sdk-public Examples](https://github.com/bithuman-product/bithuman-sdk-public/tree/main/Examples)
+  see [homebrew-bithuman Examples](https://github.com/bithuman-product/homebrew-bithuman/tree/main/Examples)
 
 ## Contributing & source
 
-This repo (`bithuman-product/homebrew-bithuman`) hosts the **release artefacts** — the Homebrew formula and notarised binaries. To embed the underlying SDK (`bitHumanKit`) in your own Mac/iPad/iPhone app, head to [`bithuman-sdk-public`](https://github.com/bithuman-product/bithuman-sdk-public), which is the public SwiftPM distribution.
+This repo (`bithuman-product/homebrew-bithuman`) hosts the **release artefacts** — the Homebrew formula and notarised binaries. To embed the underlying SDK (`bitHumanKit`) in your own Mac/iPad/iPhone app, head to [`homebrew-bithuman`](https://github.com/bithuman-product/homebrew-bithuman), which is the public SwiftPM distribution.
 
 ## Docs
 

@@ -21,7 +21,7 @@ monorepo. Clone it as a **sibling** of this repo:
 
 ```
 ~/code/bithuman-sdk-internal          # private (collaborator access)
-~/code/bithuman-sdk-public   # this repo
+~/code/homebrew-bithuman   # this repo
 ```
 
 The `Package.swift` path dep (`../../../../bithuman-sdk-internal/engine/voice`) resolves

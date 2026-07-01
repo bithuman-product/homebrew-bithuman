@@ -142,7 +142,7 @@ Examples/
 
 ## Get help
 
-- [GitHub Issues](https://github.com/bithuman-product/bithuman-sdk-public/issues) — bug reports and feature requests
+- [GitHub Issues](https://github.com/bithuman-product/homebrew-bithuman/issues) — bug reports and feature requests
 - [Discord](https://discord.gg/ES953n7bPA) — community chat
 - [docs.bithuman.ai](https://docs.bithuman.ai) — full documentation
 

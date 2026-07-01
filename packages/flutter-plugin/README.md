@@ -18,13 +18,13 @@ engine. The engines are now symmetric Layer-1 SDKs in their own repos, staged
 here by `scripts/bootstrap.sh`'s N-engine loop:
 
 - **expression2** (embody) — pure-Swift/CoreML, **SOURCE-ONLY** — from
-  [`expression-2/sdk`](https://github.com/bithuman-product/expression-2) (**REQUIRED**, the default engine).
+  [`models/expression-2/sdk`](https://github.com/bithuman-product/bithuman-models/tree/main/models/expression-2/sdk) in the `bithuman-models` engine monorepo (**REQUIRED**, the default engine).
 - **essence2** (Essence2 / a2x) — the `be_essence2_*` C ABI as a plain static
-  `libessence2.a` — from [`essence-2/sdk`](https://github.com/bithuman-product/essence-2) (**OPTIONAL**; a missing SDK / download degrades to embody-only via the `ESSENCE2_AVAILABLE` gate).
+  `libessence2.a` — from [`models/essence-2/sdk`](https://github.com/bithuman-product/bithuman-models/tree/main/models/essence-2/sdk) (**OPTIONAL**; a missing SDK / download degrades to embody-only via the `ESSENCE2_AVAILABLE` gate).
 
 The shared engine interface (`BithumanEngine`) + the Dart registry
 (`EngineDescriptor`/`kEngineRegistry`) come from Layer-0
-[`bithuman-engine-protocol`](https://github.com/bithuman-product/bithuman-engine-protocol)
+[`BithumanEngineProtocol`](https://github.com/bithuman-product/homebrew-bithuman/tree/main/Sources/BithumanEngineProtocol)
 (staged in-module as `shared/Classes/Protocol/BithumanEngine.swift`; the Dart
 half is git-dep'd and re-exported by `lib/engine_registry.dart`).
 
@@ -62,7 +62,7 @@ speaker and the avatar's lip-sync drain from the same chunk in the same instant 
 drift), and a client-side VAD on mic peak fires barge-in within ~50 ms when the user starts
 talking over the agent.
 
-> **The product app lives in its own repo, [`bithuman-app`](https://github.com/bithuman-product/bithuman-app)**
+> **The product app lives in its own repo, [`bithuman-jarvis-app`](https://github.com/bithuman-product/bithuman-jarvis-app)**
 > (macOS; it depends on this plugin via a pinned git dependency). This plugin is its
 > reusable rendering + audio layer; the app drives BOTH engines through the registry +
 > the `BithumanEngine` interface and adds the per-engine downloadable agent gallery.
@@ -73,8 +73,9 @@ talking over the agent.
 dependencies:
   bithuman:
     git:
-      url: https://github.com/bithuman-product/bithuman-avatar-plugin.git
+      url: https://github.com/bithuman-product/homebrew-bithuman.git
       ref: <pin-a-commit>      # the app pins a fixed commit, not main
+      path: packages/flutter-plugin
 ```
 
 For local development against a checkout:
@@ -82,7 +83,7 @@ For local development against a checkout:
 ```yaml
 dependencies:
   bithuman:
-    path: ../bithuman-avatar-plugin
+    path: ../homebrew-bithuman/packages/flutter-plugin
 ```
 
 After `flutter pub get`, run the plugin's bootstrap once (it fetches libconverse
@@ -216,7 +217,7 @@ export DEVELOPMENT_TEAM=XXXXXXXXXX   # your 10-char team id (developer.apple.com
 flutter build ios                    # or: scripts/dev-apple.sh
 ```
 
-`<bithuman-app>/ios/Flutter/Bithuman.xcconfig` feeds `$(DEVELOPMENT_TEAM)` into the build
+`<bithuman-jarvis-app>/ios/Flutter/Bithuman.xcconfig` feeds `$(DEVELOPMENT_TEAM)` into the build
 with automatic signing. macOS local builds sign ad-hoc and need nothing.
 
 ## What `scripts/bootstrap.sh` provisions per platform

@@ -34,7 +34,7 @@ No network calls are made after the initial weights download.
 
 | File | Purpose |
 |------|---------|
-| `Package.swift` | SPM manifest -- depends on `bitHumanKit` from `bithuman-sdk-public` |
+| `Package.swift` | SPM manifest -- depends on `bitHumanKit` from `homebrew-bithuman` |
 | `Sources/main.swift` | SwiftUI `@main` app with `Lifecycle` class and `ContentView` |
 
 ## Docs

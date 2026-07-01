@@ -27,8 +27,8 @@ If you find a bug or have a suggestion for improvement:
 
 ```bash
 # Clone your fork
-git clone https://github.com/bithuman-product/bithuman-sdk-public.git
-cd bithuman-sdk-public/Examples/integrations/nextjs-ui
+git clone https://github.com/bithuman-product/homebrew-bithuman.git
+cd homebrew-bithuman/Examples/integrations/nextjs-ui
 
 # Install dependencies
 npm install

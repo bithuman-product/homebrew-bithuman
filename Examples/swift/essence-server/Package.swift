@@ -19,7 +19,7 @@ let package = Package(
     ],
     dependencies: [
         .package(name: "bithuman",
-                 url: "https://github.com/bithuman-product/bithuman-sdk-public.git",
+                 url: "https://github.com/bithuman-product/homebrew-bithuman.git",
                  from: "0.8.1"),
         // Upstream LiveKit Swift client. (Was a bitHuman fork carrying a no-device
         // app-audio patch; upstream >=2.15.1 handles manual-render mode natively

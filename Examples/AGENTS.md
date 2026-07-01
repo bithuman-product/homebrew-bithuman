@@ -1,6 +1,6 @@
 # bitHuman Examples — repo guide
 
-A collection of runnable examples that wire the [bithuman](https://pypi.org/project/bithuman/) Python SDK, the [bitHumanKit](https://github.com/bithuman-product/bithuman-sdk-public) Swift SDK, the CLI tools, and the REST API into end-to-end stacks.
+A collection of runnable examples that wire the [bithuman](https://pypi.org/project/bithuman/) Python SDK, the [bitHumanKit](https://github.com/bithuman-product/homebrew-bithuman) Swift SDK, the CLI tools, and the REST API into end-to-end stacks.
 
 ## What is bitHuman?
 
@@ -71,7 +71,7 @@ If you are an AI agent wiring bitHuman into a user's codebase:
 
 ### What NOT to do
 
-- Add `bithuman-sdk-public.git` as the SPM dependency (the SDK internals are closed-source; consume the binary).
+- Add `homebrew-bithuman.git` as the SPM dependency (the SDK internals are closed-source; consume the binary).
 - Don't clone Swift SDK source or reference apps — both private.
 - Don't hardcode API keys. Use env vars.
 - Don't pin Swift SDK below 0.8.1.

@@ -164,14 +164,15 @@ run_ios() {
     want ios || return 0
     note "TIER 2 — iOS Simulator (boot smoke + staged elevate engine)"
     # Probe: libessence2/libconverse xcframeworks must carry an ios-simulator
-    # slice (vendored since 2026-06-11 — ios-arm64-simulator, arm64-only; see
-    # bithuman-sdk engine/{elevate,converse}/build-xcframework.sh). On a
+    # slice (vendored since 2026-06-11 — ios-arm64-simulator, arm64-only; built
+    # by the engine trees now in bithuman-models — libessence2 from
+    # models/essence-2, libconverse via the expression2 vendor bundle). On a
     # checkout bootstrapped against an older SDK vendor drop the slice is
     # missing and ANY simulator build of the plugin fails in the Pods rsync
     # phase — auto-skip with the reason instead.
     if ! ls -d "$HERE/../ios/Frameworks/libessence2.xcframework/"ios-arm64*-simulator >/dev/null 2>&1; then
         echo "  SKIP: libessence2.xcframework has no ios-simulator slice"
-        echo "        (re-vendor from bithuman-sdk: engine/elevate/build-xcframework.sh)"
+        echo "        (re-vendor from the bithuman-models release essence2-libessence2-v1.0-a2x)"
         result_ios="skip (no sim slice)"
         return
     fi

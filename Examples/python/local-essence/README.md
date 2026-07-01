@@ -28,8 +28,8 @@ python generation.py --prompt "You are a friendly assistant" --download --output
 
 ```bash
 # 1. Clone and enter the directory
-git clone https://github.com/bithuman-product/bithuman-sdk-public.git
-cd bithuman-sdk-public/Examples/python/local-essence
+git clone https://github.com/bithuman-product/homebrew-bithuman.git
+cd homebrew-bithuman/Examples/python/local-essence
 
 # 2. Place your .imx model(s)
 mkdir -p models

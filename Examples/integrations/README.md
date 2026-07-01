@@ -21,8 +21,8 @@ Each integration has its own prerequisites listed in its README. Common requirem
 ## Getting started
 
 ```bash
-git clone https://github.com/bithuman-product/bithuman-sdk-public.git
-cd bithuman-sdk-public/Examples/integrations/<example>
+git clone https://github.com/bithuman-product/homebrew-bithuman.git
+cd homebrew-bithuman/Examples/integrations/<example>
 ```
 
 Each subdirectory has its own README with setup steps.

@@ -1,0 +1,33 @@
+name: preflight
+# Cheap permanent guard: verifies the SDK_RO_PAT secret can read the PRIVATE
+# engine monorepo bithuman-product/bithuman-models — the exact fetch path
+# release-pypi.yml uses (actions/checkout with token). Run this
+# (workflow_dispatch) before cutting a pypi-v* release or after rotating the
+# PAT; it also runs automatically on PRs that touch this file.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/preflight.yml'
+
+jobs:
+  probe-models-read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bithuman-models with SDK_RO_PAT (release-pypi fetch path)
+        uses: actions/checkout@v4
+        with:
+          repository: bithuman-product/bithuman-models
+          token: ${{ secrets.SDK_RO_PAT }}
+          fetch-depth: 1
+          path: bithuman-models
+
+      - name: Verify monorepo layout + essence1-v* tag namespace
+        working-directory: bithuman-models
+        run: |
+          test -f models/essence-1/sdk/python/pyproject.toml
+          test -d models/essence-1/engine/essence
+          # release-pypi maps pypi-vX.Y.Z -> essence1-vX.Y.Z; prove the tag
+          # namespace is reachable with this token too.
+          git ls-remote --tags origin 'essence1-v*' | grep -q essence1-v
+          echo "OK: SDK_RO_PAT reads bithuman-product/bithuman-models (models/essence-1 + essence1-v* tags present)"

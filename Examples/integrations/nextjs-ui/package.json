@@ -7,10 +7,10 @@
   "homepage": "https://bithuman.ai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bithuman-product/bithuman-sdk-public.git"
+    "url": "https://github.com/bithuman-product/homebrew-bithuman.git"
   },
   "bugs": {
-    "url": "https://github.com/bithuman-product/bithuman-sdk-public/issues"
+    "url": "https://github.com/bithuman-product/homebrew-bithuman/issues"
   },
   "keywords": [
     "bithuman",
