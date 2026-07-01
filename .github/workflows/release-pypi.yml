@@ -226,7 +226,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pytag: [cp310, cp311, cp312, cp313, cp314]
+        pytag: [cp311, cp312, cp313]
     env:
       PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
       PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
@@ -297,7 +297,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pytag: [cp310, cp311, cp312, cp313, cp314]
+        pytag: [cp311, cp312, cp313]
     env:
       PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
       PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
