@@ -57,6 +57,7 @@ Requires **macOS 26 (Tahoe) or later** on **Apple Silicon (M3+)** — the avatar
 
 ```sh
 brew tap bithuman-product/bithuman
+brew trust bithuman-product/bithuman   # Homebrew 6+ gates third-party taps; skip on older brew
 brew install bithuman-cli   # `brew install bithuman` works as a deprecated alias
 bithuman                    # voice (default)
 bithuman video              # voice + animated face
