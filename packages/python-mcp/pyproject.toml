@@ -21,7 +21,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://bithuman.ai"
 Documentation = "https://docs.bithuman.ai"
-Source = "https://github.com/bithuman-product/bithuman-sdk-public/tree/main/mcp"
+Source = "https://github.com/bithuman-product/homebrew-bithuman/tree/main/packages/python-mcp"
 
 [project.scripts]
 bithuman-mcp = "bithuman_mcp.server:main"
