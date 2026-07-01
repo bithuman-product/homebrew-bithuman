@@ -10,6 +10,10 @@
 // from bithuman-sdk-internal and uploaded here per release; consumers depend only
 // on this package URL.
 //
+// NOTE: bithuman-sdk-internal was ARCHIVED on 2026-06-30; its trees are now
+// consolidated into the engine SDK repos (expression-2, essence-1/essence-2).
+// The bithuman-sdk-internal references below are historical provenance only.
+//
 // All third-party deps (MLX, HuggingFace, Tokenizers, …) are
 // statically linked into the framework binaries, so consumers
 // don't need any transitive Swift Package dependencies. Just
