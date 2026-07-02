@@ -14,7 +14,7 @@ One repo, **one tag prefix per artifact**. Cut a tag, CI does the rest. Don't mi
 **Why the prefixes:** SwiftPM resolves packages by **bare semver tags**, so the bare `v*` namespace is the **Swift SDK's alone**. The CLI moved to `cli-v*` to stop colliding (old bare CLI tags ≤ `v2.3.25` are frozen history). `install.sh` and the formula follow `cli-v*` (with a fallback to the old bare tags until the next CLI release).
 
 ## Secrets (this repo, or org-level — all repos inherit)
-`PYPI_API_TOKEN`, `PYPI_USERNAME` (=`__token__`), `SDK_RO_PAT` (read-only `Contents` on the `bithuman-models` engine monorepo — probe it with the `preflight` workflow). No Maven/Android/OSSRH/GPG.
+`PYPI_API_TOKEN`, `PYPI_USERNAME` (=`__token__`), `BITHUMAN_MODELS_SSH_KEY` (private half of the read-only deploy key `homebrew-bithuman-ci-ro` on the `bithuman-models` engine monorepo — probe it with the `preflight` workflow). No Maven/Android/OSSRH/GPG.
 
 ## Cut a release
 - **PyPI wheel** — tag `bithuman-models` `essence1-v<x.y.z>` (must match `models/essence-1/sdk/python/pyproject.toml`), then `git tag pypi-v<x.y.z> && git push --tags` here. Dry run: run `release-pypi.yml` via *workflow_dispatch* with `publish=false` (builds the 9-wheel matrix, publishes nothing).

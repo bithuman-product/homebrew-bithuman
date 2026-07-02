@@ -13,10 +13,12 @@
 # and the pybind11 binding at `models/essence-1/sdk/python/` (note: `sdk/`,
 # singular — not the `sdks/` of the old internal repo). homebrew-bithuman
 # holds NO engine code; every job checks bithuman-models out with the
-# read-only PAT.
+# read-only deploy key.
 #
 # Secrets required on homebrew-bithuman:
-#   SDK_RO_PAT       read-only PAT with `contents:read` on bithuman-product/bithuman-models
+#   BITHUMAN_MODELS_SSH_KEY  private half of the READ-ONLY deploy key
+#                    `homebrew-bithuman-ci-ro` registered on
+#                    bithuman-product/bithuman-models
 #                    (probe it any time with the `preflight` workflow)
 #   PYPI_API_TOKEN   PyPI project/account token (the password)
 #   PYPI_USERNAME    "__token__" (falls back to __token__ if unset)
@@ -129,7 +131,7 @@ jobs:
         with:
           repository: bithuman-product/bithuman-models
           ref: ${{ needs.resolve.outputs.essence_ref }}
-          token: ${{ secrets.SDK_RO_PAT }}
+          ssh-key: ${{ secrets.BITHUMAN_MODELS_SSH_KEY }}
 
       - name: Install Homebrew deps
         # SDK wheel is lib-only (no bundled CLI), so the `livekit` formula the
@@ -247,7 +249,7 @@ jobs:
         with:
           repository: bithuman-product/bithuman-models
           ref: ${{ needs.resolve.outputs.essence_ref }}
-          token: ${{ secrets.SDK_RO_PAT }}
+          ssh-key: ${{ secrets.BITHUMAN_MODELS_SSH_KEY }}
 
       - name: Set up Docker buildx
         uses: docker/setup-buildx-action@v3
@@ -319,7 +321,7 @@ jobs:
         with:
           repository: bithuman-product/bithuman-models
           ref: ${{ needs.resolve.outputs.essence_ref }}
-          token: ${{ secrets.SDK_RO_PAT }}
+          ssh-key: ${{ secrets.BITHUMAN_MODELS_SSH_KEY }}
 
       - name: Set up Docker buildx
         uses: docker/setup-buildx-action@v3
