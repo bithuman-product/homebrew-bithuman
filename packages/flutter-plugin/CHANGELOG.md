@@ -1,5 +1,15 @@
 ## Unreleased
 
+* **Engine registry: the combined `essence-2` creation name routes to the
+  essence2 engine.** The platform (2026-07-02 model-release UX) stores
+  `agents.model='essence-2'` verbatim and folds it onto the light family —
+  whose on-device leg is essence2. Added as a frozen alias in the Swift
+  `EngineRegistry` + Dart `kEssence2` (lockstep with bithuman-models
+  `models/essence-2/sdk` `Essence2Engine.id`/manifest), so a catalog/manifest
+  entry carrying the combined name no longer falls through the unknown-slug
+  fallback onto the default expression2 engine. `essence-2-quality` stays
+  cloud-only.
+
 * **Account hub + `engine/sdk/app` reorg + dead-code cleanup.** All chrome
   consolidated behind one top-left Clerk avatar → a single in-app **hub**:
   profile · credits (on-device **1 cr/min** vs OpenAI **10 cr/min**, 99 free

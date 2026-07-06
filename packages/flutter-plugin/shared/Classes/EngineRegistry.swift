@@ -41,8 +41,13 @@ enum EngineRegistry {
       id: EngineId(canonical: "expression2", aliases: ["embody", "expression-2"]),
       capabilities: .expression2),
     EngineRegistryDescriptor(
+      // essence2 aliases = frozen `elevate` + the cloud LIGHT-tier names + the
+      // COMBINED creation name `essence-2` (2026-07-02: agents.model stores it
+      // verbatim; the platform folds it onto the light family, whose on-device
+      // leg is this engine). Lockstep with Essence2Engine.id + the Dart
+      // kEssence2. essence-2-quality stays cloud-only (deliberately absent).
       id: EngineId(canonical: "essence2",
-                   aliases: ["elevate", "essence-2-light", "essence-2-mobile"]),
+                   aliases: ["elevate", "essence-2", "essence-2-light", "essence-2-mobile"]),
       capabilities: .essence2),
   ]
 
