@@ -69,13 +69,17 @@ const EngineDescriptor kExpression2 = EngineDescriptor(
 
 /// Essence 2 (elevate) — the on-device director-avatar (a2x) engine. This is the
 /// on-device leg of the cloud **light** tier, so the cloud names `essence-2-light`
-/// and `essence-2-mobile` (the App-Store-facing on-device name) both resolve here.
-/// Aliases: `elevate` (legacy on-device slug, FROZEN) + the two cloud light names.
+/// and `essence-2-mobile` (the App-Store-facing on-device name) both resolve here,
+/// as does the COMBINED creation name `essence-2` (model-release UX 2026-07-02:
+/// the platform stores `agents.model='essence-2'` verbatim and folds it onto the
+/// light family everywhere — the family this engine serves on-device).
+/// Aliases: `elevate` (legacy on-device slug, FROZEN) + the cloud light names +
+/// the combined name.
 /// NOTE: the cloud `essence-2-quality` tier is GPU-only and has NO on-device
 /// engine — it is deliberately absent here (see [kCloudOnlyEngineSlugs]).
 const EngineDescriptor kEssence2 = EngineDescriptor(
   canonical: 'essence2',
-  aliases: <String>['elevate', 'essence-2-light', 'essence-2-mobile'],
+  aliases: <String>['elevate', 'essence-2', 'essence-2-light', 'essence-2-mobile'],
   label: 'Essence 2',
   loadsFromLocalDir: true,
   engineAbi: 2,

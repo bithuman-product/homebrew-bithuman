@@ -20,9 +20,10 @@ final class BithumanEngineProtocolTests: XCTestCase {
         XCTAssertFalse(expr.matches("elevate"))
 
         let ess = EngineId(canonical: "essence2",
-                           aliases: ["elevate", "essence-2-light", "essence-2-mobile"])
+                           aliases: ["elevate", "essence-2", "essence-2-light", "essence-2-mobile"])
         XCTAssertTrue(ess.matches("essence2"))        // canonical
         XCTAssertTrue(ess.matches("elevate"))         // frozen on-device alias
+        XCTAssertTrue(ess.matches("essence-2"))       // COMBINED creation name (2026-07-02)
         XCTAssertTrue(ess.matches("essence-2-light")) // cloud light tier (on-device leg)
         XCTAssertTrue(ess.matches("essence-2-mobile"))// cloud App-Store name
         // The GPU-only quality tier is NOT served on-device by essence2.
