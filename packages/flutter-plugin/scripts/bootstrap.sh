@@ -113,7 +113,23 @@ locate_engine_sdk() {
             git clone --depth 1 -b "$ref" "https://github.com/$MODELS_REPO.git" "$cache" >/dev/null 2>&1 || true
         fi
     else
-        ( cd "$cache" && git fetch -q --depth 1 origin "$ref" && git checkout -q FETCH_HEAD ) >/dev/null 2>&1 || true
+        # Refresh the cache to the CURRENT tip of $ref. This must FAIL LOUD: the
+        # cache holds the engine adapter SOURCE compiled into the pod, and a
+        # silently-stale cache pins it forever while every log line reads
+        # success (found 2026-07-06: an echelon cache frozen at a pre-dec_P2
+        # Expression2Engine because the plain-git refresh of the PRIVATE repo
+        # had no credentials and the old `|| true` swallowed the failure).
+        # gh's credential helper carries the auth (gh auth login / GH_TOKEN);
+        # plain git is the fallback for public/credential-cached setups.
+        if ! ( cd "$cache" && { \
+                 if command -v gh >/dev/null 2>&1; then \
+                     git -c credential.helper='!gh auth git-credential' fetch -q --depth 1 origin "$ref"; \
+                 else \
+                     git fetch -q --depth 1 origin "$ref"; \
+                 fi; } && git checkout -q FETCH_HEAD ) >/dev/null 2>&1; then
+            die "engine SDK cache refresh FAILED ($MODELS_REPO ref $ref at $cache) — refusing to stage a possibly-stale engine adapter.
+  Fix: gh auth login (or export GH_TOKEN), or rm -rf $cache to re-clone, or set BITHUMAN_${slug}_DIR / place a sibling bithuman-models checkout."
+        fi
     fi
     [ -f "$cache/models/$model/sdk/scripts/bootstrap.sh" ] && { ENGINE_SDK="$cache/models/$model/sdk"; return 0; }
     return 1
