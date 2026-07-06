@@ -1,5 +1,15 @@
 ## Unreleased
 
+* **bootstrap: a stale engine-SDK cache now FAILS LOUD instead of silently
+  pinning old engine source.** The shared `~/.cache/bithuman/bithuman-models`
+  refresh used plain `git fetch … || true`; on machines whose cache was
+  created via gh's auth, the un-credentialed refresh of the private repo
+  failed silently and the pod kept compiling a frozen engine adapter (found
+  as a pre-`dec_P2` `Expression2Engine` staged from a 07-01 cache while every
+  log line read success). The refresh now goes through gh's credential helper
+  (`gh auth login` / `GH_TOKEN`) and a refresh failure aborts the bootstrap
+  with the exact remedies.
+
 * **Engine registry: the combined `essence-2` creation name routes to the
   essence2 engine.** The platform (2026-07-02 model-release UX) stores
   `agents.model='essence-2'` verbatim and folds it onto the light family —
