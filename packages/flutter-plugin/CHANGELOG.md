@@ -1,5 +1,18 @@
 ## Unreleased
 
+* **Essence 2 (on-device Elevate) `.elevatedir` download flow.** Added
+  `fetchEssence2Catalog` + `downloadEssence2Bundle` (+ `Essence2CatalogEntry`)
+  — the Elevate twin of the Essence `.imx` model_url flow. The client fetches
+  the `elevate-catalog-v1` index (https + optional host allow-list), downloads a
+  content-addressed `.tar.gz` bundle, verifies its canonical SHA-256 (via the
+  system `shasum`, so no new package dep — the extraction is already macOS-only
+  via `tar`), and extracts it into a ready-to-load `.elevatedir` (meta.json
+  marker checked; staging-dir + atomic rename; cache-aware). Before this the app
+  had NO essence-2 download path, so on-device Essence 2 could only run from a
+  bundle baked on a dev machine — a user could not download the Essence-2 demo
+  agent to run it offline. Producer:
+  `models/essence-2/engine/light/*/ml/pipeline/publish_elevatedir.py`.
+
 * **bootstrap: a stale engine-SDK cache now FAILS LOUD instead of silently
   pinning old engine source.** The shared `~/.cache/bithuman/bithuman-models`
   refresh used plain `git fetch … || true`; on machines whose cache was

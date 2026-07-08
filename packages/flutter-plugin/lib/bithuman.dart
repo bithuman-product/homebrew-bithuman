@@ -904,6 +904,225 @@ Future<String> downloadAgentImx(
   }
 }
 
+// ── Essence 2 (on-device Elevate) `.elevatedir` delivery ─────────────────────
+// The Essence-2 on-device engine (`engine: 'essence2'` / the frozen `elevate`
+// alias) loads from a local `.elevatedir` directory (meta.json + CoreML/ONNX).
+// This is the Elevate twin of the Essence `.imx` model_url flow (fetchPublicAgents
+// -> downloadAgentImx): a content-addressed catalog maps agent_id -> a gzip
+// tarball of the bundle's contents + its sha256, and the client fetches the
+// index, downloads a bundle, verifies it, and extracts it into a ready-to-load
+// `.elevatedir`. Producer: essence-2 engine/light/*/ml/pipeline/publish_elevatedir.py
+// (catalog "elevate-catalog-v1"; bundle "elevatedir-v*"). Before this the app had
+// NO essence-2 download path — on-device Essence 2 could only run from a bundle
+// baked on a dev machine (main.dart `_essence2GalleryEntries` TODO), so users
+// could not download the Essence-2 demo agent to run it offline.
+
+/// One entry from the Essence-2 (Elevate) delivery catalog: an agent id, the
+/// https URL of its content-addressed `.tar.gz` bundle, the bundle's canonical
+/// SHA-256 (verified on install so a tampered/substituted bundle is rejected
+/// before it reaches the native loader), its byte size (for a progress bar), and
+/// the bundle `format_version` (`elevatedir-v*`).
+class Essence2CatalogEntry {
+  const Essence2CatalogEntry({
+    required this.agentId,
+    required this.url,
+    required this.sha256,
+    required this.size,
+    required this.formatVersion,
+  });
+
+  final String agentId;
+  final String url;
+  final String sha256; // lowercase-hex SHA-256 of the canonical tarball
+  final int size; // bytes (0 when the catalog omits it)
+  final String formatVersion; // e.g. 'elevatedir-v3'
+
+  factory Essence2CatalogEntry.fromJson(String id, Map<String, dynamic> j) =>
+      Essence2CatalogEntry(
+        agentId: (j['agent_id'] as String?)?.isNotEmpty == true
+            ? j['agent_id'] as String
+            : id,
+        url: (j['url'] ?? '') as String,
+        sha256: ((j['sha256'] ?? '') as String).toLowerCase(),
+        size: (j['size'] as num?)?.toInt() ?? 0,
+        formatVersion: (j['format_version'] ?? '') as String,
+      );
+}
+
+/// Fetch the Essence-2 (Elevate) `.elevatedir` delivery catalog and return its
+/// entries. [catalogUrl] must be https; when [allowedHosts] is non-empty the
+/// catalog host must be on it (same poisoned-catalog rationale as
+/// [downloadAgentImx]). Entries with an empty `url` are dropped (mirrors
+/// [fetchPublicAgents] dropping empty model_url), so a broken row never reaches
+/// the gallery. Throws on a non-https URL, a disallowed host, a non-200, or an
+/// unexpected catalog `format`.
+Future<List<Essence2CatalogEntry>> fetchEssence2Catalog(
+  String catalogUrl, {
+  Set<String>? allowedHosts,
+}) async {
+  final uri = Uri.parse(catalogUrl);
+  if (uri.scheme != 'https') {
+    throw BithumanAvatarException('refusing non-https catalog_url: $catalogUrl');
+  }
+  if (allowedHosts != null &&
+      allowedHosts.isNotEmpty &&
+      !allowedHosts.contains(uri.host)) {
+    throw BithumanAvatarException('catalog_url host not allowed: ${uri.host}');
+  }
+  final client = HttpClient();
+  try {
+    final req = await client.getUrl(uri);
+    final res = await req.close();
+    if (res.statusCode != 200) {
+      throw BithumanAvatarException(
+          'elevate catalog HTTP ${res.statusCode} from $catalogUrl');
+    }
+    final body = await res.transform(utf8.decoder).join();
+    final j = jsonDecode(body) as Map<String, dynamic>;
+    final fmt = j['format'];
+    if (fmt != 'elevate-catalog-v1') {
+      throw BithumanAvatarException('unexpected elevate catalog format: $fmt');
+    }
+    final agents = (j['agents'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    final out = <Essence2CatalogEntry>[];
+    agents.forEach((id, v) {
+      if (v is Map<String, dynamic>) {
+        final e = Essence2CatalogEntry.fromJson(id, v);
+        if (e.url.isNotEmpty) out.add(e);
+      }
+    });
+    return out;
+  } finally {
+    client.close();
+  }
+}
+
+/// Download + install an Essence-2 (Elevate) `.elevatedir` bundle into
+/// `<cacheDir>/<agentId>.elevatedir/` and return that directory — ready to pass
+/// to `BithumanAvatar.load(dir, engine: 'essence2')`.
+///
+/// Mirrors [downloadExpression2Agent]'s hardening: cache-aware (re-returns an
+/// already-installed bundle, keyed on the extracted `meta.json` marker),
+/// https-only, optional host allow-list, streams to a `.partial` then verifies
+/// the canonical SHA-256 (a length match alone can't catch substitution — the
+/// bytes feed the native loader) BEFORE extracting with the system `tar` into a
+/// staging dir that is atomically renamed into place. macOS delivery path
+/// (`Process.run('tar')`), same as the expression-2 `.tar.gz` flow.
+/// `onProgress(received,total)` ticks during download.
+Future<String> downloadEssence2Bundle(
+  Essence2CatalogEntry entry,
+  String cacheDir, {
+  Set<String>? allowedHosts,
+  void Function(int received, int? total)? onProgress,
+}) async {
+  // The agent id comes from a public / MITM-able catalog, so never use it raw
+  // in a filesystem path — a crafted '../' would escape cacheDir. Real ids are
+  // alphanumeric, so this is a no-op for legit data (cache stays warm).
+  final safe = entry.agentId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+  final destDir = Directory('$cacheDir/$safe.elevatedir');
+  final marker = File('${destDir.path}/meta.json');
+  if (await marker.exists()) return destDir.path; // already installed
+
+  final uri = Uri.parse(entry.url);
+  if (uri.scheme != 'https') {
+    throw BithumanAvatarException('refusing non-https bundle url: ${entry.url}');
+  }
+  if (allowedHosts != null &&
+      allowedHosts.isNotEmpty &&
+      !allowedHosts.contains(uri.host)) {
+    throw BithumanAvatarException('elevate bundle host not allowed: ${uri.host}');
+  }
+  final tmpDir = Directory(cacheDir);
+  if (!await tmpDir.exists()) await tmpDir.create(recursive: true);
+  final tgz = File('$cacheDir/$safe.elevatedir.tar.gz.partial');
+
+  final client = HttpClient();
+  try {
+    final req = await client.getUrl(uri);
+    // Don't follow redirects: a legit content-addressed bundle is a direct 200
+    // from the allowlisted host, so a 30x can only bounce the download
+    // off-allowlist (the scheme/host checks validate the initial URL only).
+    req.followRedirects = false;
+    final res = await req.close();
+    if (res.statusCode != 200) {
+      throw BithumanAvatarException(
+          'elevate bundle HTTP ${res.statusCode} from ${entry.url}');
+    }
+    final total =
+        entry.size > 0 ? entry.size : (res.contentLength <= 0 ? null : res.contentLength);
+    var received = 0;
+    final sink = tgz.openWrite();
+    try {
+      await for (final chunk in res) {
+        sink.add(chunk);
+        received += chunk.length;
+        onProgress?.call(received, total);
+      }
+      await sink.flush();
+      await sink.close();
+    } catch (e) {
+      try { await sink.close(); } catch (_) {}
+      try { await tgz.delete(); } catch (_) {}
+      rethrow;
+    }
+  } finally {
+    client.close(force: true);
+  }
+
+  // Integrity: verify the canonical SHA-256 before trusting a byte of the
+  // tarball (a length match can't catch a tampered/substituted bundle). Computed
+  // with the system `shasum` — same macOS-only Process dependency as the `tar`
+  // extraction below, so no new package dependency is pulled into the plugin.
+  if (entry.sha256.isNotEmpty) {
+    final got = await _sha256OfFile(tgz.path);
+    if (got != entry.sha256) {
+      try { await tgz.delete(); } catch (_) {}
+      throw BithumanAvatarException(
+          'elevate bundle sha256 mismatch (expected ${entry.sha256}, got $got)');
+    }
+  }
+
+  // Extract into a fresh staging dir, then atomically rename into place. The
+  // tarball holds the bundle's contents at the archive root (see
+  // publish_elevatedir.py), so it extracts directly into the `.elevatedir`.
+  final stageDir = Directory('${destDir.path}.tmp');
+  if (await stageDir.exists()) await stageDir.delete(recursive: true);
+  await stageDir.create(recursive: true);
+  final r = await Process.run('tar', ['-xzf', tgz.path, '-C', stageDir.path]);
+  if (r.exitCode != 0) {
+    try { await stageDir.delete(recursive: true); } catch (_) {}
+    try { await tgz.delete(); } catch (_) {}
+    throw BithumanAvatarException('elevate bundle extract failed: ${r.stderr}');
+  }
+  if (!await File('${stageDir.path}/meta.json').exists()) {
+    try { await stageDir.delete(recursive: true); } catch (_) {}
+    try { await tgz.delete(); } catch (_) {}
+    throw BithumanAvatarException(
+        'elevate bundle missing meta.json after extract (not an .elevatedir?)');
+  }
+  if (await destDir.exists()) await destDir.delete(recursive: true);
+  await stageDir.rename(destDir.path);
+  try { await tgz.delete(); } catch (_) {}
+  return destDir.path;
+}
+
+/// Lowercase-hex SHA-256 of [path] via the system `shasum` (macOS/BSD). Kept
+/// dependency-free (the download path is already macOS-only via `tar`); throws
+/// if `shasum` is unavailable or its output can't be parsed.
+Future<String> _sha256OfFile(String path) async {
+  final r = await Process.run('shasum', ['-a', '256', path]);
+  if (r.exitCode != 0) {
+    throw BithumanAvatarException('shasum failed: ${r.stderr}');
+  }
+  final out = (r.stdout as String).trim();
+  final hex = out.split(RegExp(r'\s+')).first.toLowerCase();
+  if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(hex)) {
+    throw BithumanAvatarException('shasum produced unparseable digest: $out');
+  }
+  return hex;
+}
+
 /// Plugin version stamp the native side reports for diagnostics.
 Future<String?> nativeEngineVersion() async {
   return _channel.invokeMethod<String>('engineVersion');
