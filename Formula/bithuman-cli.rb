@@ -42,11 +42,11 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.3.26 (first cli-v* release; standalone bithuman-cli vs reconciled bithuman-models essence1-v2.3.11 / libessence 2.3.8). Apple Silicon (arm64).
-  # (Engine core stays libessence 2.3.6 / ABI v7 — a separate axis.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.3.26/bithuman-aarch64-apple-darwin.tar.gz"
-  version "2.3.26"
-  sha256 "46c391d822faa00911de564883b5c1b64fba05c74a5a393f2cba40b5bd3bfc0a"
+  # Current published release: cli-v2.3.27 (standalone bithuman-cli vs reconciled bithuman-models essence1-v2.3.11 / libessence 2.3.8). Apple Silicon (arm64).
+  # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis.)
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.3.27/bithuman-aarch64-apple-darwin.tar.gz"
+  version "2.3.27"
+  sha256 "57c17ebb1aa6b2fecd8014fc3195d84723cc069115acba90c10f993fe4bc10a5"
   license "Apache-2.0"
 
   depends_on arch: :arm64
