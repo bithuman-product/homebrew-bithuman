@@ -166,7 +166,14 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
         return
       }
       // `apiSecret` is accepted for API compatibility but unused: the embody
-      // engine is pure on-device (no metered auth / heartbeat).
+      // engine is pure on-device (no metered auth / heartbeat). When the
+      // metered enforcement gate lands (offline-token program Components
+      // 1/2, owner-gated), wire auth through the Component-4 surface that
+      // already ships DARK in this pod: DeviceIdentity.fingerprint32()
+      // (hardware-bound billing fingerprint — never nil/random) +
+      // DeviceIdentity.registerRequestSigner() (Secure Enclave request
+      // signing) + SealedCounterStore.registerWithEngine() (kiosk SKU only;
+      // mobile-offline is NOT-OFFERED).
       guard let textureRegistry = registrarTextures else {
         result(FlutterError(code: "NO_REGISTRY",
                             message: "no FlutterTextureRegistry available",
