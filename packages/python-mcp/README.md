@@ -37,7 +37,7 @@ The server exposes **22 tools**, each mapping to one documented REST endpoint
 | `get_usage` | Usage/metering history (paginated, date-filterable). |
 | `list_voices` | Built-in (M1–M5 / F1–F5) and custom TTS voices. |
 | `text_to_speech` | Synthesize speech → a WAV file. |
-| `generate_agent` | Create an avatar agent from a prompt / image / video / audio. |
+| `generate_agent` | Create an avatar agent from a prompt / image / audio (image-only appearance; a 10-second idle video is generated internally). |
 | `get_agent_status` | Poll agent generation progress. |
 | `get_agent` | Fetch an existing agent's details. |
 | `list_agents` | List your agents, newest first (paginated). |

@@ -51,16 +51,17 @@ def get_headers():
 def generate_agent(
     prompt: str = "You are a friendly AI assistant.",
     image: str | None = None,
-    video: str | None = None,
     audio: str | None = None,
     aspect_ratio: str = "16:9",
 ):
-    """POST /v1/agent/generate -- start agent generation."""
+    """POST /v1/agent/generate -- start agent generation.
+
+    Agent creation is image-only: bitHuman generates a 10-second idle/driver
+    video internally from your portrait image so it loops seamlessly.
+    """
     body = {"prompt": prompt, "aspect_ratio": aspect_ratio}
     if image:
         body["image"] = image
-    if video:
-        body["video"] = video
     if audio:
         body["audio"] = audio
 
@@ -68,8 +69,6 @@ def generate_agent(
     print(f"  Prompt: {prompt[:80]}{'...' if len(prompt) > 80 else ''}")
     if image:
         print(f"  Image:  {image}")
-    if video:
-        print(f"  Video:  {video}")
     if audio:
         print(f"  Audio:  {audio}")
     print()
@@ -240,7 +239,7 @@ if __name__ == "__main__":
     parser.add_argument("--prompt", default="You are a friendly AI assistant.",
                         help="system prompt / personality for the agent")
     parser.add_argument("--image", help="face image URL to use for the agent")
-    parser.add_argument("--video", help="video URL for agent appearance")
+    parser.add_argument("--video", help=argparse.SUPPRESS)  # DEPRECATED: creation is image-only
     parser.add_argument("--audio", help="audio URL for agent voice")
     parser.add_argument("--aspect-ratio", default="16:9", choices=["16:9", "9:16", "1:1"],
                         help="video aspect ratio (default: 16:9)")
@@ -253,6 +252,15 @@ if __name__ == "__main__":
     parser.add_argument("--agent-id",
                         help="skip generation, download model for an existing agent")
     args = parser.parse_args()
+
+    if args.video:
+        # DEPRECATED: agent creation is image-only (VIDEO_INPUT_NOT_SUPPORTED).
+        print("Error: `--video` is not supported. Agent creation is image-only.")
+        print("  Provide a portrait --image; bitHuman generates a 10-second")
+        print("  idle/driver video internally so it loops seamlessly")
+        print("  (first frame == last frame). Applies to all models")
+        print("  (essence-1, expression-1, essence-2, essence-2-max, expression-2).")
+        sys.exit(2)
 
     if args.agent_id and args.download:
         # Download model for an existing agent
@@ -285,7 +293,6 @@ if __name__ == "__main__":
         agent_id = generate_agent(
             prompt=args.prompt,
             image=args.image,
-            video=args.video,
             audio=args.audio,
             aspect_ratio=args.aspect_ratio,
         )
