@@ -55,11 +55,13 @@ public struct EngineId: Hashable {
 }
 
 /// Cloud-API tier names the app RECOGNISES but cannot serve on-device (no engine
-/// conforms to them). Today: the GPU-only `essence-2-quality` tier. The registry
-/// returns no descriptor for these, so a caller can tell "known cloud-only tier"
-/// apart from "unknown slug" without pretending the on-device essence2 (light /
-/// a2x) engine can serve them. Mirrors the Dart `kCloudOnlyEngineSlugs`.
-public let cloudOnlyEngineSlugs: Set<String> = ["essence-2-quality"]
+/// conforms to them). Today: the GPU-only premium tier, under BOTH its names —
+/// `essence-2-max` (the canonical premium name) and `essence-2-quality` (its
+/// accepted legacy alias). The registry returns no descriptor for these, so a
+/// caller can tell "known cloud-only tier" apart from "unknown slug" without
+/// pretending the on-device essence2 (light / a2x) engine can serve them.
+/// Mirrors the Dart `kCloudOnlyEngineSlugs`.
+public let cloudOnlyEngineSlugs: Set<String> = ["essence-2-quality", "essence-2-max"]
 
 /// True for a slug the cloud API serves but the device cannot (no on-device
 /// engine). Such a slug must NOT be loaded locally — surface it as cloud-only.
