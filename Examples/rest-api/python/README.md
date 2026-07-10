@@ -54,8 +54,9 @@ python generation.py --prompt "You are a fitness coach" --download
 # Customize appearance with a face image
 python generation.py --prompt "A news anchor" --image https://example.com/face.jpg --download
 
-# Provide a video for appearance and audio for voice
-python generation.py --prompt "A tutor" --video https://example.com/clip.mp4 --audio https://example.com/voice.wav --download
+# Provide audio for voice cloning (appearance is image-only; bitHuman
+# generates a 10-second idle video internally from your image)
+python generation.py --prompt "A tutor" --image https://example.com/face.jpg --audio https://example.com/voice.wav --download
 
 # Save .imx to a specific path
 python generation.py --prompt "A tutor" --download --output ../../python/local-essence/models/avatar.imx

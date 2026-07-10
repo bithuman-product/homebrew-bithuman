@@ -197,24 +197,46 @@ async def text_to_speech(
 async def generate_agent(
     prompt: str | None = None,
     image: str | None = None,
-    video: str | None = None,
     audio: str | None = None,
     aspect_ratio: str = "16:9",
+    video: str | None = None,
 ) -> dict:
     """Create a new avatar agent. Async (2–5 min) and costs ~250 credits.
 
+    Agent creation is image-only: provide a portrait `image` for appearance —
+    bitHuman generates a 10-second idle/driver video internally so it loops
+    seamlessly (first frame == last frame). Video input is not accepted.
+
     Args:
         prompt: Personality / system prompt. A random default is used if omitted.
-        image: URL to a face image for appearance.
-        video: URL to a video for appearance and mannerisms.
+        image: URL to a portrait image for appearance.
         audio: URL to audio for voice cloning.
         aspect_ratio: "16:9", "9:16", or "1:1".
+        video: DEPRECATED — rejected. Agent creation is image-only; pass `image`
+            instead (the idle/driver video is generated internally).
 
     Returns an agent_id and status "processing". Poll get_agent_status(agent_id)
     until status is "ready", then the agent is usable for embedding / live calls.
     """
+    if video:
+        # Deprecated arg: rejected client-side with the platform's contract
+        # message (the server 400s it too once AGENT_CREATION_IMAGE_ONLY is live).
+        return {
+            "success": False,
+            "error": {
+                "code": "VIDEO_INPUT_NOT_SUPPORTED",
+                "httpStatus": 400,
+                "message": (
+                    "Agent creation is image-only. Provide a portrait `image`; "
+                    "bitHuman generates a 10-second idle/driver video internally "
+                    "so it loops seamlessly (first frame == last frame). Video "
+                    "input is not accepted for any model (essence-1, expression-1, "
+                    "essence-2, essence-2-max, expression-2)."
+                ),
+            },
+        }
     payload: dict[str, Any] = {"aspect_ratio": aspect_ratio}
-    for k, v in (("prompt", prompt), ("image", image), ("video", video), ("audio", audio)):
+    for k, v in (("prompt", prompt), ("image", image), ("audio", audio)):
         if v:
             payload[k] = v
     async with _client() as c:
@@ -355,7 +377,8 @@ async def upload_file(
 
     Provide exactly one of file_url (download by URL) or file_path (a local file,
     uploaded as base64). The returned data.file_url can be passed to
-    generate_agent's image/video/audio arguments.
+    generate_agent's image/audio arguments. Video uploads are content/knowledge
+    assets only — agent creation is image-only and does not accept video input.
 
     Args:
         file_url: Public URL to fetch the file from.

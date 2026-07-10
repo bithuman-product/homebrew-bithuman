@@ -124,7 +124,7 @@ All requests require `api-secret: YOUR_SECRET` header.
 | Method | Endpoint | Purpose |
 |---|---|---|
 | POST | `/v1/validate` | Verify API secret is valid |
-| POST | `/v1/agent/generate` | Create agent from prompt + image/video/audio |
+| POST | `/v1/agent/generate` | Create agent from prompt + image/audio (image-only appearance; a 10-second idle/driver video is generated internally) |
 | GET | `/v1/agent/status/{agent_id}` | Poll generation progress (processing -> ready/failed) |
 | GET | `/v1/agent/{code}` | Get agent details |
 | POST | `/v1/agent/{code}` | Update agent system prompt |

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Upload a file (image, video, or audio) to the bitHuman platform via URL.
-# Returns a hosted URL you can pass to agent generation endpoints.
+# Returns a hosted URL you can pass to agent generation endpoints
+# (image/audio only — agent creation is image-only; video uploads are
+# content/knowledge assets).
 # Usage: ./upload-file.sh [FILE_URL]
 set -euo pipefail
 
