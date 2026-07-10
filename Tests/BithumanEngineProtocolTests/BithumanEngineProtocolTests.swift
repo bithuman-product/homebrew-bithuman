@@ -26,17 +26,25 @@ final class BithumanEngineProtocolTests: XCTestCase {
         XCTAssertTrue(ess.matches("essence-2"))       // COMBINED creation name (2026-07-02)
         XCTAssertTrue(ess.matches("essence-2-light")) // cloud light tier (on-device leg)
         XCTAssertTrue(ess.matches("essence-2-mobile"))// cloud App-Store name
-        // The GPU-only quality tier is NOT served on-device by essence2.
+        // The GPU-only premium tier is NOT served on-device by essence2 —
+        // under its legacy `essence-2-quality` name OR its canonical
+        // `essence-2-max` name (2026-07-10 rename; both accepted).
         XCTAssertFalse(ess.matches("essence-2-quality"))
+        XCTAssertFalse(ess.matches("essence-2-max"))
     }
 
-    // `essence-2-quality` is a recognised cloud tier with NO on-device engine.
+    // The GPU-only premium tier is a recognised cloud tier with NO on-device
+    // engine — under BOTH its canonical `essence-2-max` name and its accepted
+    // legacy `essence-2-quality` alias.
     func testCloudOnlyEngineSlugs() {
         XCTAssertTrue(isCloudOnlyEngineSlug("essence-2-quality"))
+        XCTAssertTrue(isCloudOnlyEngineSlug("essence-2-max"))
         XCTAssertFalse(isCloudOnlyEngineSlug("essence-2-light"))
+        XCTAssertFalse(isCloudOnlyEngineSlug("essence-2"))
         XCTAssertFalse(isCloudOnlyEngineSlug("expression-2"))
         XCTAssertFalse(isCloudOnlyEngineSlug("essence2"))
         XCTAssertTrue(cloudOnlyEngineSlugs.contains("essence-2-quality"))
+        XCTAssertTrue(cloudOnlyEngineSlugs.contains("essence-2-max"))
     }
 
     func testCapabilityPresets() {

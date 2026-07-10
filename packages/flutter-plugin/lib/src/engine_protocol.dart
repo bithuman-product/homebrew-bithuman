@@ -93,10 +93,15 @@ const List<EngineDescriptor> kEngineRegistry = <EngineDescriptor>[
 
 /// Cloud-API tier names that the app RECOGNISES but that have NO on-device
 /// engine (so [engineDescriptorFor] returns null for them by design). Today
-/// this is just the GPU-only `essence-2-quality` tier. Keeping it here lets the
-/// app distinguish "known cloud-only tier" from "unknown slug / typo" without
-/// pretending the on-device essence2 (light/a2x) engine can serve it.
-const Set<String> kCloudOnlyEngineSlugs = <String>{'essence-2-quality'};
+/// this is just the GPU-only premium tier, under BOTH its names:
+/// `essence-2-max` (the canonical premium name) and `essence-2-quality` (its
+/// accepted legacy alias). Keeping them here lets the app distinguish "known
+/// cloud-only tier" from "unknown slug / typo" without pretending the
+/// on-device essence2 (light/a2x) engine can serve it.
+const Set<String> kCloudOnlyEngineSlugs = <String>{
+  'essence-2-quality',
+  'essence-2-max',
+};
 
 /// True for a slug the cloud API serves but the device cannot (no on-device
 /// engine). Such a slug must NOT be loaded locally — surface it as cloud-only.
