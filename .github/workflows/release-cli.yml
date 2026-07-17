@@ -1,0 +1,157 @@
+# Build + publish the self-contained macOS `bithuman` CLI tarball for a
+# cli-vX.Y.Z release, with the expression-2 render engine VENDORED so
+# `bithuman run` renders Wise Pup out of the box with ZERO engine fetch.
+#
+# This is the macOS-CLI analogue of release-pypi.yml (which builds the PyPI
+# `bithuman` SDK wheel). It re-homes the mac tarball build that was cut by
+# hand for cli-v2.3.x into a reproducible workflow, and adds the 2.4.0
+# engine-vendoring step (the earlier distribution gap: the tarball must
+# CARRY the engine, not rely on a hand-staged ~/.bithuman/lib).
+#
+# What it does (exactly the proven local build, scripts/bundle-macos.sh +
+# scripts/check-engine-dedup.sh from bithuman-cli):
+#   1. build `bithuman` --release on an Apple-Silicon runner (libessence.a
+#      from bithuman-models at the Cargo.toml-pinned essence1-v* tag),
+#   2. vendor the expression-2 render engine next to the binary
+#      (bundle-macos.sh: EXPRESSION2_MODEL_BIN=expression2-model +
+#      EMBODY_MODEL=embody.model) and bundle the Homebrew dylib closure,
+#   3. drop the versioned engines/mac-arm64-<ver>.engine into the tree,
+#   4. run the no-dup gate (the vendored .engine must be byte-identical to
+#      the imx_fetch.rs ENGINES pin — DISTRIBUTION.md §13),
+#   5. tar + sha256, upload to the cli-vX.Y.Z release, print the sha256 to
+#      paste into Formula/bithuman-cli.rb.
+#
+# Engine-artifact sourcing (the "set EXPRESSION2_MODEL_BIN + EMBODY_MODEL +
+# source those artifacts" fix):
+#   * mac-arm64-<ver>.engine — PUBLIC: fetched from the imx_fetch.rs ENGINES
+#     pin URL (Supabase `web` bucket) and sha-verified against the pin.
+#   * expression2-model + embody.model — the mac render tool + shared CoreML
+#     graph are NOT public; provide read URLs via the repo secrets
+#     RENDER_TOOL_URL + EMBODY_MODEL_URL (a private store the runner can
+#     read). Absent them the pairing gate in bundle-macos.sh fails the job —
+#     a cloud/serve-only tarball is NOT a valid engine release.
+#
+# Secrets required (on homebrew-bithuman):
+#   BITHUMAN_MODELS_SSH_KEY  read-only deploy key for the private engine
+#                            monorepo (same key cli-build.yml / release-pypi.yml use)
+#   RENDER_TOOL_URL          authenticated URL to the mac expression2-model binary
+#   EMBODY_MODEL_URL         authenticated URL to the mac embody.model graph
+#   GITHUB_TOKEN             (built-in) — upload the asset to the release
+#
+# Dispatch-only until the RENDER_TOOL_URL / EMBODY_MODEL_URL publish location
+# is wired; then add `push: tags: [cli-v*]` to cut on tag.
+name: release-cli
+
+on:
+  workflow_dispatch:
+    inputs:
+      cli_ref:
+        description: 'bithuman-cli git ref to build (release/2.4.0, a cli-vX.Y.Z tag, or a SHA).'
+        type: string
+        default: main
+      engine_version:
+        description: 'Vendored mac engine version (matches the imx_fetch.rs ENGINES pin, e.g. 1.0.0).'
+        type: string
+        default: '1.0.0'
+      release_tag:
+        description: 'Release tag to upload the tarball to (must already exist, e.g. cli-v2.4.0).'
+        type: string
+        required: true
+
+permissions:
+  contents: write            # upload the tarball asset to the Release
+
+jobs:
+  mac-tarball:
+    name: macOS arm64 self-contained CLI tarball (engine vendored)
+    runs-on: macos-15         # Apple Silicon + current Xcode (webrtc-sys C++ bridge)
+    timeout-minutes: 60
+    env:
+      CLI_REF: ${{ inputs.cli_ref }}
+      ENGINE_VERSION: ${{ inputs.engine_version }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      RENDER_TOOL_URL: ${{ secrets.RENDER_TOOL_URL }}
+      EMBODY_MODEL_URL: ${{ secrets.EMBODY_MODEL_URL }}
+      GH_TOKEN: ${{ github.token }}
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - name: Checkout bithuman-cli
+        uses: actions/checkout@v4
+        with:
+          repository: bithuman-product/bithuman-cli
+          ref: ${{ inputs.cli_ref }}
+          path: cli
+
+      - name: Toolchain (brew engine deps + rust)
+        run: |
+          brew install cmake ninja onnxruntime hdf5 jpeg-turbo webp ffmpeg
+          rustup default stable && rustc --version
+
+      - name: Load the bithuman-models deploy key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.BITHUMAN_MODELS_SSH_KEY }}
+
+      - name: Configure git auth for private bithuman-models
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git config --global url."git@github.com:".insteadOf "https://github.com/"
+
+      - name: Build libessence.a (pinned essence1-v* tag from Cargo.toml)
+        run: |
+          set -euo pipefail
+          # The tag the CLI pins the `bithuman` crate to = the ABI to link.
+          TAG=$(grep -m1 'tag = "essence1-' cli/Cargo.toml | sed -E 's/.*tag = "([^"]+)".*/\1/')
+          echo "engine tag: $TAG"
+          git clone --depth 1 --branch "$TAG" \
+              https://github.com/bithuman-product/bithuman-models "$RUNNER_TEMP/bm"
+          ESRC="$RUNNER_TEMP/bm/models/essence-1"
+          cmake -GNinja -B "$ESRC/engine/essence/build" -S "$ESRC/engine/essence" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$ESRC/engine/essence/build" --target essence --parallel "$(sysctl -n hw.ncpu)"
+          test -f "$ESRC/engine/essence/build/libessence.a"
+          echo "ESSENCE_BUILD_DIR=$ESRC/engine/essence/build" >> "$GITHUB_ENV"
+
+      - name: cargo build --release -p bithuman-cli
+        working-directory: cli
+        run: cargo build --release -p bithuman-cli && ./target/release/bithuman --version
+
+      - name: Source the vendored engine artifacts
+        working-directory: cli
+        run: |
+          set -euo pipefail
+          # mac-arm64 .engine — PUBLIC pin URL from imx_fetch.rs; sha-verified by the no-dup gate.
+          ENG_URL=$(grep -o 'https://[^"]*mac-arm64-'"$ENGINE_VERSION"'\.engine' \
+                    crates/bithuman-cli/src/expression2/imx_fetch.rs | head -1)
+          echo "engine url: $ENG_URL"
+          mkdir -p engine-src
+          curl -fsSL -o "engine-src/mac-arm64-$ENGINE_VERSION.engine" "$ENG_URL"
+          # expression2-model + embody.model — private; from repo-secret URLs.
+          : "${RENDER_TOOL_URL:?set the RENDER_TOOL_URL secret}"
+          : "${EMBODY_MODEL_URL:?set the EMBODY_MODEL_URL secret}"
+          curl -fsSL -o engine-src/expression2-model "$RENDER_TOOL_URL"
+          curl -fsSL -o engine-src/embody.model "$EMBODY_MODEL_URL"
+
+      - name: Assemble tarball (bundle-macos.sh vendors engine + dylibs) + no-dup gate
+        working-directory: cli
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/stage"; rm -rf "$STAGE"; mkdir -p "$STAGE/engines"
+          cp target/release/bithuman "$STAGE/bithuman"
+          EXPRESSION2_MODEL_BIN="$PWD/engine-src/expression2-model" \
+          EMBODY_MODEL="$PWD/engine-src/embody.model" \
+            bash scripts/bundle-macos.sh "$STAGE/bithuman"
+          cp "engine-src/mac-arm64-$ENGINE_VERSION.engine" "$STAGE/engines/"
+          BIN_DIR="$STAGE" bash scripts/check-engine-dedup.sh      # DISTRIBUTION.md §13
+          TGZ="$RUNNER_TEMP/bithuman-aarch64-apple-darwin.tar.gz"
+          ( cd "$STAGE" && COPYFILE_DISABLE=1 tar --no-xattrs --exclude '._*' \
+              -czf "$TGZ" bithuman lib expression2-model embody.model engines )
+          shasum -a 256 "$TGZ" | tee "$TGZ.sha256"
+          echo "TGZ=$TGZ" >> "$GITHUB_ENV"
+
+      - name: Upload tarball to the release + emit formula sha
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" --repo bithuman-product/homebrew-bithuman --clobber \
+            "$TGZ" "$TGZ.sha256"
+          echo "::notice::Formula sha256 for cli $RELEASE_TAG = $(cut -d' ' -f1 "$TGZ.sha256")"
