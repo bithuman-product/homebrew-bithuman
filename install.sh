@@ -191,6 +191,20 @@ if [ -z "$extracted_bin" ]; then
   exit 1
 fi
 
+# The expression-2 LOCAL realtime render payload travels next to the binary in
+# the self-contained tarball (mac: expression2-model + embody.model + engines/;
+# linux: expression2-model + engines/). The CLI discovers them by the binary's
+# own location (expression2/render_stream.rs: <exe>/expression2-model,
+# <exe>/embody.model; imx_fetch.rs: <exe>/engines/<platform>-<version>.engine),
+# so they MUST be installed side-by-side with `bithuman` — otherwise
+# `bithuman run` fetches the avatar but has nothing to render it with locally
+# (the exact linux out-of-box gap fixed in cli-v2.4.0). Absent ⇒ a cloud/serve-
+# only tarball; these stay empty and the render payload is simply not installed.
+bundle_root="$(dirname "$extracted_bin")"
+extracted_host=""; [ -f "$bundle_root/expression2-model" ] && extracted_host="$bundle_root/expression2-model"
+extracted_embody=""; [ -f "$bundle_root/embody.model" ] && extracted_embody="$bundle_root/embody.model"
+extracted_engines=""; [ -d "$bundle_root/engines" ] && extracted_engines="$bundle_root/engines"
+
 # ----- install ---------------------------------------------------------------
 
 # Preserve binary + lib/<dylibs> side by side so @loader_path/lib resolves
@@ -209,6 +223,22 @@ if command -v install >/dev/null 2>&1; then
 else
   cp "$extracted_bin" "$install_dir/bithuman"
   chmod 755 "$install_dir/bithuman"
+fi
+
+# Install the expression-2 local-render payload side-by-side with the binary so
+# the CLI's exe-relative discovery finds it (zero engine fetch on first run).
+if [ -n "$extracted_host" ]; then
+  cp "$extracted_host" "$install_dir/expression2-model"
+  chmod 755 "$install_dir/expression2-model"
+  info "installed expression2-model (local realtime render host)"
+fi
+if [ -n "$extracted_embody" ]; then
+  cp "$extracted_embody" "$install_dir/embody.model"    # mac shared CoreML/ANE graph (data blob)
+fi
+if [ -n "$extracted_engines" ]; then
+  rm -rf "$install_dir/engines"
+  cp -R "$extracted_engines" "$install_dir/engines"
+  info "installed engines/ ($(ls -1 "$install_dir/engines" 2>/dev/null | tr '\n' ' '))"
 fi
 
 # ----- smoke test ------------------------------------------------------------
