@@ -42,12 +42,17 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.3.27 — standalone bithuman-cli vs
-  # reconciled bithuman-models essence1-v2.3.11. Apple Silicon (arm64).
+  # Current published release: cli-v2.4.0 — the consolidation release
+  # (out-of-box Wise Pup, two-artifact .imx/.engine, `bithuman engine`,
+  # `bithuman mcp`), standalone bithuman-cli vs reconciled bithuman-models
+  # essence1-v2.3.11. Apple Silicon (arm64). The macOS tarball is
+  # self-contained AND ships the expression-2 render engine next to the
+  # binary (expression2-model + embody.model + engines/mac-arm64-1.0.0.engine),
+  # so `bithuman run` renders Wise Pup out of the box with ZERO engine fetch.
   # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.3.27/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "57c17ebb1aa6b2fecd8014fc3195d84723cc069115acba90c10f993fe4bc10a5"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.4.0/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "f0fc70b8f5236b7af93b13521fddaf3727065c38164ea3132faccaebcbe69709"
   license "Apache-2.0"
 
   depends_on arch: :arm64
@@ -67,11 +72,15 @@ class BithumanCli < Formula
 
   def install
     # Self-contained tarball: ./bithuman + ./lib/*.dylib, binary linked
-    # with @loader_path/lib. Keep that relative layout intact by
-    # installing the whole bundle under libexec and exposing a thin
-    # symlink on PATH — @loader_path resolves through the symlink to
-    # the real binary in libexec, so the bundled lib/ is found.
-    libexec.install "bithuman", "lib"
+    # with @loader_path/lib. The macOS release also vendors the expression-2
+    # render engine next to the binary — the `expression2-model` render host,
+    # the `embody.model` graph, and the versioned `engines/mac-arm64-1.0.0.engine`
+    # — so `bithuman run` renders Wise Pup out of the box with zero engine fetch.
+    # Install the whole bundle under libexec and expose a thin symlink on PATH:
+    # @loader_path resolves through the symlink to the real binary in libexec
+    # (so the bundled lib/ is found), and the CLI canonicalizes current_exe so
+    # its exe-relative engine search resolves to libexec through the symlink too.
+    libexec.install "bithuman", "lib", "expression2-model", "embody.model", "engines"
     bin.install_symlink libexec/"bithuman"
   end
 
