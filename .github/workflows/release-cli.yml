@@ -1,6 +1,7 @@
-# Build + publish the self-contained macOS `bithuman` CLI tarball for a
-# cli-vX.Y.Z release, with the expression-2 render engine VENDORED so
-# `bithuman run` renders Wise Pup out of the box with ZERO engine fetch.
+# Build + publish the self-contained `bithuman` CLI tarballs (macOS arm64 +
+# Linux x86_64) for a cli-vX.Y.Z release, with the expression-2 render host +
+# engine VENDORED so `bithuman run` renders Wise Pup out of the box with ZERO
+# engine fetch. Two jobs: `mac-tarball` and `linux-tarball` (see each below).
 #
 # This is the macOS-CLI analogue of release-pypi.yml (which builds the PyPI
 # `bithuman` SDK wheel). It re-homes the mac tarball build that was cut by
@@ -155,3 +156,117 @@ jobs:
           gh release upload "$RELEASE_TAG" --repo bithuman-product/homebrew-bithuman --clobber \
             "$TGZ" "$TGZ.sha256"
           echo "::notice::Formula sha256 for cli $RELEASE_TAG = $(cut -d' ' -f1 "$TGZ.sha256")"
+
+  # ──────────────────────────────────────────────────────────────────
+  # Linux x86_64 lane — the analogue of mac-tarball, so `bithuman run` renders
+  # Wise Pup out of the box on Linux with a ZERO-fetch embedded engine (the gap
+  # cli-v2.4.0's first cut had: the tarball shipped the binary but no render
+  # host). The LiteRT host is a BUILT artifact (unlike the mac Swift tool), so
+  # this job builds it in-workflow from the bithuman-models source rather than
+  # pulling a secret URL — fully reproducible from public + deploy-key inputs.
+  #   1. cross-compile `bithuman` in the pinned manylinux_2_28 image (glibc 2.28),
+  #   2. build `expression2-model` = PyInstaller --onefile of the #278 split host
+  #      (render_stream_host_litert.py) + pinned ai_edge_litert/numpy, on Ubuntu
+  #      22.04 (glibc 2.35 → Ubuntu 22.04+/Debian 12+/RHEL 9+),
+  #   3. fetch the sha-pinned linux-x64-<ver>.engine (PUBLIC url from imx_fetch.rs),
+  #   4. build-linux.sh vendors host + engine + runs BOTH gates (no-dup +
+  #      host↔engine render compatibility) + tars {bithuman,lib,expression2-model,
+  #      engines}, then uploads.
+  linux-tarball:
+    name: Linux x86_64 self-contained CLI tarball (host + engine vendored)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CLI_REF: ${{ inputs.cli_ref }}
+      ENGINE_VERSION: ${{ inputs.engine_version }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      GH_TOKEN: ${{ github.token }}
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - name: Checkout bithuman-cli
+        uses: actions/checkout@v4
+        with:
+          repository: bithuman-product/bithuman-cli
+          ref: ${{ inputs.cli_ref }}
+          path: cli
+
+      - name: Load the bithuman-models deploy key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.BITHUMAN_MODELS_SSH_KEY }}
+
+      - name: Configure git auth for private bithuman-models
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git config --global url."git@github.com:".insteadOf "https://github.com/"
+
+      - name: Clone bithuman-models (engine src + manylinux Dockerfile + LiteRT host src)
+        run: |
+          set -euo pipefail
+          TAG=$(grep -m1 'tag = "essence1-' cli/Cargo.toml | sed -E 's/.*tag = "([^"]+)".*/\1/')
+          echo "engine tag: $TAG"
+          git clone --depth 1 --branch "$TAG" \
+              https://github.com/bithuman-product/bithuman-models bithuman-models
+          echo "BM=$PWD/bithuman-models" >> "$GITHUB_ENV"
+
+      - name: Build the pinned manylinux_2_28 image (the `bithuman` glibc 2.28 floor)
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 \
+            -t libessence/manylinux-x86_64:0.1 \
+            -f "$BM/models/essence-1/sdk/python/scripts/Dockerfile.manylinux-x86_64" \
+            "$BM/models/essence-1/sdk/python/scripts"
+
+      - name: Build the LiteRT render host (expression2-model, glibc 2.35 floor)
+        run: |
+          set -euo pipefail
+          HOSTSRC="$BM/models/expression-2/engine/cpu/serve/render_stream_host_litert.py"
+          test -f "$HOSTSRC"   # the #278 two-interpreter split host
+          mkdir -p host-build && cp "$HOSTSRC" host-build/
+          docker run --rm --platform linux/amd64 -v "$PWD/host-build":/work ubuntu:22.04 bash -c '
+            set -e; export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq && apt-get install -y -qq python3 python3-venv python3-pip binutils >/dev/null
+            cd /work && python3 -m venv v && ./v/bin/pip -q install --upgrade pip wheel
+            ./v/bin/pip -q install "ai_edge_litert==2.1.6" "numpy==2.2.6" "pyinstaller==6.21.0"
+            ./v/bin/pyinstaller --onefile --name expression2-model --distpath d --workpath b \
+              --collect-all ai_edge_litert --collect-submodules numpy --console render_stream_host_litert.py'
+          test -f host-build/d/expression2-model
+          echo "HOST=$PWD/host-build/d/expression2-model" >> "$GITHUB_ENV"
+
+      - name: Source the vendored engine + probe imx (PUBLIC pins from the CLI source)
+        working-directory: cli
+        run: |
+          set -euo pipefail
+          ENG_URL=$(grep -o 'https://[^"]*linux-x64-'"$ENGINE_VERSION"'\.engine' \
+                    crates/bithuman-cli/src/expression2/imx_fetch.rs | head -1)
+          echo "engine url: $ENG_URL"
+          curl -fsSL -o "$RUNNER_TEMP/linux-x64-$ENGINE_VERSION.engine" "$ENG_URL"
+          echo "EXPRESSION2_ENGINE_FILE=$RUNNER_TEMP/linux-x64-$ENGINE_VERSION.engine" >> "$GITHUB_ENV"
+          IMX_URL=$(grep -o 'https://[^"]*wise-pup\.imx' crates/bithuman-cli/src/cmd/models.rs | head -1)
+          curl -fsSL -o "$RUNNER_TEMP/probe.imx" "$IMX_URL"
+          echo "EXPRESSION2_PROBE_IMX=$RUNNER_TEMP/probe.imx" >> "$GITHUB_ENV"
+
+      - name: Build + vendor + gate the linux tarball (scripts/build-linux.sh)
+        working-directory: cli
+        env:
+          EXPRESSION2_MODEL_BIN: ${{ env.HOST }}
+          # EXPRESSION2_ENGINE_FILE + EXPRESSION2_PROBE_IMX exported above; keep
+          # the compose tree on the workspace FS so cp -al hardlinks work.
+          BITHUMAN_CLI_COMPOSE_DIR: ${{ github.workspace }}/compose-cli-linux
+        run: |
+          set -euo pipefail
+          # x86_64: manylinux cross-compile of `bithuman`, then _vendor_expr2_linux
+          # stages expression2-model + engines/linux-x64-<ver>.engine, runs the
+          # no-dup + host↔engine gates, and tars the self-contained bundle.
+          BITHUMAN_SDK_ROOT="$BM/models/essence-1" bash scripts/build-linux.sh x86_64
+          TGZ="$PWD/dist/bithuman-x86_64-unknown-linux-gnu.tar.gz"
+          test -f "$TGZ"
+          echo "TGZ=$TGZ" >> "$GITHUB_ENV"
+
+      - name: Upload linux tarball to the release + emit sha
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" --repo bithuman-product/homebrew-bithuman --clobber \
+            "$TGZ" "$TGZ.sha256"
+          echo "::notice::Linux tarball sha256 for cli $RELEASE_TAG = $(cut -d' ' -f1 "$TGZ.sha256")"
