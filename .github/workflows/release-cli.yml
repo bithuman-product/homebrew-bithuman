@@ -32,15 +32,23 @@
 #     read). Absent them the pairing gate in bundle-macos.sh fails the job —
 #     a cloud/serve-only tarball is NOT a valid engine release.
 #
-# Secrets required (on homebrew-bithuman):
+# Secrets required (on homebrew-bithuman — ALL provisioned 2026-08-01):
+#   BITHUMAN_CLI_SSH_KEY     read-only deploy key for the private CLI repo
+#                            bithuman-product/bithuman (both checkout steps;
+#                            the default GITHUB_TOKEN is scoped to THIS repo
+#                            and cannot read it — first-run failure root cause)
 #   BITHUMAN_MODELS_SSH_KEY  read-only deploy key for the private engine
 #                            monorepo (same key cli-build.yml / release-pypi.yml use)
 #   RENDER_TOOL_URL          authenticated URL to the mac expression2-model binary
+#                            (private models-downloads store; sha cd3f053f…,
+#                            the cli-v2.4.0-proven render tool)
 #   EMBODY_MODEL_URL         authenticated URL to the mac embody.model graph
+#                            (private models-downloads store; sha 90e4cf31cf71…,
+#                            the BLESSED live archive — byte-exact, never repacked)
 #   GITHUB_TOKEN             (built-in) — upload the asset to the release
 #
-# Dispatch-only until the RENDER_TOOL_URL / EMBODY_MODEL_URL publish location
-# is wired; then add `push: tags: [cli-v*]` to cut on tag.
+# Still dispatch-only by choice; secrets are wired, so `push: tags: [cli-v*]`
+# may be added once a tag-cut release is wanted.
 name: release-cli
 
 on:
@@ -76,12 +84,16 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
-      - name: Checkout bithuman-cli
+      - name: Checkout bithuman (private CLI repo — needs the deploy key)
         uses: actions/checkout@v4
         with:
           repository: bithuman-product/bithuman
           ref: ${{ inputs.cli_ref }}
           path: cli
+          # bithuman-product/bithuman is PRIVATE; this repo's default
+          # GITHUB_TOKEN cannot read it (the exact first-run failure of
+          # 2026-08-01). Read-only deploy key on the bithuman repo.
+          ssh-key: ${{ secrets.BITHUMAN_CLI_SSH_KEY }}
 
       - name: Toolchain (brew engine deps + rust)
         run: |
@@ -183,12 +195,16 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
-      - name: Checkout bithuman-cli
+      - name: Checkout bithuman (private CLI repo — needs the deploy key)
         uses: actions/checkout@v4
         with:
           repository: bithuman-product/bithuman
           ref: ${{ inputs.cli_ref }}
           path: cli
+          # bithuman-product/bithuman is PRIVATE; this repo's default
+          # GITHUB_TOKEN cannot read it (the exact first-run failure of
+          # 2026-08-01). Read-only deploy key on the bithuman repo.
+          ssh-key: ${{ secrets.BITHUMAN_CLI_SSH_KEY }}
 
       - name: Load the bithuman-models deploy key
         uses: webfactory/ssh-agent@v0.9.0
