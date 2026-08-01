@@ -23,13 +23,27 @@
 #   PYPI_API_TOKEN   PyPI project/account token (the password)
 #   PYPI_USERNAME    "__token__" (falls back to __token__ if unset)
 #
-# Build matrix (3 CPython minors (3.11-3.13) × 3 platforms = 9 wheels):
+# ============================= 2.8.x NOTE =============================
+# The CANONICAL publisher for bithuman >= 2.8.0 is bithuman-models'
+# .github/workflows/release-macos-wheels.yml (dispatch-only, publish=true) —
+# 2.8.0 shipped from there (run 29957329788, 07-22), NOT from this workflow,
+# whose last run was the 2.3.x line (pypi-v2.3.11, 07-17). This workflow's
+# Linux jobs run build-wheel-in-container.sh WITHOUT the combined-V3 staging
+# (no BITHUMAN_COMBINED_WHEEL / build-v2-wheel.sh), so Linux wheels built
+# here are the essence-1-only variant — do NOT dispatch this with
+# publish=true for a 2.8.x version, or PyPI gets wrong-content Linux wheels
+# (twine --skip-existing means whichever publisher runs first wins).
+# Matrices below are kept in sync with the models source support
+# (Python 3.10-3.14 since 9dab6d2d) to stop publisher-surface drift.
+# ======================================================================
+#
+# Build matrix (5 CPython minors (3.10-3.14) × 3 platforms = 15 wheels):
 #   macOS arm64            macosx_*_arm64           cp310..cp314   (github-hosted macos-14)
 #   Linux x86_64           manylinux_2_28_x86_64    cp310..cp314   (manylinux docker)
 #   Linux aarch64          manylinux_2_28_aarch64   cp310..cp314   (manylinux docker, arm64 runner)
 # The aarch64/x86_64 Linux wheels are built inside the pinned
-# models/essence-1/sdk/python/scripts/Dockerfile.manylinux-* images (ORT 1.20.1 + FFmpeg 7.0.2
-# + HDF5 1.14 + Rust baked in) via sdk/python/scripts/build-wheel-in-container.sh.
+# models/essence-1/sdk/python/scripts/Dockerfile.manylinux-* images (ORT 1.26
+# + FFmpeg + HDF5 1.14 + Rust baked in) via sdk/python/scripts/build-wheel-in-container.sh.
 # macOS builds on the host with Homebrew deps, then `delocate` bundles the
 # Homebrew dylibs into the wheel.
 #
@@ -119,7 +133,7 @@ jobs:
       # fail-fast) is what enforces completeness.
       fail-fast: false
       matrix:
-        python: ['3.11', '3.12', '3.13']
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
     env:
       PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
       PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
@@ -237,7 +251,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pytag: [cp311, cp312, cp313]
+        pytag: [cp310, cp311, cp312, cp313, cp314]
     env:
       PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
       PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
@@ -310,7 +324,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pytag: [cp311, cp312, cp313]
+        pytag: [cp310, cp311, cp312, cp313, cp314]
     env:
       PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
       PYPI_USERNAME: ${{ secrets.PYPI_USERNAME }}
@@ -378,7 +392,7 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
-      EXPECTED_PYTAGS: "cp311 cp312 cp313"
+      EXPECTED_PYTAGS: "cp310 cp311 cp312 cp313 cp314"
       EXPECTED_PLATFORMS: "macosx_.*_arm64 manylinux_2_28_x86_64 manylinux_2_28_aarch64"
     steps:
       - name: Download all SDK wheel artifacts
