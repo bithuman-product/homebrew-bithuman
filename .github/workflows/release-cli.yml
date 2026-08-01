@@ -225,6 +225,15 @@ jobs:
           git clone --depth 1 --branch "$TAG" \
               https://github.com/bithuman-product/bithuman-models bithuman-models
           echo "BM=$PWD/bithuman-models" >> "$GITHUB_ENV"
+          # The LiteRT render host lives on a DIFFERENT axis than the essence-1
+          # ABI tag: models/expression-2/engine/cpu/serve/render_stream_host_litert.py
+          # does not exist at essence1-v* tags (proven: first dispatch died at
+          # `test -f $HOSTSRC`, 2026-08-01 run 30715617689). Host source comes
+          # from bithuman-models MAIN; the host↔engine render-compat gate in
+          # build-linux.sh still validates the pairing against the pinned engine.
+          git clone --depth 1 \
+              https://github.com/bithuman-product/bithuman-models bithuman-models-main
+          echo "BM_MAIN=$PWD/bithuman-models-main" >> "$GITHUB_ENV"
 
       - name: Build the pinned manylinux_2_28 image (the `bithuman` glibc 2.28 floor)
         run: |
@@ -237,8 +246,8 @@ jobs:
       - name: Build the LiteRT render host (expression2-model, glibc 2.35 floor)
         run: |
           set -euo pipefail
-          HOSTSRC="$BM/models/expression-2/engine/cpu/serve/render_stream_host_litert.py"
-          test -f "$HOSTSRC"   # the #278 two-interpreter split host
+          HOSTSRC="$BM_MAIN/models/expression-2/engine/cpu/serve/render_stream_host_litert.py"
+          test -f "$HOSTSRC"   # the #278 two-interpreter split host (main-axis, see clone step)
           mkdir -p host-build && cp "$HOSTSRC" host-build/
           docker run --rm --platform linux/amd64 -v "$PWD/host-build":/work ubuntu:22.04 bash -c '
             set -e; export DEBIAN_FRONTEND=noninteractive
