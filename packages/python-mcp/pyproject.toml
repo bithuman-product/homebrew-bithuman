@@ -1,6 +1,6 @@
 [project]
 name = "bithuman-mcp"
-version = "0.3.3"
+version = "0.3.4"
 description = "DEPRECATED — use `bithuman mcp` in the bitHuman CLI. MCP server for the bitHuman AI avatar platform."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,7 +14,10 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "mcp[cli]>=1.2.0",
+    # <2: mcp 2.0 removed mcp.server.fastmcp — an unbounded pin made fresh
+    # installs crash at import (ModuleNotFoundError). Cap until/unless this
+    # (deprecated) server is ported to the 2.x API.
+    "mcp[cli]>=1.2.0,<2",
     "httpx>=0.27",
 ]
 

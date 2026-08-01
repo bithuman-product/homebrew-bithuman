@@ -199,6 +199,8 @@ async def generate_agent(
     image: str | None = None,
     audio: str | None = None,
     aspect_ratio: str = "16:9",
+    model: str | None = None,
+    version: str | None = None,
     video: str | None = None,
 ) -> dict:
     """Create a new avatar agent. Async (2–5 min) and costs ~250 credits.
@@ -212,6 +214,14 @@ async def generate_agent(
         image: URL to a portrait image for appearance.
         audio: URL to audio for voice cloning.
         aspect_ratio: "16:9", "9:16", or "1:1".
+        model: Avatar model family — "essence" (photoreal) or "expression"
+            (stylized / creatures). Omitted → the platform default
+            (expression, v1). Full engine names ("essence-2", …) also pass
+            through unchanged.
+        version: Model generation — "v1" or "v2". "essence" + "v2" selects
+            essence-2, the current photoreal engine. Omitted → v1; an
+            omitted model/version never silently upgrades you onto a
+            higher-priced pipeline.
         video: DEPRECATED — rejected. Agent creation is image-only; pass `image`
             instead (the idle/driver video is generated internally).
 
@@ -236,7 +246,16 @@ async def generate_agent(
             },
         }
     payload: dict[str, Any] = {"aspect_ratio": aspect_ratio}
-    for k, v in (("prompt", prompt), ("image", image), ("audio", audio)):
+    # model/version are engine selection (not content sources): folded
+    # server-side by /v1/agent/generate — model ∈ {essence, expression} +
+    # version ∈ {v1, v2} → essence-1/2, expression-1/2.
+    for k, v in (
+        ("prompt", prompt),
+        ("image", image),
+        ("audio", audio),
+        ("model", model),
+        ("version", version),
+    ):
         if v:
             payload[k] = v
     async with _client() as c:
