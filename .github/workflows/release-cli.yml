@@ -79,7 +79,7 @@ jobs:
       - name: Checkout bithuman-cli
         uses: actions/checkout@v4
         with:
-          repository: bithuman-product/bithuman-cli
+          repository: bithuman-product/bithuman
           ref: ${{ inputs.cli_ref }}
           path: cli
 
@@ -186,7 +186,7 @@ jobs:
       - name: Checkout bithuman-cli
         uses: actions/checkout@v4
         with:
-          repository: bithuman-product/bithuman-cli
+          repository: bithuman-product/bithuman
           ref: ${{ inputs.cli_ref }}
           path: cli
 

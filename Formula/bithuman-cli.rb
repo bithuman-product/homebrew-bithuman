@@ -34,7 +34,7 @@
 #   with the old name in scripts / muscle memory.
 #
 # This formula installs a prebuilt Rust binary built from the standalone
-# bithuman-product/bithuman-cli against the bithuman-product/bithuman-models
+# bithuman-product/bithuman (repo renamed from bithuman-cli) against the bithuman-product/bithuman-models
 # engine monorepo, models/essence-1 (libessence engine core 2.3.8, ABI 7),
 # mirrored to the public homebrew-bithuman tap repo's own Releases
 # (both upstream repos are private — anonymous brew downloads fail
