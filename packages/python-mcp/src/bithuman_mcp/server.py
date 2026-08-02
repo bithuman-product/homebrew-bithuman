@@ -201,7 +201,6 @@ async def generate_agent(
     aspect_ratio: str = "16:9",
     model: str | None = None,
     version: str | None = None,
-    video: str | None = None,
 ) -> dict:
     """Create a new avatar agent. Async (2–5 min) and costs ~250 credits.
 
@@ -222,29 +221,10 @@ async def generate_agent(
             essence-2, the current photoreal engine. Omitted → v1; an
             omitted model/version never silently upgrades you onto a
             higher-priced pipeline.
-        video: DEPRECATED — rejected. Agent creation is image-only; pass `image`
-            instead (the idle/driver video is generated internally).
 
     Returns an agent_id and status "processing". Poll get_agent_status(agent_id)
     until status is "ready", then the agent is usable for embedding / live calls.
     """
-    if video:
-        # Deprecated arg: rejected client-side with the platform's contract
-        # message (the server 400s it too once AGENT_CREATION_IMAGE_ONLY is live).
-        return {
-            "success": False,
-            "error": {
-                "code": "VIDEO_INPUT_NOT_SUPPORTED",
-                "httpStatus": 400,
-                "message": (
-                    "Agent creation is image-only. Provide a portrait `image`; "
-                    "bitHuman generates a 10-second idle/driver video internally "
-                    "so it loops seamlessly (first frame == last frame). Video "
-                    "input is not accepted for any model (essence-1, expression-1, "
-                    "essence-2, essence-2-max, expression-2)."
-                ),
-            },
-        }
     payload: dict[str, Any] = {"aspect_ratio": aspect_ratio}
     # model/version are engine selection (not content sources): folded
     # server-side by /v1/agent/generate — model ∈ {essence, expression} +

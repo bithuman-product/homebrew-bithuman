@@ -1,6 +1,6 @@
 [project]
 name = "bithuman-mcp"
-version = "0.3.4"
+version = "0.3.5"
 description = "DEPRECATED — use `bithuman mcp` in the bitHuman CLI. MCP server for the bitHuman AI avatar platform."
 readme = "README.md"
 requires-python = ">=3.10"

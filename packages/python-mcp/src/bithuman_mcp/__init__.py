@@ -5,7 +5,7 @@ discover and drive bitHuman: synthesize speech, generate avatar agents, make
 them speak, manage gestures, mint embed tokens, and check credits.
 """
 
-__version__ = "0.3.4"
+__version__ = "0.3.5"
 
 from .server import main
 
