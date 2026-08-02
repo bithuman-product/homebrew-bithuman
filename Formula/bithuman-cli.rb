@@ -42,17 +42,20 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.4.0 — the consolidation release
-  # (out-of-box Wise Pup, two-artifact .imx/.engine, `bithuman engine`,
-  # `bithuman mcp`), standalone bithuman-cli vs reconciled bithuman-models
-  # essence1-v2.3.11. Apple Silicon (arm64). The macOS tarball is
-  # self-contained AND ships the expression-2 render engine next to the
-  # binary (expression2-model + embody.model + engines/mac-arm64-1.0.0.engine),
-  # so `bithuman run` renders Wise Pup out of the box with ZERO engine fetch.
+  # Current published release: cli-v2.4.2 — public family naming
+  # (info/pull/models/run speak essence-2 / essence-2-max) on top of
+  # 2.4.1's essence-2 MCP reachability + full .imx TOC + multi-agent
+  # audio hardening; source repo renamed bithuman-cli -> bithuman.
+  # First workflow-built tarball (release-cli.yml run 30723853129; the
+  # 2.4.0 tarballs were hand-cut). Apple Silicon (arm64). The macOS
+  # tarball is self-contained AND ships the expression-2 render engine
+  # next to the binary (expression2-model + embody.model blessed
+  # 90e4cf31cf71 + engines/mac-arm64-1.0.0.engine), so `bithuman run`
+  # renders Wise Pup out of the box with ZERO engine fetch.
   # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.4.0/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "f0fc70b8f5236b7af93b13521fddaf3727065c38164ea3132faccaebcbe69709"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.4.2/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "1d56690cc9e0dd338ed3a33de8ba4e7d9c82c574635b70bb10a88475c4eead8d"
   license "Apache-2.0"
 
   depends_on arch: :arm64
