@@ -46,8 +46,10 @@ class BithumanCli < Formula
   # (info/pull/models/run speak essence-2 / essence-2-max) on top of
   # 2.4.1's essence-2 MCP reachability + full .imx TOC + multi-agent
   # audio hardening; source repo renamed bithuman-cli -> bithuman.
-  # First workflow-built tarball (release-cli.yml run 30723853129; the
-  # 2.4.0 tarballs were hand-cut). Apple Silicon (arm64). The macOS
+  # First workflow-built tarball (release-cli.yml run 30729588176, which
+  # also shipped the Linux x86_64 tarball as a release asset — this
+  # formula stays mac-only, matching 2.4.0; the 2.4.0 tarballs were
+  # hand-cut). Apple Silicon (arm64). The macOS
   # tarball is self-contained AND ships the expression-2 render engine
   # next to the binary (expression2-model + embody.model blessed
   # 90e4cf31cf71 + engines/mac-arm64-1.0.0.engine), so `bithuman run`
@@ -55,7 +57,7 @@ class BithumanCli < Formula
   # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
   # version below is scanned from the cli-v* tag in the URL.)
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.4.2/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "1d56690cc9e0dd338ed3a33de8ba4e7d9c82c574635b70bb10a88475c4eead8d"
+  sha256 "49582d8ced9c78c9b80fd10d81414829f4601290ce1e60b2a9f1200d2b7c98bf"
   license "Apache-2.0"
 
   depends_on arch: :arm64
