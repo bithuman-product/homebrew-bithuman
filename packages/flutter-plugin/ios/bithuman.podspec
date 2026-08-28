@@ -10,10 +10,24 @@
 # ABI) is vendored by scripts/bootstrap.sh as a plain `s.vendored_libraries`, and
 # its header (Engines/essence2/include/be_essence2.h) is folded into THIS pod's own
 # auto-generated umbrella module; the spec sets the `ESSENCE2_AVAILABLE` Swift
-# compilation condition only when `Frameworks/libessence2.a` is present. (Embody
-# render is macOS-only today; the essence2 runtime adapter is `#if os(macOS)`-
-# gated, so on iOS its be_essence2 symbols dead-strip — the vendored lib just
-# keeps the pod consistent across both slices.)
+# compilation condition only when `Frameworks/libessence2.a` is present.
+#
+# ★2026-08-28 THIS PARAGRAPH USED TO END "the essence2 runtime adapter is
+# `#if os(macOS)`-gated, so on iOS its be_essence2 symbols dead-strip — the
+# vendored lib just keeps the pod consistent across both slices." That was FALSE,
+# and the SAME FILE contradicted it 20 lines down (and again at
+# s.vendored_libraries). Ground truth, verified on bithuman-models main:
+# essence-2/sdk/Classes/Essence2Engine.swift:26 gates on
+# `#if (os(macOS) || os(iOS)) && ESSENCE2_AVAILABLE`; sdk/scripts/bootstrap.sh
+# extracts the ios-arm64 slice to Vendor/libessence2-ios.a; this plugin's
+# scripts/bootstrap.sh calls `stage_essence2_plat ios`; and the pinned release
+# essence2-libessence2-v1.0-a2x really does carry ios-arm64 (232 MB) and
+# ios-arm64-simulator slices. So on iOS the adapter COMPILES and the symbols are
+# LINKED, not dead-stripped. Keep this sentence and Essence2Engine.swift's #if in
+# the same commit — a reader acting on the stale half concludes essence-2 has no
+# iOS leg at all. (What is genuinely unproven is a full-pipeline on-device iOS
+# RENDER: no target in essence-2/engine/light/ane/Package.swift drives the C ABI
+# on a device slice — only the Essence2 library enters the iOS xcframework.)
 #
 # libconverse.xcframework + the per-agent embody CoreML models land in the
 # plugin tree via scripts/bootstrap.sh (an embody Release vendor bundle, or a
@@ -112,9 +126,10 @@ Pod::Spec.new do |s|
   # second module-map xcframework: two vendored C-module xcframeworks break each
   # other's module resolution. Its header is served from this pod's own umbrella
   # (Engines/essence2/include/be_essence2.h). Vendored by scripts/bootstrap.sh only when
-  # an Essence2 vendor surface is present (essence2_lib). NOTE the essence2 runtime
-  # adapter is `#if os(macOS)`-gated, so its be_essence2 symbols dead-strip on iOS
-  # — the entry keeps the pod consistent across slices (as libconverse already is).
+  # an Essence2 vendor surface is present (essence2_lib). NOTE (corrected
+  # 2026-08-28; this said the adapter is `#if os(macOS)`-gated and dead-strips on
+  # iOS): the adapter is `#if (os(macOS) || os(iOS)) && ESSENCE2_AVAILABLE`, so on
+  # iOS these symbols are LINKED, not dead-stripped — see the header block.
   s.vendored_libraries  = engine_libs.map { |p| p.sub(__dir__ + '/', '') } if essence2_lib
 
   # Metal/MetalKit: ggml-metal (libconverse LOCAL mode). CoreML/Accelerate:
