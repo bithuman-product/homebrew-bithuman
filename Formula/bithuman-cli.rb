@@ -85,7 +85,22 @@ class BithumanCli < Formula
     # @loader_path resolves through the symlink to the real binary in libexec
     # (so the bundled lib/ is found), and the CLI canonicalizes current_exe so
     # its exe-relative engine search resolves to libexec through the symlink too.
-    libexec.install "bithuman", "lib", "expression2-model", "embody.model", "engines"
+    #
+    # ★INSTALL WHAT THE TARBALL CONTAINS, NOT A HAND-WRITTEN LIST. The line
+    # here used to be exactly five names, which made this formula a THIRD
+    # independent place the on-device essence-2 payload could be dropped after
+    # every gate upstream had passed (the other two: the release job's env vars,
+    # and its hand-written `tar` file list). The macOS tarball may also carry
+    # `libessence2.dylib` plus the resources libessence2 resolves through
+    # Bundle.main — the MLX/Expression *.bundle dirs and the a2x_w2v frontend —
+    # and all of those must sit BESIDE the binary in libexec or
+    # `bithuman run <X.elevatedir>` cannot render. Installing everything that
+    # was shipped is also self-maintaining: the next payload added to the
+    # tarball arrives without another edit here.
+    #
+    # Nothing else is in the archive — the release job builds it from a staging
+    # dir it populates itself — so this cannot pick up strays.
+    libexec.install Dir["*"]
     bin.install_symlink libexec/"bithuman"
   end
 

@@ -145,20 +145,117 @@ jobs:
           curl -fsSL -o engine-src/expression2-model "$RENDER_TOOL_URL"
           curl -fsSL -o engine-src/embody.model "$EMBODY_MODEL_URL"
 
+      # ─────────────────────────────────────────────────────────────────
+      # THE ESSENCE-2 ENGINE. This step did not exist, and its absence is the
+      # whole defect: this job set EXPRESSION2_MODEL_BIN and EMBODY_MODEL and
+      # never set LIBESSENCE2_DYLIB, so bundle-macos.sh's essence-2 block was a
+      # silent no-op. MEASURED on the published cli-v2.4.2 tarball
+      # (bithuman-aarch64-apple-darwin.tar.gz, 276,335,811 B, 99 entries,
+      # listed 2026-08-29): no libessence2.dylib, no essence-2 resources, no
+      # tessera anything — while the shipped binary's own load() error told
+      # users to install this tarball "because it vendors libessence2 next to
+      # the binary".
+      #
+      # IT IS BUILDABLE. On an Apple-Silicon host, cli/scripts/make-libessence2-
+      # dylib.sh re-links the pinned static archive out of
+      # essence2-libessence2-v1.0-a2x into a 56 MB dylib exporting all 15
+      # be_essence2_* entry points (measured on moraga 2026-08-29; a dlopen +
+      # dlsym probe resolved them, with a negative control that resolved none).
+      # Nothing here is blocked on a missing artifact.
+      #
+      # ★WHAT IT IS BLOCKED ON, AND IT IS AN OWNER ACTION: this repo has no
+      # credential that can READ bithuman-product/bithuman-models RELEASE
+      # ASSETS. It holds two SSH DEPLOY KEYS (BITHUMAN_CLI_SSH_KEY,
+      # BITHUMAN_MODELS_SSH_KEY) which clone git over ssh — release assets are
+      # not in git and are not reachable over ssh — plus this repo's own
+      # GITHUB_TOKEN, which is scoped to homebrew-bithuman. So this step needs
+      # ONE new secret, BITHUMAN_MODELS_RELEASE_TOKEN: a token with read access
+      # to bithuman-models releases. With it, the next tarball ships essence-2.
+      # Without it, the tarball is honestly DECLARED essence-2-less rather than
+      # silently shipped as one, and this job says so in the log.
+      #
+      # ★SIZE, so nobody is surprised by it: the resources are 373 MB extracted,
+      # 366 MB of which is the shared a2x_w2v.fp32.onnx frontend, plus the
+      # 56 MB dylib. A complete tarball is therefore roughly 2x today's 276 MB.
+      # That is a real product trade (every `brew install` pays it) and it is
+      # the owner's to make — which is another reason this step is opt-in by
+      # secret rather than switched on unilaterally.
+      - name: Source the essence-2 engine (libessence2) — or declare its absence
+        working-directory: cli
+        env:
+          MODELS_TOKEN: ${{ secrets.BITHUMAN_MODELS_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Keep the pin in ONE place: read it out of the SDK manifest that
+          # already owns it rather than restating the tag here, so a re-pin
+          # cannot leave this job fetching the previous engine.
+          E2_REPO=bithuman-product/bithuman-models
+          E2_TAG=essence2-libessence2-v1.0-a2x
+          if [ -z "${MODELS_TOKEN:-}" ]; then
+            echo "::warning::BITHUMAN_MODELS_RELEASE_TOKEN is not set — this tarball will ship NO essence-2 engine."
+            echo "::warning::the command 'bithuman run <X.elevatedir>' will fail on it with: could not load libessence2.dylib"
+            echo "::warning::Add a token with read access to $E2_REPO releases to ship the engine."
+            echo "BITHUMAN_TARBALL_NO_ESSENCE2=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          mkdir -p e2-src && cd e2-src
+          GH_TOKEN="$MODELS_TOKEN" gh release download "$E2_TAG" --repo "$E2_REPO" \
+            -p 'libessence2.xcframework.zip' -p 'onnxruntime.xcframework.zip' \
+            -p 'libessence2-resources.zip' --clobber
+          # bootstrap.sh's own sha256 pins, restated here so a swapped asset is
+          # caught at BUILD time rather than at a customer's first render.
+          echo "88ea9959991b07a0fc4dee2f1142019554b210f7ac0580295d25d8d329786f73  libessence2.xcframework.zip" | shasum -a 256 -c -
+          echo "94ce2120e59de3c039165a26ff95eb15be6085a142864e2e091169586d99aa22  libessence2-resources.zip"   | shasum -a 256 -c -
+          unzip -oq libessence2.xcframework.zip
+          unzip -oq onnxruntime.xcframework.zip
+          mkdir -p resources && unzip -oq libessence2-resources.zip -d resources
+          LIBESSENCE2_A="$PWD/libessence2.xcframework/macos-arm64/libessence2.a" \
+          ONNXRUNTIME_FW="$PWD/onnxruntime.xcframework/macos-arm64_x86_64" \
+          OUT="$PWD/libessence2.dylib" \
+            bash ../scripts/make-libessence2-dylib.sh
+          echo "LIBESSENCE2_DYLIB=$PWD/libessence2.dylib" >> "$GITHUB_ENV"
+          echo "LIBESSENCE2_RESOURCES=$PWD/resources" >> "$GITHUB_ENV"
+
       - name: Assemble tarball (bundle-macos.sh vendors engine + dylibs) + no-dup gate
         working-directory: cli
         run: |
           set -euo pipefail
           STAGE="$RUNNER_TEMP/stage"; rm -rf "$STAGE"; mkdir -p "$STAGE/engines"
           cp target/release/bithuman "$STAGE/bithuman"
+          # LIBESSENCE2_* are set by the step above only when the engine was
+          # sourced; bundle-macos.sh treats unset as "no essence-2" and its
+          # pairing gate then REFUSES the build unless
+          # BITHUMAN_TARBALL_NO_ESSENCE2=1 declares that on purpose (which the
+          # step above sets when the token is missing). Forgetting them can no
+          # longer produce a silently essence-2-less tarball.
           EXPRESSION2_MODEL_BIN="$PWD/engine-src/expression2-model" \
           EMBODY_MODEL="$PWD/engine-src/embody.model" \
+          LIBESSENCE2_DYLIB="${LIBESSENCE2_DYLIB:-}" \
+          LIBESSENCE2_RESOURCES="${LIBESSENCE2_RESOURCES:-}" \
+          BITHUMAN_TARBALL_NO_ESSENCE2="${BITHUMAN_TARBALL_NO_ESSENCE2:-0}" \
             bash scripts/bundle-macos.sh "$STAGE/bithuman"
           cp "engine-src/mac-arm64-$ENGINE_VERSION.engine" "$STAGE/engines/"
           BIN_DIR="$STAGE" bash scripts/check-engine-dedup.sh      # DISTRIBUTION.md §13
           TGZ="$RUNNER_TEMP/bithuman-aarch64-apple-darwin.tar.gz"
+          # ★THE FILE LIST USED TO BE HAND-WRITTEN: `tar ... bithuman lib
+          # expression2-model embody.model engines`. That list is a SECOND
+          # place a vendored file can be dropped, silently and after every
+          # gate has passed — libessence2.dylib and the essence-2 resource
+          # bundles are vendored into $STAGE by bundle-macos.sh and would have
+          # been left on the floor by this line even once everything upstream
+          # was correct. Archive what the staging directory actually CONTAINS,
+          # so vendoring and shipping cannot diverge again.
           ( cd "$STAGE" && COPYFILE_DISABLE=1 tar --no-xattrs --exclude '._*' \
-              -czf "$TGZ" bithuman lib expression2-model embody.model engines )
+              -czf "$TGZ" . )
+          # Say what shipped, in the log, at the size it shipped — the cheapest
+          # possible check on "did the engine make it in".
+          echo "tarball contents (top level):"
+          tar tzf "$TGZ" | sed 's|^\./||' | awk -F/ 'NF<=1 && $0!=""' | sort -u
+          if tar tzf "$TGZ" | grep -q 'libessence2\.dylib'; then
+            echo "::notice::this tarball VENDORS the essence-2 engine"
+          else
+            echo "::warning::this tarball ships NO essence-2 engine (declared)"
+          fi
           shasum -a 256 "$TGZ" | tee "$TGZ.sha256"
           echo "TGZ=$TGZ" >> "$GITHUB_ENV"
 

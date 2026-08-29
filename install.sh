@@ -204,6 +204,21 @@ bundle_root="$(dirname "$extracted_bin")"
 extracted_host=""; [ -f "$bundle_root/expression2-model" ] && extracted_host="$bundle_root/expression2-model"
 extracted_embody=""; [ -f "$bundle_root/embody.model" ] && extracted_embody="$bundle_root/embody.model"
 extracted_engines=""; [ -d "$bundle_root/engines" ] && extracted_engines="$bundle_root/engines"
+# ★THE ESSENCE-2 PAYLOAD, which this script never carried. The CLI dlopens
+# libessence2.dylib by exe-relative search (elevate/ffi.rs::candidates: next to
+# the binary, <exe>/lib, <exe>/../lib, ~/.bithuman/lib), and libessence2 then
+# resolves its MLX default.metallib and the Expression bundle through
+# Bundle.main — i.e. relative to the EXE dir — so BOTH must land beside
+# `bithuman` or `bithuman run <X.elevatedir>` fails. Discovered 2026-08-29
+# while tracing why cli-v2.4.2 ships no essence-2: even once the tarball
+# carries the engine, this installer would have left it in the temp dir,
+# because the payload it copies is a hand-written list. Absent ⇒ empty ⇒
+# not installed, exactly like the expression-2 payload above.
+extracted_e2lib=""; [ -f "$bundle_root/libessence2.dylib" ] && extracted_e2lib="$bundle_root/libessence2.dylib"
+extracted_e2res=""
+if [ -n "$(find "$bundle_root" -maxdepth 1 -name '*.bundle' -print -quit 2>/dev/null)" ]; then
+  extracted_e2res="$bundle_root"
+fi
 
 # ----- install ---------------------------------------------------------------
 
@@ -239,6 +254,27 @@ if [ -n "$extracted_engines" ]; then
   rm -rf "$install_dir/engines"
   cp -R "$extracted_engines" "$install_dir/engines"
   info "installed engines/ ($(ls -1 "$install_dir/engines" 2>/dev/null | tr '\n' ' '))"
+fi
+
+# essence-2: the dylib and its Bundle.main resources travel TOGETHER. Installing
+# one without the other produces a CLI that dlopens the engine and then dies at
+# the first render, which is strictly worse than not installing it at all — so
+# the pair is gated, and a half-payload says so instead of installing quietly.
+if [ -n "$extracted_e2lib" ] && [ -z "$extracted_e2res" ]; then
+  err "tarball carries libessence2.dylib but none of its resource bundles; skipping essence-2 (it would fail at first render)"
+elif [ -n "$extracted_e2lib" ]; then
+  cp "$extracted_e2lib" "$install_dir/libessence2.dylib"
+  chmod 755 "$install_dir/libessence2.dylib"
+  for b in "$extracted_e2res"/*.bundle; do
+    [ -e "$b" ] || continue
+    rm -rf "$install_dir/$(basename "$b")"
+    cp -R "$b" "$install_dir/"
+  done
+  for f in "$extracted_e2res"/a2x_w2v*.onnx "$extracted_e2res"/audio_encoder_fp16_window_*.onnx; do
+    [ -e "$f" ] || continue
+    cp "$f" "$install_dir/"
+  done
+  info "installed libessence2.dylib + essence-2 resources (on-device essence-2)"
 fi
 
 # ----- smoke test ------------------------------------------------------------
