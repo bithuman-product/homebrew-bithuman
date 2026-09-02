@@ -42,22 +42,46 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.4.2 — public family naming
-  # (info/pull/models/run speak essence-2 / essence-2-max) on top of
-  # 2.4.1's essence-2 MCP reachability + full .imx TOC + multi-agent
-  # audio hardening; source repo renamed bithuman-cli -> bithuman.
-  # First workflow-built tarball (release-cli.yml run 30729588176, which
-  # also shipped the Linux x86_64 tarball as a release asset — this
-  # formula stays mac-only, matching 2.4.0; the 2.4.0 tarballs were
-  # hand-cut). Apple Silicon (arm64). The macOS
-  # tarball is self-contained AND ships the expression-2 render engine
-  # next to the binary (expression2-model + embody.model blessed
-  # 90e4cf31cf71 + engines/mac-arm64-1.0.0.engine), so `bithuman run`
-  # renders Wise Pup out of the box with ZERO engine fetch.
+  # Current published release: cli-v2.5.0 — `bithuman pull <CODE> --model
+  # <FAMILY>`, and a no-flag `pull` that names the families it did NOT hand
+  # you (read off the download response's X-Bithuman-Model /
+  # -Model-Source / -Supported-Models headers). Before this, `pull` could
+  # only return the agent's BIRTH model, so an agent born essence-1 and
+  # later given another family was unreachable from the CLI.
+  #
+  # ★FIRST SIGNED + NOTARIZED macOS TARBALL. Every mac `bithuman` up to and
+  # including cli-v2.4.2 was AD-HOC signed (Signature=adhoc,
+  # TeamIdentifier=not set, `spctl -a -t install` rejected). `brew install`
+  # never noticed — Homebrew fetches with curl, which sets no
+  # com.apple.quarantine, and Gatekeeper only evaluates quarantined files —
+  # but a BROWSER download of the same tarball was quarantined, macOS
+  # propagated that onto every extracted member, and the binary was SIGKILLed
+  # on exec (rc=137, no message). This tarball carries `Developer ID
+  # Application: bitHuman Inc. (G64NFNZX84)` under the hardened runtime and
+  # an Apple notarization ticket; verified from a quarantined download,
+  # `spctl -a -t install` = accepted, source=Notarized Developer ID, and the
+  # binary runs rc=0.
+  #
+  # Cut on alpharetta rather than by release-cli.yml's mac lane: the signing
+  # identity is in that host's login keychain and homebrew-bithuman holds
+  # none of the MACOS_CERT_P12_* / NOTARY_* secrets, so the workflow's own
+  # gate correctly REFUSES to publish from CI. Same scripts either way
+  # (tap scripts/sign-macos.sh + notarize-macos.sh + verify-macos-release.sh,
+  # cli scripts/bundle-macos.sh + check-engine-dedup.sh). The Linux x86_64
+  # tarball on the same release IS workflow-built; this formula stays
+  # mac-only, matching 2.4.0/2.4.2.
+  #
+  # Apple Silicon (arm64). The macOS tarball is self-contained AND ships the
+  # expression-2 render engine next to the binary (expression2-model +
+  # embody.model blessed 90e4cf31cf71 + engines/mac-arm64-1.0.0.engine), so
+  # `bithuman run` renders Wise Pup out of the box with ZERO engine fetch.
+  # It ships NO essence-2 engine, deliberately and declared: the pinned
+  # essence2-libessence2-v1.0-a2x slices SYNTHESIZE teeth, and
+  # cli scripts/check-libessence2-borrows.sh refuses them at packaging.
   # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.4.2/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "49582d8ced9c78c9b80fd10d81414829f4601290ce1e60b2a9f1200d2b7c98bf"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.5.0/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "919b56fb53abca78db7a72189de150ec94de03be532dc6b48ff186ebcc0afbe5"
   license "Apache-2.0"
 
   depends_on arch: :arm64
@@ -111,6 +135,12 @@ class BithumanCli < Formula
         bithuman list                      # browse showcase avatars
         bithuman pull modern-court-jester  # download one
         bithuman run ~/.cache/bithuman/showcase/modern-court-jester.imx
+
+      Choosing a model family (new in 2.5.0):
+        bithuman pull <CODE>                       # the server's default
+        bithuman pull <CODE> --model essence-2     # ask for a family
+        Plain `pull` now also NAMES the families it did not hand you, and
+        says why you got the one you got.
 
       `bithuman run` prints a http://127.0.0.1:8088/<CODE> URL — open
       it, grant mic permission, talk.
