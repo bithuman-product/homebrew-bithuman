@@ -619,14 +619,63 @@ jobs:
           HOSTSRC="$BM_MAIN/models/expression-2/engine/cpu/serve/render_stream_host_litert.py"
           test -f "$HOSTSRC"   # the #278 two-interpreter split host (main-axis, see clone step)
           mkdir -p host-build && cp "$HOSTSRC" host-build/
+          # ★tools/shared_enc_dep.py MUST travel with the host, and the host says
+          # so itself. It is the ONE place the shared-encoder BASE policy lives:
+          # the two-artifact LiteRT split pairs an identity.tflite against a
+          # shared-enc.tflite, and pairing the wrong pair "loaded without error
+          # and rendered 181 frames, 0 of 181 matching the correct render" --
+          # silently wrong pixels, no exception. So when the module is absent the
+          # host REFUSES the split path by name rather than falling back to the
+          # old unchecked pairing.
+          #
+          # It lives in models/expression-2/tools/, NOT beside the host source in
+          # engine/cpu/serve/, so `cp "$HOSTSRC"` alone left it behind and the
+          # frozen host could never import it: at runtime under --onefile,
+          # os.path.dirname(__file__) is PyInstaller's extraction dir, so neither
+          # of the host's two search paths (the repo tools/ dir; beside this file)
+          # can resolve outside the bundle. MEASURED on run 33602563547, the
+          # host↔engine gate in build-linux.sh:
+          #   FATAL: ... is a two-artifact split, but this engine has no
+          #   shared_enc_dep.py ... (No module named 'shared_enc_dep')
+          #   host-engine gate: host exited before READY (rc=3)
+          # That is the gate working. The fix is to FREEZE the module in, from the
+          # SAME tree the host came from so producer and consumer cannot drift.
+          # It is stdlib-only (hashlib/os/re), so it adds no dependency, and it can
+          # only make the pairing check STRICTER -- never vacuous: with the module
+          # absent the split path refuses, with it present the declared base sha is
+          # actually verified.
+          SEDSRC="$BM_MAIN/models/expression-2/tools/shared_enc_dep.py"
+          test -f "$SEDSRC"
+          cp "$SEDSRC" host-build/
           docker run --rm --platform linux/amd64 -v "$PWD/host-build":/work ubuntu:22.04 bash -c '
             set -e; export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq && apt-get install -y -qq python3 python3-venv python3-pip binutils >/dev/null
             cd /work && python3 -m venv v && ./v/bin/pip -q install --upgrade pip wheel
             ./v/bin/pip -q install "ai_edge_litert==2.1.6" "numpy==2.2.6" "pyinstaller==6.21.0"
             ./v/bin/pyinstaller --onefile --name expression2-model --distpath d --workpath b \
+              --paths /work --hidden-import shared_enc_dep \
               --collect-all ai_edge_litert --collect-submodules numpy --console render_stream_host_litert.py'
           test -f host-build/d/expression2-model
+          # ★ASSERT THE MODULE IS ACTUALLY FROZEN IN. An unresolvable
+          # `--hidden-import` is a WARNING in PyInstaller, not a build error, so
+          # without this a future build could go green for the old reason.
+          #
+          # It has to be PYZ-00.toc, and that is a measured claim, not a guess.
+          # Two controls, built for real with PyInstaller 6.21.0:
+          #   module file present -> PYZ-00.toc names it 1x, Analysis-00.toc 3x
+          #   module file ABSENT  -> PYZ-00.toc names it 0x, Analysis-00.toc 1x
+          # So Analysis-00.toc is NON-ZERO IN BOTH -- it records the attempted
+          # import whether or not it resolved, and a guard reading it is blind to
+          # exactly the failure it exists to catch. Only PYZ-00.toc, the frozen
+          # module archive's index, discriminates.
+          # A raw grep of the onefile BINARY is also blind (measured: 0 hits even
+          # on a working build -- the PYZ payload is compressed).
+          PYZ="$(find host-build/b -name 'PYZ-*.toc' | head -1)"
+          [ -n "$PYZ" ] || { echo "::error::no PYZ toc under host-build/b -- cannot verify the freeze"; exit 1; }
+          grep -q "'shared_enc_dep'" "$PYZ" \
+            || { echo "::error::shared_enc_dep is NOT frozen into expression2-model ($PYZ)."; \
+                 echo "::error::The host would refuse every two-artifact split identity at render time."; exit 1; }
+          echo "shared_enc_dep frozen into the host (verified in $PYZ): OK"
           echo "HOST=$PWD/host-build/d/expression2-model" >> "$GITHUB_ENV"
 
       - name: Source the vendored engine + probe imx (PUBLIC pins from the CLI source)
