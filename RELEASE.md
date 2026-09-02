@@ -13,6 +13,27 @@ One repo, **one tag prefix per artifact**. Cut a tag, CI does the rest. Don't mi
 
 **Why the prefixes:** SwiftPM resolves packages by **bare semver tags**, so the bare `v*` namespace is the **Swift SDK's alone**. The CLI moved to `cli-v*` to stop colliding (old bare CLI tags ≤ `v2.3.25` are frozen history). `install.sh` and the formula follow `cli-v*` (with a fallback to the old bare tags until the next CLI release).
 
+## macOS code signing (CLI)
+
+`release-cli.yml`'s `mac-tarball` job Developer ID signs every Mach-O it ships
+(`scripts/sign-macos.sh`), notarizes them with Apple (`scripts/notarize-macos.sh`),
+and then verifies the finished tarball **with the quarantine attribute set**
+(`scripts/verify-macos-release.sh`) — the only state that actually exercises
+Gatekeeper. Without the signing secrets the job **refuses to publish**; re-dispatch
+with `allow_unsigned=true` to override deliberately.
+
+Every release up to and including `cli-v2.4.2` is ad-hoc signed and Gatekeeper
+rejects it. `brew install` users are unaffected (Homebrew's `curl` fetch sets no
+quarantine attribute); a browser download of the tarball is quarantined, macOS
+propagates that onto the extracted files, and the binary is SIGKILLed on launch.
+
+★ **Stapling is not possible for this artifact.** `xcrun stapler` only attaches a
+ticket to a disk image, installer package, or bundle — never to a bare Mach-O
+executable, which is what the tarball ships. The notarization ticket is therefore
+resolved online by CDHash on first launch. Shipping a stapled artifact would mean
+publishing a `.dmg`/`.pkg` instead of a `.tar.gz`, which is a distribution change,
+not a signing one.
+
 ## Secrets (this repo, or org-level — all repos inherit)
 `PYPI_API_TOKEN`, `PYPI_USERNAME` (=`__token__`), `BITHUMAN_MODELS_SSH_KEY` (private half of the read-only deploy key `homebrew-bithuman-ci-ro` on the `bithuman-models` engine monorepo — probe it with the `preflight` workflow). No Maven/Android/OSSRH/GPG.
 

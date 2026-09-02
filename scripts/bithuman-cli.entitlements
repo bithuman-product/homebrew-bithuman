@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Entitlements for the hardened runtime on the `bithuman` CLI.
+
+	     Each key below is here because a MEASURED failure required it, not
+	     because it is commonly seen in signing recipes. The hardened runtime
+	     is mandatory for notarization, and every entitlement listed here
+	     RELAXES it, so the set is kept as small as the binary actually
+	     tolerates. See scripts/sign-macos.sh. -->
+
+	<!-- The CLI dlopen()s dylibs it did not ship: the expression-2 engine
+	     that imx_fetch.rs can download at runtime into ~/.bithuman/lib, and
+	     the native extensions in the managed brain venv under
+	     ~/.cache/bithuman/brain-venv. Under the hardened runtime, library
+	     validation refuses any dylib not signed by the same Team ID, which
+	     would break both paths. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

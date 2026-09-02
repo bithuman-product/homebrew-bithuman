@@ -1,6 +1,9 @@
 # Security Policy
 
-This repo is the Homebrew tap for `bithuman` (formerly `bithuman-cli`). The CLI binary is built from a private source repo and notarized by Apple before being attached to a GitHub Release. This tap just publishes the formula that points at those artifacts.
+This repo is the Homebrew tap for `bithuman` (formerly `bithuman-cli`). The CLI binary is built from a private source repo by `.github/workflows/release-cli.yml`, which Developer ID signs it as **bitHuman Inc. (G64NFNZX84)** with the hardened runtime and notarizes it with Apple before attaching it to a GitHub Release. This tap just publishes the formula that points at those artifacts.
+
+> **Releases up to and including `cli-v2.4.2` are AD-HOC signed and Gatekeeper rejects them.** This page previously claimed those builds were notarized; they were not. Measured against the published `cli-v2.4.2` tarball (sha256 `49582d8ced9c78c9…`): `codesign -dv` reports `Signature=adhoc` and `TeamIdentifier=not set`, and `spctl -a -t install` reports `rejected`.
+> Installs via `brew install` are unaffected in practice — Homebrew fetches with `curl`, which sets no `com.apple.quarantine` attribute, and Gatekeeper only evaluates quarantined files. If you downloaded the tarball from the Releases page **in a browser**, macOS propagates quarantine onto every extracted file and the binary is killed on launch (SIGKILL, no message). Either re-install with `brew install bithuman-cli`, or clear the attribute yourself with `xattr -dr com.apple.quarantine <dir>` after checking the published sha256.
 
 ## Reporting a vulnerability
 

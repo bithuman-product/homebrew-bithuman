@@ -47,6 +47,25 @@
 #                            the BLESSED live archive — byte-exact, never repacked)
 #   GITHUB_TOKEN             (built-in) — upload the asset to the release
 #
+# Secrets required for SIGNING + NOTARIZATION (★NOT YET PROVISIONED as of
+# 2026-09-02 — `gh secret list` on this repo shows none of them, and the three
+# inherited org secrets are Azure-only). Until they exist this job REFUSES to
+# publish a mac tarball unless it is re-dispatched with allow_unsigned=true:
+#   MACOS_CERT_P12_BASE64    base64 of the "Developer ID Application: bitHuman
+#                            Inc. (G64NFNZX84)" identity exported as .p12 WITH
+#                            its private key. The certificate itself already
+#                            exists — it is in the login keychain on alpharetta,
+#                            valid 2026-04-15 -> 2027-02-01. Export it from
+#                            Keychain Access; it has never been used to ship.
+#   MACOS_CERT_P12_PASSWORD  the .p12 export password
+#   and ONE of:
+#     NOTARY_KEY_P8_BASE64 + NOTARY_KEY_ID + NOTARY_ISSUER   (preferred; an
+#       App Store Connect API key. NOTARY_ISSUER is the UUID from App Store
+#       Connect > Users and Access > Integrations — it is NOT derivable from
+#       the .p8 and is not recorded anywhere in this estate.)
+#     NOTARY_APPLE_ID + NOTARY_TEAM_ID + NOTARY_PASSWORD     (Apple ID + an
+#       app-specific password; NOTARY_TEAM_ID=G64NFNZX84)
+#
 # Still dispatch-only by choice; secrets are wired, so `push: tags: [cli-v*]`
 # may be added once a tag-cut release is wanted.
 name: release-cli
@@ -66,6 +85,10 @@ on:
         description: 'Release tag to upload the tarball to (must already exist, e.g. cli-v2.4.0).'
         type: string
         required: true
+      allow_unsigned:
+        description: 'Publish an AD-HOC (Gatekeeper-rejected) mac tarball. Leave false unless you mean it.'
+        type: boolean
+        default: false
 
 permissions:
   contents: write            # upload the tarball asset to the Release
@@ -94,6 +117,11 @@ jobs:
           # GITHUB_TOKEN cannot read it (the exact first-run failure of
           # 2026-08-01). Read-only deploy key on the bithuman repo.
           ssh-key: ${{ secrets.BITHUMAN_CLI_SSH_KEY }}
+
+      - name: Checkout this tap (scripts/sign-macos.sh + notarize + verify)
+        uses: actions/checkout@v4
+        with:
+          path: tap
 
       - name: Toolchain (brew engine deps + rust)
         run: |
@@ -276,6 +304,146 @@ jobs:
             bash scripts/bundle-macos.sh "$STAGE/bithuman"
           cp "engine-src/mac-arm64-$ENGINE_VERSION.engine" "$STAGE/engines/"
           BIN_DIR="$STAGE" bash scripts/check-engine-dedup.sh      # DISTRIBUTION.md §13
+          # The tarball is NOT built here any more. $STAGE must be Developer ID
+          # signed and notarized FIRST -- signing rewrites every Mach-O in place,
+          # so a tarball rolled before signing would ship the ad-hoc bytes.
+          echo "STAGE=$STAGE" >> "$GITHUB_ENV"
+
+      # ────────────────────────────────────────────────────────────────
+      # Developer ID signing + notarization.
+      #
+      # Every mac `bithuman` up to and including cli-v2.4.2 shipped AD-HOC
+      # signed -- `Signature=adhoc`, `TeamIdentifier=not set`, and
+      # `spctl -a -t install` = rejected. bitHuman has held the
+      # `Developer ID Application: bitHuman Inc. (G64NFNZX84)` certificate the
+      # whole time and never used it.
+      #
+      # Measured on alpharetta (macOS 26.6.2, Gatekeeper + SIP on) against the
+      # exact cli-v2.4.2 tarball this workflow published, sha256 49582d8ced9c78c9:
+      #
+      #   published tarball, quarantined as a browser download:
+      #     codesign -dv      -> flags=0x2(adhoc), TeamIdentifier=not set
+      #     spctl -t install  -> rejected
+      #     ./bithuman --version -> rc=137   (SIGKILL, no message)
+      #
+      #   same tree, signed + notarized by these steps:
+      #     codesign -dv      -> Authority=Developer ID Application: bitHuman Inc.
+      #                          (G64NFNZX84), flags=0x10000(runtime)
+      #     spctl -t install  -> accepted, source=Notarized Developer ID
+      #     ./bithuman --version -> rc=0
+      #
+      # ★ Quarantine is what makes this matter, and it is also why almost nobody
+      # has hit it: Homebrew fetches with curl, which sets no quarantine
+      # attribute, so `brew install` users run the ad-hoc binary happily.
+      # A browser download of the same tarball is quarantined, macOS propagates
+      # that onto every extracted member (plain `tar -xzf` does it too, not just
+      # Archive Utility), and the binary is then killed on exec.
+      - name: Import the Developer ID signing certificate
+        id: signing_cert
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_P12_PASSWORD: ${{ secrets.MACOS_CERT_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MACOS_CERT_P12_BASE64:-}" ] || [ -z "${MACOS_CERT_P12_PASSWORD:-}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::MACOS_CERT_P12_BASE64 / MACOS_CERT_P12_PASSWORD not set — cannot sign"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          # Ephemeral keychain password: it guards a keychain that exists only
+          # for this job and is deleted below. It is not a durable secret.
+          KPW="$(uuidgen)"
+          security create-keychain -p "$KPW" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KPW" "$KEYCHAIN"
+          P12="$RUNNER_TEMP/cert.p12"
+          printf '%s' "$MACOS_CERT_P12_BASE64" | base64 --decode > "$P12"
+          security import "$P12" -k "$KEYCHAIN" -P "$MACOS_CERT_P12_PASSWORD" \
+                  -T /usr/bin/codesign -f pkcs12
+          rm -f "$P12"
+          # Without this, codesign blocks on a UI prompt that never comes and
+          # the job hangs until the timeout.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+                  -s -k "$KPW" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "MACOS_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          IDENT="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+                   | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
+          [ -n "$IDENT" ] || { echo "::error::no Developer ID Application identity in the imported .p12"; exit 1; }
+          echo "imported identity: $IDENT"
+          echo "MACOS_SIGN_IDENTITY=$IDENT" >> "$GITHUB_ENV"
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Sign every Mach-O with the Developer ID (hardened runtime)
+        if: steps.signing_cert.outputs.available == 'true'
+        run: bash tap/scripts/sign-macos.sh "$STAGE"
+
+      - name: Notarize with Apple
+        id: notarize
+        if: steps.signing_cert.outputs.available == 'true'
+        env:
+          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${NOTARY_KEY_P8_BASE64:-}" ] && [ -n "${NOTARY_KEY_ID:-}" ] && [ -n "${NOTARY_ISSUER:-}" ]; then
+            KEY="$RUNNER_TEMP/notary.p8"
+            printf '%s' "$NOTARY_KEY_P8_BASE64" | base64 --decode > "$KEY"
+            trap 'rm -f "$KEY"' EXIT
+            NOTARY_KEY="$KEY" bash tap/scripts/notarize-macos.sh "$STAGE"
+          elif [ -n "${NOTARY_APPLE_ID:-}" ] && [ -n "${NOTARY_TEAM_ID:-}" ] && [ -n "${NOTARY_PASSWORD:-}" ]; then
+            bash tap/scripts/notarize-macos.sh "$STAGE"
+          else
+            echo "notarized=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::no notarization credentials — signed but NOT notarized; Gatekeeper still rejects"
+            exit 0
+          fi
+          echo "notarized=true" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to publish an unsigned or unnotarized tarball
+        run: |
+          set -euo pipefail
+          SIGNED='${{ steps.signing_cert.outputs.available }}'
+          NOTARIZED='${{ steps.notarize.outputs.notarized }}'
+          if [ "$SIGNED" = "true" ] && [ "$NOTARIZED" = "true" ]; then
+            echo "signed + notarized — ok to publish"; exit 0
+          fi
+          # Mirrors the BITHUMAN_TARBALL_NO_ESSENCE2 pattern: shipping a
+          # degraded artifact has to be DECLARED, never a silent default.
+          if [ '${{ inputs.allow_unsigned }}' = 'true' ]; then
+            echo "::warning::publishing an ad-hoc / unnotarized tarball because allow_unsigned=true"
+            exit 0
+          fi
+          cat >&2 <<'EOF'
+          ::error::refusing to publish a Gatekeeper-rejected mac tarball.
+
+          This job will not repeat the cli-v2.4.2 defect (Signature=adhoc,
+          spctl rejected, SIGKILL on a quarantined download) by default.
+
+          Add these repo secrets on bithuman-product/homebrew-bithuman:
+            MACOS_CERT_P12_BASE64    base64 of the "Developer ID Application:
+                                     bitHuman Inc. (G64NFNZX84)" identity
+                                     exported as .p12 WITH its private key
+            MACOS_CERT_P12_PASSWORD  the .p12 export password
+          and ONE notarization credential:
+            NOTARY_KEY_P8_BASE64 + NOTARY_KEY_ID + NOTARY_ISSUER   (preferred)
+              -- App Store Connect API key; NOTARY_ISSUER is the UUID from
+                 App Store Connect > Users and Access > Integrations.
+            NOTARY_APPLE_ID + NOTARY_TEAM_ID + NOTARY_PASSWORD
+              -- Apple ID + an app-specific password. NOTARY_TEAM_ID=G64NFNZX84.
+
+          To publish anyway, re-dispatch with allow_unsigned=true.
+          EOF
+          exit 1
+
+      - name: Roll the tarball from the SIGNED stage
+        run: |
+          set -euo pipefail
           TGZ="$RUNNER_TEMP/bithuman-aarch64-apple-darwin.tar.gz"
           # ★THE FILE LIST USED TO BE HAND-WRITTEN: `tar ... bithuman lib
           # expression2-model embody.model engines`. That list is a SECOND
@@ -299,12 +467,27 @@ jobs:
           shasum -a 256 "$TGZ" | tee "$TGZ.sha256"
           echo "TGZ=$TGZ" >> "$GITHUB_ENV"
 
+      # The acceptance test, run on the bytes about to be uploaded and in the
+      # state a customer actually receives them in: QUARANTINED. An
+      # un-quarantined check would pass on an ad-hoc binary and prove nothing —
+      # that is exactly how this defect survived every release to date.
+      - name: Verify the tarball the way a customer receives it (quarantined)
+        if: steps.notarize.outputs.notarized == 'true'
+        run: bash tap/scripts/verify-macos-release.sh "$TGZ"
+
       - name: Upload tarball to the release + emit formula sha
         run: |
           set -euo pipefail
           gh release upload "$RELEASE_TAG" --repo bithuman-product/homebrew-bithuman --clobber \
             "$TGZ" "$TGZ.sha256"
           echo "::notice::Formula sha256 for cli $RELEASE_TAG = $(cut -d' ' -f1 "$TGZ.sha256")"
+
+      - name: Remove the temporary signing keychain
+        if: always()
+        run: |
+          if [ -n "${MACOS_KEYCHAIN:-}" ] && [ -f "$MACOS_KEYCHAIN" ]; then
+            security delete-keychain "$MACOS_KEYCHAIN" || true
+          fi
 
   # ──────────────────────────────────────────────────────────────────
   # Linux x86_64 lane — the analogue of mac-tarball, so `bithuman run` renders

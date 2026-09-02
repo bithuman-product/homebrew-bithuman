@@ -1,6 +1,6 @@
 # Contributing
 
-This repo is the **Homebrew tap** for `bithuman-cli` (briefly `bithuman`, originally `bithuman-cli`). It hosts the formula and the notarized release artifacts — that's it. The formula is bumped automatically when we cut a new release; the CLI itself is distributed as a signed binary attached to those releases.
+This repo is the **Homebrew tap** for `bithuman-cli` (briefly `bithuman`, originally `bithuman-cli`). It hosts the formula and the release artifacts — that's it. The formula is bumped automatically when we cut a new release; the CLI itself is distributed as a Developer ID signed, Apple-notarized binary attached to those releases (see `scripts/sign-macos.sh` and `scripts/notarize-macos.sh`; releases up to `cli-v2.4.2` predate that and are ad-hoc signed).
 
 A short orientation:
 
