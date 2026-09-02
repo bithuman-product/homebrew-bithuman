@@ -734,13 +734,35 @@ jobs:
           SEDSRC="$BM_MAIN/models/expression-2/tools/shared_enc_dep.py"
           test -f "$SEDSRC"
           cp "$SEDSRC" host-build/
+          # ★ AND selfhost_meter.py, FOR THE SAME REASON, ON THE SAME EVIDENCE.
+          # Since bithuman-models ef7702ce2 the host also imports `selfhost_meter`
+          # (the self-host billing beat). This recipe did not carry it, and the
+          # consequence is not cosmetic: a freeze of current bithuman-models main
+          # under the OLD recipe produces a binary that REFUSES EVERY RENDER --
+          # MEASURED, rc=5 / rc=4 before READY, not reasoned. It is the identical
+          # failure shape as shared_enc_dep above, for the identical reason: under
+          # --onefile, os.path.dirname(__file__) is PyInstaller's extraction dir, so
+          # neither of the host's search paths can resolve a module that was left on
+          # the build machine.
+          #
+          # ★It is still needed now that metering is FAIL-OPEN (bithuman-models
+          # 2026-09-02: selfhost_meter.ENFORCE_DEFAULT = False). Fail-open means a
+          # missing meter no longer kills the render -- it means the render goes out
+          # UNMETERED with a `★ UNMETERED RENDER` banner and nothing reaches the
+          # ledger. A recipe that silently drops the module would ship a CLI that
+          # cannot bill anybody, which is the defect the meter exists to close. So
+          # the module must travel whichever way the enforcement switch is set, and
+          # the PYZ assertion below is what proves it did.
+          METERSRC="$BM_MAIN/models/expression-2/engine/cpu/serve/selfhost_meter.py"
+          test -f "$METERSRC"
+          cp "$METERSRC" host-build/
           docker run --rm --platform linux/amd64 -v "$PWD/host-build":/work ubuntu:22.04 bash -c '
             set -e; export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq && apt-get install -y -qq python3 python3-venv python3-pip binutils >/dev/null
             cd /work && python3 -m venv v && ./v/bin/pip -q install --upgrade pip wheel
             ./v/bin/pip -q install "ai_edge_litert==2.1.6" "numpy==2.2.6" "pyinstaller==6.21.0"
             ./v/bin/pyinstaller --onefile --name expression2-model --distpath d --workpath b \
-              --paths /work --hidden-import shared_enc_dep \
+              --paths /work --hidden-import shared_enc_dep --hidden-import selfhost_meter \
               --collect-all ai_edge_litert --collect-submodules numpy --console render_stream_host_litert.py'
           test -f host-build/d/expression2-model
           # ★ASSERT THE MODULE IS ACTUALLY FROZEN IN. An unresolvable
@@ -763,6 +785,11 @@ jobs:
             || { echo "::error::shared_enc_dep is NOT frozen into expression2-model ($PYZ)."; \
                  echo "::error::The host would refuse every two-artifact split identity at render time."; exit 1; }
           echo "shared_enc_dep frozen into the host (verified in $PYZ): OK"
+          grep -q "'selfhost_meter'" "$PYZ" \
+            || { echo "::error::selfhost_meter is NOT frozen into expression2-model ($PYZ)."; \
+                 echo "::error::Metering is fail-open, so this does NOT fail the render --"; \
+                 echo "::error::it ships a CLI whose every self-hosted render is UNMETERED."; exit 1; }
+          echo "selfhost_meter frozen into the host (verified in $PYZ): OK"
           echo "HOST=$PWD/host-build/d/expression2-model" >> "$GITHUB_ENV"
 
       - name: Source the vendored engine + probe imx (PUBLIC pins from the CLI source)
