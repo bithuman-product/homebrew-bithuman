@@ -209,6 +209,46 @@ jobs:
           unzip -oq libessence2.xcframework.zip
           unzip -oq onnxruntime.xcframework.zip
           mkdir -p resources && unzip -oq libessence2-resources.zip -d resources
+          # ★THE BORROW GATE, ON THE SLICE, BEFORE ANY OF IT IS BUILT.
+          #
+          # essence-2's bar is an owner ruling and a switch, not a gradient:
+          # teeth are BORROWED from the audio-driven teacher on every lane,
+          # with zero synthesis and never a synthesizing fallback. The engine
+          # this step just digest-verified does NOT clear that bar — measured
+          # 2026-09-02 on these exact bytes, all three slices score
+          # tessera_bank 0 / tessera_head 0 while the instrument's own controls
+          # fire (a2x 214/174/172, be_essence2_create 12). It cannot open the
+          # donor bank; there is no borrow code in it.
+          #
+          # cli/scripts/bundle-macos.sh refuses it too (that is the load-bearing
+          # gate, one step before the copy that would make it part of the
+          # tarball). This runs the SAME check here so the failure is attributed
+          # to the engine at the moment it is fetched, instead of forty minutes
+          # later inside an assembly step — and so the reason lands next to the
+          # secret whose arrival caused it.
+          #
+          # WHEN THE ENGINE LEARNS TO BORROW this turns green on its own and
+          # nothing here needs editing.
+          # `cli_ref` is a dispatch input, so it can name a ref that predates
+          # the gate. "The gate file is absent" and "the engine is fine" must
+          # never look the same from here.
+          if [ ! -f ../scripts/check-libessence2-borrows.sh ]; then
+            echo "::error::cli_ref '${{ inputs.cli_ref }}' has no scripts/check-libessence2-borrows.sh."
+            echo "::error::Refusing to vendor an essence-2 engine no gate has read. Build from a cli_ref"
+            echo "::error::at or after bithuman-product/bithuman 60195fe, or unset"
+            echo "::error::BITHUMAN_MODELS_RELEASE_TOKEN to ship a tarball without essence-2."
+            exit 1
+          fi
+          bash ../scripts/check-libessence2-borrows.sh \
+            "$PWD/libessence2.xcframework/macos-arm64/libessence2.a" || {
+              rc=$?
+              echo "::error::REFUSING to build a macOS tarball around this essence-2 engine (gate rc=$rc)."
+              echo "::error::rc=3 it SYNTHESIZES teeth — it never references the frozen donor-bank members."
+              echo "::error::rc=2 it could not be inspected — a gate that cannot read must not guess."
+              echo "::error::Fix the ENGINE (bithuman-models models/essence-2: port the TESSERA TeethPass"
+              echo "::error::into the CoreML/ANE core and cut a new pinned release), then re-run. To ship a"
+              echo "::error::tarball WITHOUT essence-2 in the meantime, unset BITHUMAN_MODELS_RELEASE_TOKEN."
+              exit "$rc"; }
           LIBESSENCE2_A="$PWD/libessence2.xcframework/macos-arm64/libessence2.a" \
           ONNXRUNTIME_FW="$PWD/onnxruntime.xcframework/macos-arm64_x86_64" \
           OUT="$PWD/libessence2.dylib" \
