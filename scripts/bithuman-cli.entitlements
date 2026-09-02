@@ -15,7 +15,19 @@
 	     the native extensions in the managed brain venv under
 	     ~/.cache/bithuman/brain-venv. Under the hardened runtime, library
 	     validation refuses any dylib not signed by the same Team ID, which
-	     would break both paths. -->
+	     would break both paths.
+
+	     MEASURED, so this is not a cargo-culted key. A minimal dlopen host
+	     signed with the same Developer ID and the hardened runtime, opening
+	     the ad-hoc lible_core.dylib from the PyPI `bithuman` wheel:
+
+	       no entitlements  -> dlopen FAILED, rc=1
+	          "code signature ... not valid for use in process: mapping
+	           process and mapped file (non-platform) have different Team IDs"
+	       this entitlement -> DLOPEN_OK, rc=0
+
+	     Remove this key and any dlopen of a dylib bitHuman did not sign
+	     fails exactly that way. -->
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
 </dict>
