@@ -42,12 +42,19 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.5.0 — `bithuman pull <CODE> --model
-  # <FAMILY>`, and a no-flag `pull` that names the families it did NOT hand
-  # you (read off the download response's X-Bithuman-Model /
-  # -Model-Source / -Supported-Models headers). Before this, `pull` could
-  # only return the agent's BIRTH model, so an agent born essence-1 and
-  # later given another family was unreachable from the CLI.
+  # Current published release: cli-v2.5.1 — the CLI that has to be installed
+  # BEFORE platform 685b2c4b (the unified `<CODE>.imx` download filename) is
+  # deployed. cmd/cloud.rs::route chose LOCAL Apple-Silicon render vs a PAID
+  # cloud session by testing that server-supplied filename for `.avatar`, so
+  # under the unified name an expression-2 agent would have stopped rendering
+  # locally and quietly opened a billed cloud session. 2.5.1 also gives
+  # `bithuman render` a family router: essence-2 and expression-2 containers
+  # used to come back rc=70 "file corrupt" from the essence-1 loader.
+  #
+  # cli-v2.5.0 (superseded) carried `bithuman pull <CODE> --model <FAMILY>`
+  # and the no-flag `pull` that names the families it did NOT hand you, read
+  # off the download response's X-Bithuman-Model / -Model-Source /
+  # -Supported-Models headers.
   #
   # ★FIRST SIGNED + NOTARIZED macOS TARBALL. Every mac `bithuman` up to and
   # including cli-v2.4.2 was AD-HOC signed (Signature=adhoc,
@@ -75,13 +82,24 @@ class BithumanCli < Formula
   # expression-2 render engine next to the binary (expression2-model +
   # embody.model blessed 90e4cf31cf71 + engines/mac-arm64-1.0.0.engine), so
   # `bithuman run` renders Wise Pup out of the box with ZERO engine fetch.
-  # It ships NO essence-2 engine, deliberately and declared: the pinned
-  # essence2-libessence2-v1.0-a2x slices SYNTHESIZE teeth, and
-  # cli scripts/check-libessence2-borrows.sh refuses them at packaging.
+  # It ships NO essence-2 engine, deliberately and declared
+  # (BITHUMAN_TARBALL_NO_ESSENCE2=1), and ★the REASON has changed since this
+  # comment was written, so read it again rather than trusting the old one.
+  # It used to say the pinned essence2-libessence2-v1.0-a2x slices SYNTHESIZE
+  # teeth and check-libessence2-borrows.sh refuses them. The pin moved: it now
+  # resolves essence2-libessence2-v1.1-tessera, which the SAME gate passes
+  # (rc 0, bank 6 / head 7, with v1.0-a2x kept as the rc-3 control). What
+  # actually keeps the engine out is (a) no credential on this estate can read
+  # bithuman-models RELEASE ASSETS from the mac build host, and (b) vendoring
+  # it roughly DOUBLES the tarball (373 MB of resources + a 56 MB dylib on
+  # top of today's 276 MB) — an owner-level product trade, not a packaging
+  # oversight. Until it is made, `bithuman run <X.elevatedir>` and
+  # `bithuman render <essence-2>.imx` exit 69 UNAVAILABLE naming
+  # libessence2.dylib, which is an honest refusal, not a render.
   # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.5.0/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "919b56fb53abca78db7a72189de150ec94de03be532dc6b48ff186ebcc0afbe5"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.5.1/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "94a282cf786a1b4fd37a2198a1f571e77a1c33ca0513a6d74f5522f94c7e6bbe"
   license "Apache-2.0"
 
   depends_on arch: :arm64
