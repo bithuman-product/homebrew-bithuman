@@ -220,7 +220,7 @@ jobs:
       #
       # IT IS BUILDABLE. On an Apple-Silicon host, cli/scripts/make-libessence2-
       # dylib.sh re-links the pinned static archive out of
-      # essence2-libessence2-v1.0-a2x into a 56 MB dylib exporting all 15
+      # the pinned libessence2 release into a 56 MB dylib exporting all 15
       # be_essence2_* entry points (measured on moraga 2026-08-29; a dlopen +
       # dlsym probe resolved them, with a negative control that resolved none).
       # Nothing here is blocked on a missing artifact.
@@ -248,11 +248,7 @@ jobs:
           MODELS_TOKEN: ${{ secrets.BITHUMAN_MODELS_RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          # Keep the pin in ONE place: read it out of the SDK manifest that
-          # already owns it rather than restating the tag here, so a re-pin
-          # cannot leave this job fetching the previous engine.
           E2_REPO=bithuman-product/bithuman-models
-          E2_TAG=essence2-libessence2-v1.0-a2x
           if [ -z "${MODELS_TOKEN:-}" ]; then
             echo "::warning::BITHUMAN_MODELS_RELEASE_TOKEN is not set — this tarball will ship NO essence-2 engine."
             echo "::warning::the command 'bithuman run <X.elevatedir>' will fail on it with: could not load libessence2.dylib"
@@ -260,14 +256,87 @@ jobs:
             echo "BITHUMAN_TARBALL_NO_ESSENCE2=1" >> "$GITHUB_ENV"
             exit 0
           fi
+          # ── THE PIN LIVES IN ONE PLACE, AND NOW IT ACTUALLY DOES ────────────
+          # ★This block used to carry `E2_TAG=essence2-libessence2-v1.0-a2x`
+          # and both sha256s hardcoded, UNDER a comment claiming it read them
+          # from the SDK manifest "so a re-pin cannot leave this job fetching
+          # the previous engine". It did the exact thing the comment said it
+          # did not. A comment describing a property the code lacks is worse
+          # than no comment: it tells the next reader not to check.
+          #
+          # It was inert only because MODELS_TOKEN is unset. The moment the
+          # token is armed, the old pin fetches the SUPERSEDED v1.0-a2x engine,
+          # the borrow gate below returns rc 3, and the build fails BLAMING THE
+          # ENGINE — sending whoever is on it to chase a perfectly good
+          # artifact. So the tag and the digests move together, from one source.
+          #
+          # The owner is models/essence-2/sdk/scripts/bootstrap.sh, on
+          # bithuman-models MAIN. ★MAIN, not the essence1-v* tag this job
+          # already has checked out for libessence.a: the essence-2 engine pin
+          # lives on a DIFFERENT AXIS from the essence-1 ABI tag (the same trap
+          # the linux job hit with the LiteRT host). MEASURED 2026-09-02 — at
+          # essence1-v2.3.11-win.1 that file reads
+          #     LIBESSENCE2_RELEASE=libessence2-v1.0-a2x
+          # which is BOTH the superseded engine AND a tag that does not exist
+          # (the release is `essence2-libessence2-v1.0-a2x`). The validation
+          # below rejects that shape by name rather than 404ing later.
+          E2_BS_REF=main
+          git clone --filter=blob:none --no-checkout --depth 1 \
+              --branch "$E2_BS_REF" "https://github.com/$E2_REPO" e2-pin
+          git -C e2-pin sparse-checkout set --no-cone \
+              models/essence-2/sdk/scripts/bootstrap.sh
+          git -C e2-pin checkout
+          E2_BS=e2-pin/models/essence-2/sdk/scripts/bootstrap.sh
+          [ -f "$E2_BS" ] || { echo "::error::no $E2_BS on bithuman-models $E2_BS_REF —"; \
+            echo "::error::the essence-2 engine pin has no owner to read. Refusing to guess a tag."; exit 1; }
+          # Both spellings the file uses: ${VAR-default} and ${VAR:-default}.
+          _pin() { sed -nE "s/^$1=\"\\$\\{$1:?-([^}\"]+)\\}\".*/\\1/p" "$E2_BS" | head -1; }
+          E2_TAG="$(_pin LIBESSENCE2_RELEASE)"
+          E2_SHA_XCF="$(_pin LIBESSENCE2_SHA256)"
+          E2_SHA_RES="$(_pin LIBESSENCE2_RESOURCES_SHA256)"
+          echo "essence-2 engine pin (from bithuman-models $E2_BS_REF bootstrap.sh):"
+          echo "  tag        $E2_TAG"
+          echo "  xcframework sha256 $E2_SHA_XCF"
+          echo "  resources   sha256 $E2_SHA_RES"
+          # A gate that cannot read must refuse, never guess — and an empty or
+          # wrong-axis value must not become a download of "whatever exists".
+          case "$E2_TAG" in
+            essence2-libessence2-v*) ;;
+            *) echo "::error::bootstrap.sh yielded E2_TAG='$E2_TAG', which is not an"
+               echo "::error::essence2-libessence2-v* release tag. Either the file moved or this"
+               echo "::error::checkout is on the wrong axis. Refusing to fetch an unidentified engine."
+               exit 1 ;;
+          esac
+          for v in E2_SHA_XCF E2_SHA_RES; do
+            eval "val=\$$v"
+            printf '%s' "$val" | grep -Eq '^[0-9a-f]{64}$' \
+              || { echo "::error::$v='$val' is not a lowercase sha256 — refusing."; exit 1; }
+          done
           mkdir -p e2-src && cd e2-src
           GH_TOKEN="$MODELS_TOKEN" gh release download "$E2_TAG" --repo "$E2_REPO" \
-            -p 'libessence2.xcframework.zip' -p 'onnxruntime.xcframework.zip' \
-            -p 'libessence2-resources.zip' --clobber
-          # bootstrap.sh's own sha256 pins, restated here so a swapped asset is
-          # caught at BUILD time rather than at a customer's first render.
-          echo "88ea9959991b07a0fc4dee2f1142019554b210f7ac0580295d25d8d329786f73  libessence2.xcframework.zip" | shasum -a 256 -c -
-          echo "94ce2120e59de3c039165a26ff95eb15be6085a142864e2e091169586d99aa22  libessence2-resources.zip"   | shasum -a 256 -c -
+            -p 'libessence2.xcframework.zip' -p 'libessence2-resources.zip' --clobber
+          # The pins from bootstrap.sh, checked here so a swapped asset is caught
+          # at BUILD time rather than at a customer's first render.
+          echo "$E2_SHA_XCF  libessence2.xcframework.zip" | shasum -a 256 -c -
+          echo "$E2_SHA_RES  libessence2-resources.zip"   | shasum -a 256 -c -
+          # ★onnxruntime.xcframework.zip IS PINNED SEPARATELY, ON PURPOSE, AND
+          # IT IS NOT ON THE ENGINE TAG. bootstrap.sh never fetches it (the
+          # SwiftPM path links ORT its own way), so the engine release stopped
+          # attaching it: MEASURED 2026-09-02, essence2-libessence2-v1.1-tessera
+          # carries libessence2.xcframework.zip + libessence2-resources.zip +
+          # LIBESSENCE2_PROVENANCE.txt and NO onnxruntime asset, while
+          # v1.0-a2x still does. make-libessence2-dylib.sh needs it
+          # (ONNXRUNTIME_FW is a hard `:?` require), so a naive tag bump would
+          # have failed at `unzip onnxruntime.xcframework.zip` with the engine
+          # looking guilty again. It is a third-party runtime on its own axis,
+          # so it gets its own declared tag + digest rather than riding the
+          # engine's. When a future engine release attaches it again, move this
+          # to $E2_TAG and delete this comment.
+          E2_ORT_TAG=essence2-libessence2-v1.0-a2x
+          E2_ORT_SHA=7d631c161ae0d9c6f01095bcb5556d0b4f0205dc5111e6d2ddae82cc7050a7ed
+          GH_TOKEN="$MODELS_TOKEN" gh release download "$E2_ORT_TAG" --repo "$E2_REPO" \
+            -p 'onnxruntime.xcframework.zip' --clobber
+          echo "$E2_ORT_SHA  onnxruntime.xcframework.zip" | shasum -a 256 -c -
           unzip -oq libessence2.xcframework.zip
           unzip -oq onnxruntime.xcframework.zip
           mkdir -p resources && unzip -oq libessence2-resources.zip -d resources
@@ -275,22 +344,40 @@ jobs:
           #
           # essence-2's bar is an owner ruling and a switch, not a gradient:
           # teeth are BORROWED from the audio-driven teacher on every lane,
-          # with zero synthesis and never a synthesizing fallback. The engine
-          # this step just digest-verified does NOT clear that bar — measured
-          # 2026-09-02 on these exact bytes, all three slices score
-          # tessera_bank 0 / tessera_head 0 while the instrument's own controls
-          # fire (a2x 214/174/172, be_essence2_create 12). It cannot open the
-          # donor bank; there is no borrow code in it.
+          # with zero synthesis and never a synthesizing fallback.
           #
-          # cli/scripts/bundle-macos.sh refuses it too (that is the load-bearing
-          # gate, one step before the copy that would make it part of the
-          # tarball). This runs the SAME check here so the failure is attributed
-          # to the engine at the moment it is fetched, instead of forty minutes
-          # later inside an assembly step — and so the reason lands next to the
-          # secret whose arrival caused it.
+          # ★THE ENGINE HAS LEARNED TO BORROW, and this comment used to say the
+          # opposite. It described v1.0-a2x, which scored tessera_bank 0 /
+          # tessera_head 0. The pin above now resolves
+          # essence2-libessence2-v1.1-tessera, and MEASURED 2026-09-02 on
+          # lafayette against the published bytes (xcframework sha256
+          # 7516b0c1…, extracted on real disk — /tmp there is tmpfs and a
+          # 733 MB extraction dies mid-unzip, which this gate reports as rc 2,
+          # a HOST problem that reads exactly like an ENGINE problem):
           #
-          # WHEN THE ENGINE LEARNS TO BORROW this turns green on its own and
-          # nothing here needs editing.
+          #   v1.1-tessera  macos-arm64          rc 0   bank 6  head 7
+          #   v1.1-tessera  ios-arm64            rc 0   bank 6  head 7
+          #   v1.1-tessera  ios-arm64-simulator  rc 0   bank 6  head 7
+          #   v1.0-a2x      macos-arm64          rc 3   bank 0  head 0  ← control
+          #   v1.0-a2x      ios-arm64            rc 3   bank 0  head 0  ← control
+          #   (missing file)                     rc 2                   ← control
+          #
+          # The instrument's own controls fire in BOTH directions on the same
+          # archives (be_essence2_create 12; a2x 267/203/201 on the new bytes,
+          # 214/174 on the old), so the rc 0 is a measurement, not a gate that
+          # stopped looking.
+          #
+          # cli/scripts/bundle-macos.sh runs the same refusal (that is the
+          # load-bearing gate, one step before the copy that would make it part
+          # of the tarball). This runs the SAME check here so a failure is
+          # attributed to the engine at the moment it is fetched, instead of
+          # forty minutes later inside an assembly step — and so the reason
+          # lands next to the secret whose arrival caused it.
+          #
+          # ★IT IS STILL LOAD-BEARING. Keep it: it is what stops a future
+          # re-pin, or a hand-set E2_TAG, from walking a synthesizing engine
+          # back into the tarball. Nothing about a green today licenses
+          # deleting it.
           # `cli_ref` is a dispatch input, so it can name a ref that predates
           # the gate. "The gate file is absent" and "the engine is fine" must
           # never look the same from here.
@@ -716,10 +803,38 @@ jobs:
           # through tools/imx_from_bundle.py so it stamps its base content address,
           # then re-dispatch this workflow with build_linux=true.
           #
-          # UNTIL THEN NO LINUX TARBALL IS PUBLISHED, by design -- the gate refuses
-          # rather than shipping a host/engine pairing nothing verified.
-          # cli-v2.5.0 therefore carries the macOS tarball only, and cli-v2.4.2's
-          # linux asset is untouched.
+          # ★CORRECTED 2026-09-02: "UNTIL THEN NO LINUX TARBALL IS PUBLISHED"
+          # was true of THIS JOB and was read as true of the RELEASE. It was not.
+          # cli-v2.5.0 shipped macOS-only and every Linux customer running the
+          # documented `curl … install.sh | sh` got a 404 and rc=1 (reproduced
+          # on lafayette before anything was changed). A blocked build job is
+          # not a neutral state when the installer resolves the newest cli-v*
+          # tag; see the verify-release-coverage job at the end of this file,
+          # which now makes that failure LOUD instead of leaving it to a
+          # customer to discover.
+          #
+          # cli-v2.5.0's Linux tarball WAS published (2026-09-02T11:55Z,
+          # sha256 439d8222…): the 2.5.0 `bithuman` binary built from this same
+          # cli main (`--model` + the disclosure-header path), vendoring the
+          # expression2-model host and linux-x64-1.0.0.engine BYTE-IDENTICAL to
+          # the ones cli-v2.4.2 already ships (host sha256 2270798418b0462b…,
+          # engine 4ad3ce614be572e2… = the imx_fetch.rs pin). Both gates were
+          # run on those exact bytes and passed: no-dup, and host↔engine
+          # rendered 85 frames from wise-pup.imx.
+          #
+          # ★THE FRESHLY-BUILT HOST IS STILL BLOCKED, and deliberately was not
+          # shipped. The host this job builds now freezes in shared_enc_dep.py,
+          # and with it present the host REFUSES wise-pup.imx at load
+          # (sys.exit(3)) because that container declares no shared-enc base.
+          # That is not only a gate problem: shipping that host would make
+          # `bithuman run` — the out-of-box showcase — fail for every Linux
+          # customer. So the 2.5.0 tarball carries the host cli-v2.4.2 already
+          # shipped, unchanged, and this job stays red until the OWNER ACTION
+          # above (re-emit wise-pup.imx through tools/imx_from_bundle.py so it
+          # stamps its base content address) lands. cli-v2.4.2's assets were
+          # NOT touched: the publish used scripts/upload-release-asset.sh
+          # against cli-v2.5.0, which can only address the tag it is given and
+          # refuses a name that already exists.
 
       - name: Build + vendor + gate the linux tarball (scripts/build-linux.sh)
         working-directory: cli
@@ -748,3 +863,74 @@ jobs:
           # tarball. See scripts/upload-release-asset.sh.
           bash tap/scripts/upload-release-asset.sh "$RELEASE_TAG" "$TGZ" "$TGZ.sha256"
           echo "::notice::Linux tarball sha256 for cli $RELEASE_TAG = $(cut -d' ' -f1 "$TGZ.sha256")"
+
+  # ──────────────────────────────────────────────────────────────────
+  # Coverage gate: a release that publishes SOME platforms and not others must
+  # go RED, not ship silently.
+  #
+  # ★THIS IS THE INSTANCE THAT MADE IT NECESSARY. `linux-tarball` above was
+  # gated behind `inputs.build_linux` — correctly, because ungated it ended in
+  # an unguarded `gh release upload --clobber` that could replace a published
+  # Linux asset for whatever tag was passed. One hazard closed, another opened:
+  # cli-v2.5.0 was dispatched build_linux=false, shipped macOS-only, and the run
+  # went GREEN. Every Linux customer running the documented one-liner then got
+  #
+  #   curl: (22) The requested URL returned error: 404   -> install.sh rc=1
+  #
+  # because install.sh resolves the newest `cli-v*` tag and finds no
+  # bithuman-x86_64-unknown-linux-gnu.tar.gz on it. Nothing anywhere compared
+  # what the release CARRIES against what the release before it HAD.
+  #
+  # `needs` both build jobs with `if: !cancelled()` so this runs even when one
+  # of them was SKIPPED — the skip is precisely the condition it exists to
+  # catch. It reads the LIVE releases index (not this run's artifacts): the
+  # artifacts cannot see a platform that was never built in this run, and the
+  # customer downloads from the release, not from an artifact.
+  #
+  # Shape mirrors bithuman-models' verify-wheel-coverage / tools/
+  # verify_pypi_platform_coverage.py, down to the "prove the gate fires before
+  # trusting its green" self-test step.
+  verify-release-coverage:
+    name: Verify release platform coverage
+    needs: [mac-tarball, linux-tarball]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout this tap (tools/verify_release_platform_coverage.py)
+        uses: actions/checkout@v4
+
+      - name: Prove the gate FIRES before trusting its green (mutation control)
+        # In-process refusal arms + opposite-direction controls. Never re-execs
+        # itself — a positive control that re-runs itself unmutated is a fork
+        # bomb, and one of those OOM-stormed lafayette on 2026-09-01.
+        run: python3 tools/verify_release_platform_coverage.py --self-test
+
+      - name: The release must not drop a platform its predecessor had
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          # The Releases API can lag a few seconds behind an upload; retry a
+          # handful of times before believing an asset is absent. rc=2 means
+          # the index was UNREADABLE — never treated as green.
+          rc=1
+          for i in 1 2 3 4 5 6; do
+            set +e
+            python3 tools/verify_release_platform_coverage.py --tag "$RELEASE_TAG"
+            rc=$?
+            set -e
+            [ "$rc" -eq 0 ] && break
+            echo "attempt $i: coverage gate rc=$rc; re-reading the index in 20 s…"
+            sleep 20
+          done
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::PARTIAL RELEASE — $RELEASE_TAG does not carry every"
+            echo "::error::platform its predecessor did (gate rc=$rc). Re-dispatch"
+            echo "::error::release-cli with the missing platform's build_* input"
+            echo "::error::ON, or delete the tag. Do NOT leave it published:"
+            echo "::error::\`curl -sSL install.bithuman.ai | sh\` resolves the"
+            echo "::error::newest cli-v* tag and 404s on the missing platform."
+            exit "$rc"
+          fi

@@ -34,6 +34,49 @@ resolved online by CDHash on first launch. Shipping a stapled artifact would mea
 publishing a `.dmg`/`.pkg` instead of a `.tar.gz`, which is a distribution change,
 not a signing one.
 
+## CLI platform coverage (a partial release must go RED)
+
+`install.sh` resolves the **newest `cli-v*` tag** and downloads
+`bithuman-<target>.tar.gz` from it. So a release that carries some platforms and
+not others is not a partial success — it is a **total outage for the missing
+platform**, and it looks green from the release job.
+
+That shipped on 2026-09-02: `cli-v2.5.0` was cut macOS-only (the `linux-tarball`
+job had just been gated behind `build_linux`, correctly, to stop it clobbering
+published assets), and every Linux customer running the documented one-liner got
+
+```
+curl: (22) The requested URL returned error: 404
+install: error: The tarball for x86_64-unknown-linux-gnu may not be published for cli-v2.5.0.
+```
+
+with `rc=1`. `cli-v2.4.2` was the accidental fallback.
+
+`tools/verify_release_platform_coverage.py` closes it, mirroring
+bithuman-models' `tools/verify_pypi_platform_coverage.py`: it reads the live
+Releases index and **refuses if a release carries fewer (asset-kind, target)
+pairs than the CLI release before it**. Adding a platform, or adding a missing
+`.sha256` sidecar, can only add pairs — an improvement never refuses. Losing a
+sidecar does, because `install.sh` silently downgrades to "verification skipped"
+rather than failing.
+
+* `verify-release-coverage` in `release-cli.yml` runs it with
+  `needs: [mac-tarball, linux-tarball]` and `if: ${{ !cancelled() }}` — a
+  SKIPPED build job is exactly the condition it exists to catch.
+* Run it by hand any time: `python3 tools/verify_release_platform_coverage.py --tag cli-vX.Y.Z`
+  (`rc` 0 green / 1 refusal / 2 index unreadable — unreachable is never green).
+* `--self-test` runs the refusal arms **in-process** (never re-execs itself) and
+  is a required step in the job, so a green from the gate is only trusted after
+  the gate has been shown to fire.
+* It compares against the PREDECESSOR, not an ideal, so it cannot see a platform
+  neither release ever had — which is why the predecessor's target set is always
+  printed, and why `--require <triples>` exists to pin a floor.
+
+★ **Known standing gaps it will not flag** (both releases lack them, so there is
+no loss to detect): `install.sh` will ask for `x86_64-apple-darwin` (Intel Mac)
+and `aarch64-unknown-linux-gnu` (ARM Linux); no `cli-v*` release has ever
+carried either. Linux ARM was last published at `cli-v2.3.27`.
+
 ## Secrets (this repo, or org-level — all repos inherit)
 `PYPI_API_TOKEN`, `PYPI_USERNAME` (=`__token__`), `BITHUMAN_MODELS_SSH_KEY` (private half of the read-only deploy key `homebrew-bithuman-ci-ro` on the `bithuman-models` engine monorepo — probe it with the `preflight` workflow). No Maven/Android/OSSRH/GPG.
 
