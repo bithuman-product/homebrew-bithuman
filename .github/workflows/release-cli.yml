@@ -66,6 +66,27 @@
 #     NOTARY_APPLE_ID + NOTARY_TEAM_ID + NOTARY_PASSWORD     (Apple ID + an
 #       app-specific password; NOTARY_TEAM_ID=G64NFNZX84)
 #
+# PUBLISHING SAFETY -- release_tag is free text, so aim it carefully
+#   `release_tag` is a plain string input naming an EXISTING release. Both jobs
+#   used to end in a bare `gh release upload ... --clobber`, which DELETES the
+#   asset already there and puts the new bytes in its place. That made an
+#   already-published release one typo away from being replaced under the
+#   customers installing it -- and the Homebrew formula pins a sha256 against
+#   those exact URLs, so a replacement breaks `brew install` until the formula
+#   is re-pinned. Worse, the `linux-tarball` job had NO gate of any kind, so a
+#   dispatch aimed only at exercising the mac signing path would still rebuild
+#   and overwrite the published Linux tarball while the mac job beside it
+#   correctly refused to publish anything at all.
+#
+#   Three inputs now bound that:
+#     build_mac / build_linux    run only the lane you actually want (default
+#                                true; turn one OFF for a single-platform re-cut)
+#     overwrite_published        REQUIRED to replace an asset that already
+#                                exists on release_tag. Default false, and
+#                                scripts/upload-release-asset.sh refuses --
+#                                naming the asset, its size, its upload date
+#                                and its download count -- rather than clobber.
+#
 # Still dispatch-only by choice; secrets are wired, so `push: tags: [cli-v*]`
 # may be added once a tag-cut release is wanted.
 name: release-cli
@@ -89,6 +110,18 @@ on:
         description: 'Publish an AD-HOC (Gatekeeper-rejected) mac tarball. Leave false unless you mean it.'
         type: boolean
         default: false
+      build_mac:
+        description: 'Build + publish the macOS arm64 tarball.'
+        type: boolean
+        default: true
+      build_linux:
+        description: 'Build + publish the Linux x86_64 tarball. Turn OFF for a mac-only re-cut -- otherwise this job rebuilds the Linux tarball for release_tag whether or not you wanted a new one.'
+        type: boolean
+        default: true
+      overwrite_published:
+        description: 'REPLACE assets that are already on release_tag. Leave false unless you mean it -- the Homebrew formula pins a sha256 against those exact URLs.'
+        type: boolean
+        default: false
 
 permissions:
   contents: write            # upload the tarball asset to the Release
@@ -96,6 +129,7 @@ permissions:
 jobs:
   mac-tarball:
     name: macOS arm64 self-contained CLI tarball (engine vendored)
+    if: inputs.build_mac
     runs-on: macos-15         # Apple Silicon + current Xcode (webrtc-sys C++ bridge)
     timeout-minutes: 60
     env:
@@ -476,10 +510,13 @@ jobs:
         run: bash tap/scripts/verify-macos-release.sh "$TGZ"
 
       - name: Upload tarball to the release + emit formula sha
+        env:
+          OVERWRITE_PUBLISHED: ${{ inputs.overwrite_published }}
         run: |
           set -euo pipefail
-          gh release upload "$RELEASE_TAG" --repo bithuman-product/homebrew-bithuman --clobber \
-            "$TGZ" "$TGZ.sha256"
+          # NOT a bare `--clobber`: replacing an asset customers are already
+          # installing has to be declared. See scripts/upload-release-asset.sh.
+          bash tap/scripts/upload-release-asset.sh "$RELEASE_TAG" "$TGZ" "$TGZ.sha256"
           echo "::notice::Formula sha256 for cli $RELEASE_TAG = $(cut -d' ' -f1 "$TGZ.sha256")"
 
       - name: Remove the temporary signing keychain
@@ -506,6 +543,14 @@ jobs:
   #      engines}, then uploads.
   linux-tarball:
     name: Linux x86_64 self-contained CLI tarball (host + engine vendored)
+    # ★GATED. This job used to run on EVERY dispatch and end in an unguarded
+    # `gh release upload --clobber`, while the mac job beside it correctly
+    # refused to publish. So a dispatch made only to exercise the mac signing
+    # path would still rebuild the Linux tarball and REPLACE the published
+    # asset for whatever release_tag was passed -- silently, and against a tag
+    # the Homebrew formula pins a sha256 for. Two independent brakes now: this
+    # `if`, and scripts/upload-release-asset.sh refusing an existing asset.
+    if: inputs.build_linux
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -525,6 +570,11 @@ jobs:
           # GITHUB_TOKEN cannot read it (the exact first-run failure of
           # 2026-08-01). Read-only deploy key on the bithuman repo.
           ssh-key: ${{ secrets.BITHUMAN_CLI_SSH_KEY }}
+
+      - name: Checkout this tap (scripts/upload-release-asset.sh)
+        uses: actions/checkout@v4
+        with:
+          path: tap
 
       - name: Load the bithuman-models deploy key
         uses: webfactory/ssh-agent@v0.9.0
@@ -610,8 +660,12 @@ jobs:
           echo "TGZ=$TGZ" >> "$GITHUB_ENV"
 
       - name: Upload linux tarball to the release + emit sha
+        env:
+          OVERWRITE_PUBLISHED: ${{ inputs.overwrite_published }}
         run: |
           set -euo pipefail
-          gh release upload "$RELEASE_TAG" --repo bithuman-product/homebrew-bithuman --clobber \
-            "$TGZ" "$TGZ.sha256"
+          # NOT a bare `--clobber` — this is the exact line that made an
+          # unrelated mac-lane dispatch able to replace the published Linux
+          # tarball. See scripts/upload-release-asset.sh.
+          bash tap/scripts/upload-release-asset.sh "$RELEASE_TAG" "$TGZ" "$TGZ.sha256"
           echo "::notice::Linux tarball sha256 for cli $RELEASE_TAG = $(cut -d' ' -f1 "$TGZ.sha256")"
