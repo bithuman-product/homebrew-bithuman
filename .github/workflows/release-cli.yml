@@ -690,6 +690,36 @@ jobs:
           IMX_URL=$(grep -o 'https://[^"]*wise-pup\.imx' crates/bithuman-cli/src/cmd/models.rs | head -1)
           curl -fsSL -o "$RUNNER_TEMP/probe.imx" "$IMX_URL"
           echo "EXPRESSION2_PROBE_IMX=$RUNNER_TEMP/probe.imx" >> "$GITHUB_ENV"
+          # ★KNOWN BLOCKER, AND IT IS IN THE PROBE ARTIFACT, NOT IN THIS JOB.
+          # The gate below (gate 2, host<->engine) currently REFUSES this probe:
+          #
+          #   FATAL: probe.imx carries identity.tflite (the two-artifact split's
+          #   DELTA half) and declares no 'expr2-shared-enc' base in its manifest
+          #   dependencies[], and carries no shared-enc.tflite of its own. There is
+          #   no way to tell which shared-enc.tflite it was cut against, and the
+          #   wrong one renders a DIFFERENT FACE with no error (measured
+          #   2026-09-01: 181 of 181 frames wrong, silently). Re-emit the container
+          #   with tools/imx_from_bundle.py, which stamps the base content address.
+          #
+          # CONFIRMED ON THE PUBLISHED BYTES, independently of CI, with the shipped
+          # cli-v2.5.0 `bithuman info --json` (2026-09-02): wise-pup.imx sha256
+          # d677173de4a4025b…, 89,354,265 B, family expression-2, IMX v2, 14
+          # members -- carries identity.tflite, carries NO shared-enc.tflite, and
+          # its manifest has no dependencies[] at all (null). So the refusal is a
+          # true statement about the artifact.
+          #
+          # THE FIX IS NOT HERE. wise-pup.imx is the PUBLISHED showcase avatar that
+          # `bithuman pull wise-pup` hands customers; re-emitting it is an
+          # expression-2 artifact-publishing action, and replacing bytes customers
+          # already have is exactly the hazard scripts/upload-release-asset.sh
+          # exists to stop being done casually. Owner action: re-emit wise-pup.imx
+          # through tools/imx_from_bundle.py so it stamps its base content address,
+          # then re-dispatch this workflow with build_linux=true.
+          #
+          # UNTIL THEN NO LINUX TARBALL IS PUBLISHED, by design -- the gate refuses
+          # rather than shipping a host/engine pairing nothing verified.
+          # cli-v2.5.0 therefore carries the macOS tarball only, and cli-v2.4.2's
+          # linux asset is untouched.
 
       - name: Build + vendor + gate the linux tarball (scripts/build-linux.sh)
         working-directory: cli
