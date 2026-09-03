@@ -122,13 +122,86 @@ on:
         description: 'REPLACE assets that are already on release_tag. Leave false unless you mean it -- the Homebrew formula pins a sha256 against those exact URLs.'
         type: boolean
         default: false
+      require_draft:
+        description: 'Refuse to upload unless release_tag is still a DRAFT. This is what makes a release atomic -- a draft is invisible to brew and to anonymous downloads, so a tag can never advertise a half-release. Turn OFF only to add an asset to an already-published tag (and then overwrite_published governs replacement).'
+        type: boolean
+        default: true
+      publish_when_atomic:
+        description: 'After both tarballs are uploaded AND scripts/check-release-atomic.sh passes, flip the draft to published. Off = leave it a draft for a human to publish.'
+        type: boolean
+        default: false
 
 permissions:
   contents: write            # upload the tarball asset to the Release
 
 jobs:
+  # ── ATOMICITY PRE-FLIGHT ─────────────────────────────────────────────────
+  # Runs BEFORE either build so a doomed dispatch costs 30 seconds, not two
+  # hours, and — more importantly — so no asset is ever uploaded to a tag
+  # that is already visible to customers.
+  #
+  # Measured 2026-09-03 across every CLI release this repo has cut: the two
+  # halves have NEVER landed together. cli-v2.5.1 was published at
+  # 2026-09-02T12:44:19Z and its Linux tarball uploaded at 19:42:49Z — for
+  # 6 h 58 m the tag advertised a release whose Linux half did not exist, and
+  # `curl -sSL install.bithuman.ai | sh` 404s in exactly that window.
+  # cli-v2.5.0 4 h 37 m, cli-v2.4.2 7 h 13 m (both halves late), cli-v2.4.0
+  # 47 m, and cli-v2.4.1 is the end state of the same bug: still published,
+  # still carrying zero assets. cli-v2.3.27 is the one that got it right and
+  # is the guard's live positive control.
+  #
+  # verify-release-coverage (below) already refuses a release that DROPPED a
+  # platform, and its own header is explicit that it runs after the fact.
+  # This job is the other half: it stops the window from opening at all.
+  preflight-atomic:
+    name: Pre-flight — release_tag must be a draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove the atomicity gate FIRES before trusting it
+        # Baseline + 8 mutations, each of which must be refused BY THE CHECK
+        # IT TARGETS — a mutation caught by some other check would let the
+        # targeted one be dead code and still show red. Runs the check
+        # function against fixtures; never re-execs this script.
+        run: bash scripts/check-release-atomic.sh --self-test
+
+      - name: Refuse a non-draft target
+        run: |
+          set -euo pipefail
+          # Read the state here; make the DECISION in the script, whose
+          # truth table (7 rows, including an unreadable state) is covered by
+          # the --self-test step above. Inline `if` logic in a workflow is
+          # exercised for the first time during a real release.
+          # NOT `$(gh …) || echo missing`: on a 404 gh exits non-zero AND
+          # prints its error JSON on STDOUT, so that form yields
+          # `{"message":"Not Found",…}missing` — a state string that is
+          # neither. (It still refuses, because the script treats an
+          # unreadable state as a refusal, but the message it prints is
+          # nonsense. Caught by the truth table's `banana` row.)
+          if out=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq .draft 2>/dev/null); then
+            draft="$(printf '%s' "$out" | tr -d '[:space:]')"
+          else
+            draft=missing
+          fi
+          echo "release_tag=${RELEASE_TAG} draft=${draft}"
+          if bash scripts/check-release-atomic.sh --gate-draft "$draft" "${{ inputs.require_draft }}"; then
+            exit 0
+          fi
+          echo "::error::${RELEASE_TAG}: refusing to upload — see the reason above."
+          echo "::error::Cut releases as a draft (gh release create <tag> --draft),"
+          echo "::error::let this workflow fill it, and publish with"
+          echo "::error::publish_when_atomic=true. Set require_draft=false ONLY to"
+          echo "::error::repair an already-published tag."
+          exit 1
+
   mac-tarball:
     name: macOS arm64 self-contained CLI tarball (engine vendored)
+    needs: [preflight-atomic]
     if: inputs.build_mac
     runs-on: macos-15         # Apple Silicon + current Xcode (webrtc-sys C++ bridge)
     timeout-minutes: 60
@@ -637,6 +710,7 @@ jobs:
     # asset for whatever release_tag was passed -- silently, and against a tag
     # the Homebrew formula pins a sha256 for. Two independent brakes now: this
     # `if`, and scripts/upload-release-asset.sh refusing an existing asset.
+    needs: [preflight-atomic]
     if: inputs.build_linux
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -917,6 +991,71 @@ jobs:
   # Shape mirrors bithuman-models' verify-wheel-coverage / tools/
   # verify_pypi_platform_coverage.py, down to the "prove the gate fires before
   # trusting its green" self-test step.
+  # ── THE ATOMICITY GATE ───────────────────────────────────────────────────
+  # Runs after both build jobs. verify-release-coverage next door answers
+  # "did this release lose a platform its predecessor had"; this one answers
+  # "is what is on the tag RIGHT NOW complete, self-consistent, and not
+  # already visible" — the three things that file's own "WHAT IT CANNOT SEE"
+  # section says it does not check: whether the sidecar digests match the
+  # bytes, whether the formula pin matches the published sha, and whether the
+  # tag was visible before it was whole.
+  #
+  # Only when this passes may the draft be published, and only when the
+  # dispatcher asked for it (publish_when_atomic).
+  release-atomic:
+    name: Release is complete + consistent (and was assembled as a draft)
+    needs: [mac-tarball, linux-tarball]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove the gate FIRES before trusting its green (mutation control)
+        run: bash scripts/check-release-atomic.sh --self-test
+
+      - name: Every asset present, every sidecar matching, formula pinned
+        run: |
+          set -euo pipefail
+          # The Releases API can lag a few seconds behind an upload; retry
+          # before believing an asset is absent. rc=3 means the check could
+          # not RUN, which is never treated as a pass.
+          rc=1
+          for i in 1 2 3 4 5 6; do
+            set +e
+            bash scripts/check-release-atomic.sh "$RELEASE_TAG"
+            rc=$?
+            set -e
+            [ "$rc" -eq 0 ] && break
+            echo "attempt $i: atomicity gate rc=$rc; re-reading the release in 20 s…"
+            sleep 20
+          done
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::${RELEASE_TAG} is NOT publishable (gate rc=$rc)."
+            echo "::error::Leave it a draft. Fix what the gate named, re-run."
+            exit "$rc"
+          fi
+
+      - name: Publish the draft (only if asked, only after the gate passed)
+        if: ${{ inputs.publish_when_atomic }}
+        run: |
+          set -euo pipefail
+          draft=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq .draft)
+          if [ "$draft" != "true" ]; then
+            echo "${RELEASE_TAG} is already published — nothing to flip."
+            exit 0
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false
+          echo "Published ${RELEASE_TAG} — every asset was already in place."
+          # Re-assert after the flip: publishing sets published_at, and C5 is
+          # a comparison against that timestamp. A green before the flip and
+          # a green after it are different statements, and the one customers
+          # live with is the second.
+          bash scripts/check-release-atomic.sh "$RELEASE_TAG"
+
   verify-release-coverage:
     name: Verify release platform coverage
     needs: [mac-tarball, linux-tarball]

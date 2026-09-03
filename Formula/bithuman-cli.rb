@@ -11,8 +11,15 @@
 # `bithuman run`, `bithuman doctor`, etc.). Only the Homebrew package
 # name carries the `-cli` suffix, matching the PyPI convention:
 #
-#   pip install bithuman          # Python SDK (library)
-#   pip install bithuman-cli      # Python CLI bundle
+#   pip install bithuman          # Python SDK (library) -- current (2.10.0)
+#   pip install bithuman-cli      # Python CLI bundle -- ★STALE + macOS-ONLY.
+#                                 #   2.3.25, 2026-06-05, two files ever, both
+#                                 #   py3-none-macosx_11_0_arm64. It exits 1 on
+#                                 #   Linux, and on macOS it puts a June
+#                                 #   Mach-O `bithuman` (internal version
+#                                 #   2.3.6) on PATH that routes local-vs-cloud
+#                                 #   from a FILENAME -- the defect cli-v2.5.1
+#                                 #   was cut to disarm. Do not advertise it.
 #   brew install bithuman-cli     # CLI (Homebrew)        <-- canonical
 #   brew install bithuman         # CLI (deprecated alias)
 #
@@ -24,8 +31,10 @@
 #
 # Two brain paths:
 #   * Cloud (default) — OPENAI_API_KEY for the OpenAI Realtime brain.
-#   * On-device — set BITHUMAN_LOCAL=1, no API key needed. Requires
-#     the Python wheel's [local] extra; see "On-device brain" caveat.
+#   * On-device — set BITHUMAN_LOCAL=1, no API key needed. Requires the
+#     whisper.cpp / llama.cpp / Supertonic Python deps; the exact line is
+#     in `caveats` below and is resolved against live PyPI by the CLI repo's
+#     scripts/check-printed-install-coordinates.sh.
 #
 # Backwards compat:
 #   Previously published as `bithuman` (which itself was a rename from
@@ -173,9 +182,11 @@ class BithumanCli < Formula
       Advanced brains (optional):
         Bring your own OpenAI key (skips credit billing for the brain):
           export OPENAI_API_KEY=sk-...
-        On-device (no key, no outbound network; needs the [local] extra):
-          pip install 'bithuman[local]'
+        On-device (no key, no outbound network):
+          pip install 'livekit-agents[silero]~=1.5' supertonic pywhispercpp llama-cpp-python soxr
           BITHUMAN_LOCAL=1 bithuman run <model.imx>
+        (llama-cpp-python has no wheel on macOS or Linux and builds from
+        source, so this needs a C++ toolchain.)
         ~860 MB models auto-download from HuggingFace on first run.
         Docs: https://docs.bithuman.ai/guides/local-mode
 
