@@ -35,8 +35,26 @@ set -euo pipefail
 # CONFIG BLOCK — THE SINGLE SOURCE OF TRUTH. Edit here when the matrix changes.
 # -----------------------------------------------------------------------------
 
-# Python minors that MUST have a wheel. (pytag form: cp39 == Python 3.9)
-EXPECTED_PYTAGS=(cp39 cp310 cp311 cp312 cp313)
+# Python minors that MUST have a wheel. (pytag form: cp310 == Python 3.10)
+#
+# ★DRIFTED, CORRECTED 2026-09-03. This said `(cp39 cp310 cp311 cp312 cp313)`
+# and had never been synced with the workflow that BUILDS the wheels.
+# `release-pypi.yml` moved to cp310..cp314 in 2ff50e0 and its own
+# verify-wheel-coverage job hard-codes `EXPECTED_PYTAGS: "cp310 cp311 cp312
+# cp313 cp314"` — two definitions of one matrix, in one repo, under the same
+# variable name, disagreeing at BOTH ends.
+#
+# Measured against published `bithuman` 2.10.0: cp39 does not exist (the
+# package's own `requires_python` is `>=3.10,<3.15`, so it cannot), and cp314
+# is published but was not required. So this script reported
+# `PHASE 1 RESULT: FAIL — 3 required wheel(s) missing` and exited 1 on a
+# HEALTHY release, while a real regression at cp314 would not have been asked
+# about at all. A guard that is red for a reason nobody will act on is a guard
+# nobody reads.
+#
+# The authority is the package's `requires_python` plus release-pypi.yml's
+# build matrix; `BITHUMAN_EXPECTED_PYTAGS` overrides for a one-off check.
+read -r -a EXPECTED_PYTAGS <<< "${BITHUMAN_EXPECTED_PYTAGS:-cp310 cp311 cp312 cp313 cp314}"
 
 # Platform tags that MUST be present for EACH pytag above.
 # A wheel's platform tag is matched as a SUBSTRING (PyPI bakes the macOS
