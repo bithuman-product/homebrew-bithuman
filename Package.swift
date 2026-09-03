@@ -1,26 +1,38 @@
 // swift-tools-version: 6.0
-// bitHumanKit — public binary distribution.
+// bitHuman — public SwiftPM distribution for Apple platforms.
 //
-// The source for these frameworks lives in the private monorepo
-// bithuman-product/bithuman-sdk-internal (the swift/ tree for bitHumanKit; the
-// engine/expression/ and sdks/swift/ trees for the two Layer-1 engine
-// products extracted on the refactor/engine-tiers branch). This package
-// consumes the pre-compiled XCFrameworks attached to THIS repo's GitHub
-// Releases via SwiftPM's binaryTarget — each `.xcframework.zip` is built
-// from bithuman-sdk-internal and uploaded here per release; consumers depend only
-// on this package URL.
+// This package consumes pre-compiled XCFrameworks attached to THIS repo's
+// GitHub Releases via SwiftPM's binaryTarget. Each `.xcframework.zip` is built
+// from the private engine monorepo bithuman-product/bithuman-models and
+// uploaded here per release; consumers depend only on this package URL.
 //
-// NOTE: bithuman-sdk-internal was ARCHIVED on 2026-06-30; its trees are now
-// consolidated into the private engine monorepo bithuman-product/bithuman-models
-// (models/expression-2, models/essence-1, models/essence-2). The
-// bithuman-sdk-internal references below are historical provenance only.
+// PROVENANCE NOTE: these frameworks were originally built from
+// bithuman-product/bithuman-sdk-internal, which was ARCHIVED on 2026-06-30 and
+// consolidated into bithuman-models (models/expression-2, models/essence-1,
+// models/essence-2). Any bithuman-sdk-internal reference below is historical
+// provenance, not a live path.
 //
-// All third-party deps (MLX, HuggingFace, Tokenizers, …) are
-// statically linked into the framework binaries, so consumers
-// don't need any transitive Swift Package dependencies. Just
-// add this package and `import bitHumanKit` (or `import Expression`
-// / `import Bithuman` for the lower-level engine products).
+// ─────────────────────────────────────────────────────────────────────────────
+// WHAT THIS PACKAGE ACTUALLY VENDS. Three products, and no others. Naming any
+// other product fails at resolve time:
+//     product 'Expression' ... not found in package 'homebrew-bithuman'
 //
+//   - bitHumanKit              binary umbrella, tag v2.4.0. `import bitHumanKit`.
+//   - Expression2              expression-2 engine alone, tag v2.5.0.
+//                              `import Expression2`.
+//   - BithumanEngineProtocol   source-only Layer-0 engine interface.
+//                              `import BithumanEngineProtocol`.
+//
+// ★ THERE IS NO `Expression` PRODUCT AND NO `Bithuman` PRODUCT. Earlier
+//   revisions of this header sent you to the modules `Expression` and
+//   `Bithuman` "for the lower-level engine products" and then described both at
+//   length. Neither has ever appeared in `products` below. The instruction was
+//   unbuildable on the day it was written and it is deleted here rather than
+//   softened. `Bithuman` is a TYPE — a public actor vended BY `bitHumanKit`
+//   (`import bitHumanKit`, then `Bithuman.create(modelPath:)`); it is not a
+//   module you can import and not a product you can attach in Xcode.
+//
+// ─────────────────────────────────────────────────────────────────────────────
 // Products
 //   - bitHumanKit  Full on-device voice + video chat SDK (umbrella).
 //                  The Expression avatar engine + an `.imx` avatar runtime +
@@ -28,18 +40,27 @@
 //                  `import bitHumanKit`.
 //                  ★ IT DOES NOT CONTAIN libessence, AND IT NEVER SAID SO
 //                  TRUTHFULLY. This block used to read "re-exports … the Essence
-//                  (libessence) runtime". MEASURED 2026-08-29 against the exact
-//                  published asset (bitHumanKit.xcframework.zip @ v2.4.0, sha256
-//                  5c536e37…e9db, the value the binaryTarget below pins): the
-//                  framework binary is a static archive of 28 objects —
-//                  bitHumanKit.o, MLX*, HuggingFace, Tokenizers, Crypto, yyjson —
-//                  and NOT ONE of them is libessence, libelevate or onnxruntime.
-//                  `strings` finds zero occurrences of "essence"/"elevate"; the
-//                  public .swiftinterface declares no Essence type. What is
+//                  (libessence) runtime". MEASURED 2026-08-29 and RE-MEASURED
+//                  2026-09-03 against the exact published asset
+//                  (bitHumanKit.xcframework.zip @ v2.4.0, sha256 5c536e37…e9db,
+//                  the value the binaryTarget below pins, re-downloaded and
+//                  re-hashed): the framework binary is a static archive of 28
+//                  objects — bitHumanKit.o, MLX*, HuggingFace, Tokenizers,
+//                  Crypto, yyjson — and NOT ONE of them is libessence,
+//                  libelevate or onnxruntime.
+//                  `strings -a` on the ios-arm64 slice, 2026-09-03, counts:
+//                      ImxContainer 141 · bitHumanKit 12715 · mlx 104937 ·
+//                      Expression 3353 · Bithuman 1663 · CoreML 433
+//                      essence 0 · Essence 0 · libessence 0 · tessera 0 ·
+//                      elevate 0 · onnxruntime 0
+//                  (`strings -a`, not `grep`: without -a, grep silently reads 0
+//                  on a binary and every one of those counts would be a lie in
+//                  the safe direction. Read with a control that fires.)
+//                  The public .swiftinterface declares no Essence type. What is
 //                  really there is a Swift-side `ImxContainer` reader reached via
 //                  `Bithuman.create(modelPath:)`. The `Bithuman` ACTOR is real;
 //                  "the portable libessence C++ runtime" was not.
-//   - Expression2  Layer-1 Expression 2 avatar engine, pure Swift + CoreML.
+//   - Expression2  Layer-1 expression-2 avatar engine, pure Swift + CoreML.
 //                  Published at tag v2.5.0 (see `expression2Tag` below).
 //                  `import Expression2`, then `Expression2Engine()`.
 //                  ★ CODE ONLY — NO MODEL WEIGHTS. `Expression2Engine.init()`
@@ -47,40 +68,63 @@
 //                  in $BITHUMAN_EXPRESSION2_DIR or in the app bundle, and
 //                  `isReady` stays false until it finds one. No such bundle is
 //                  published yet, so this product does not render out of the box.
-//   - Expression   Layer-1 avatar engine on its own: speech encoder →
-//                  animator → face decoder → face renderer expressive
-//                  talking head. Built from the
-//                  bithuman-sdk-internal engine/expression/ package. Pull this in
-//                  directly when you only need the avatar renderer (no
-//                  STT/LLM/TTS). Home of the `Bithuman` actor,
-//                  `Bithuman.Quality`, `AvatarConfig`, `ImxContainer`.
-//                  `import Expression`.
-//   - Bithuman     Layer-1 Essence engine on its own: the portable
-//                  libessence C++ avatar runtime (audio → composited BGR
-//                  frames from a pre-built `.imx`). Built from the
-//                  bithuman-sdk-internal sdks/swift/ package. CPU-only, works on
-//                  any Apple Silicon. `import Bithuman`.
+//   - BithumanEngineProtocol
+//                  Layer-0 common engine interface, pure Swift SOURCE. Consumed
+//                  by the engine SDKs in bithuman-models for their standalone
+//                  builds. ★ HAZARD, measured (arm C3, exit 1): a consumer that
+//                  depends on BOTH this product AND `Expression2` gets the module
+//                  twice and fails to link — `Expression2` already carries a
+//                  BINARY copy. Depend on `Expression2` alone. See the note on
+//                  the `Expression2` product below for why both must exist.
 //
-// Hardware floor (gated at runtime via HardwareCheck.evaluate()):
+// ─────────────────────────────────────────────────────────────────────────────
+// ★ essence-2 IS NOT ON THIS RAIL. It is not a product below and it is not
+//   bundled inside bitHumanKit — that is the `essence 0 / libessence 0` reading
+//   above, not an assumption. essence-2 on iOS is CAPABILITY-PROVEN and NOT
+//   ARMED: an in-process device probe (iPhone 15, 2026-09-02) rendered
+//   essence-2 and composed the teeth borrow inline, grading L1 0.002295 u8
+//   against the offline borrow reference (97.71 % gap closure vs the borrow-OFF
+//   twin; null control exactly 0.000000). It reached that on a hand-assembled
+//   side-load: a bundle trimmed to NT=64, an a2x provenance breach recorded in
+//   meta.json, a 46 MB fp16 w2v standing in for the 377 MB production frontend
+//   (which the phone SIGKILLs), and RTF 16.06 — not realtime. No customer could
+//   do any of that. See models/essence-2/proof/evidence/
+//   IOS_INPROCESS_BORROW_20260902.txt §6-§7 for the four blockers by owner.
+//   To reach essence-2 from an Apple app TODAY: the REST API, a LiveKit
+//   session, or — on macOS only — the Python wheel. Not this package.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Hardware floor for the two bitHumanKit engines (gated at runtime via
+// HardwareCheck.evaluate(), which refuses politely below it — NOT by the
+// `platforms:` floor below, which is deliberately lower, see the note there):
 //   macOS:   M3+ Apple Silicon, macOS 26 (Tahoe)
 //   iPad:    iPad Pro M4+, 16 GB unified memory, iPadOS 26
 //   iPhone:  iPhone 16 Pro+ (A18 Pro), iOS 26
+// ★ That floor grades bitHumanKit ONLY. It is not `Expression2`'s floor:
+//   Expression2 is a separate binary with its own CoreML requirements and is
+//   not gated by HardwareCheck.
 //
-// RELEASE NOTE (Layer-1 engine products):
-//   `bitHumanKit` (the umbrella, tag v2.4.0) and `Expression2` (tag v2.5.0)
-//   ship today. The standalone `Expression` and `Bithuman` (Essence) products
-//   are NOT yet published:
-//   their per-product XCFramework zips + checksums are produced by the
-//   release flow (scripts/build-binary-xcframework.sh emits the per-product
-//   zips; `swift package compute-checksum <zip>` yields the value). They are
-//   omitted from `products`/`targets` below until a release uploads those
-//   two zips, so this manifest always resolves cleanly. To re-add them, fill
-//   in real checksums and restore the two products/binaryTargets. See
+// RELEASE NOTE:
+//   `bitHumanKit` (the umbrella, tag v2.4.0) and `Expression2` + its binary
+//   `BithumanEngineProtocol` (tag v2.5.0) ship today, and every one of the
+//   three binaryTargets below was re-fetched on 2026-09-03 and re-hashed
+//   against the checksum it pins — three MATCH, and a one-byte mutation of the
+//   same zip MISMATCHes, so the check is not vacuous.
+//   Nothing else ships. There is no pending `Expression` or `Bithuman`
+//   per-product zip: the release flow can emit one
+//   (scripts/build-binary-xcframework.sh; `swift package compute-checksum
+//   <zip>` yields the value), but until a release actually uploads it, do not
+//   describe it here as if a consumer could reach it. See
 //   scripts/validate-release.sh and docs/RELEASE_MATRIX.md.
+//
+// ★ VERIFY THIS MANIFEST RATHER THAN TRUSTING IT: scripts/check-manifest-truth.py
+//   fetches every binaryTarget URL, checks its sha256 against the pinned
+//   checksum, and cross-checks the token claims in these comments against
+//   `strings -a` on the downloaded binaries. `--prove-by-mutation` runs six
+//   mutation arms and requires every one of them to turn the guard RED.
 import PackageDescription
 
-// Pin the binary slice to a release tag. When the Layer-1 engine products are
-// published they should share this tag so a `from:` bump moves them in lockstep.
+// Pin the binary slice to a release tag.
 let releaseTag = "v2.4.0"
 let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(releaseTag)"
 
@@ -125,12 +169,6 @@ let package = Package(
         // Layer-0 common engine interface (pure Swift source). Consumed by the
         // engine SDKs for their standalone builds + staged into the Flutter pod.
         .library(name: "BithumanEngineProtocol", targets: ["BithumanEngineProtocol"]),
-        // NOTE: the standalone `Expression` and `Bithuman` (Essence) Layer-1
-        // engine products are not yet published — their per-product XCFramework
-        // zips + checksums are produced by the release flow. They are
-        // intentionally omitted here until a release uploads them, so the
-        // package resolves cleanly. Until then, use `bitHumanKit` (the umbrella
-        // product re-exports both engines). See the RELEASE NOTE above.
         // Layer-1 Expression 2 avatar engine on its own: pure Swift + CoreML
         // on-device talking head. Apple Silicon only (the engine's
         // MLShapedArray<Float16> decode path does not compile for x86_64).

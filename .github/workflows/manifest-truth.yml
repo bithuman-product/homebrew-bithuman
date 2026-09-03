@@ -1,0 +1,49 @@
+name: manifest-truth
+# Package.swift's COMMENTS are the first thing a developer reads in Xcode, and
+# nothing in the toolchain checks them. `swift build` compiles the manifest; it
+# does not read the prose. So on 2026-09-03 the live published manifest could
+# — and did — record "IT DOES NOT CONTAIN libessence" in one block and "the
+# umbrella product re-exports both engines" ~100 lines lower, while sending
+# developers to `import Expression` / `import Bithuman`, two products this
+# package has never vended (measured: `swift build` exits 1 with
+# "product 'Expression' ... not found in package 'homebrew-bithuman'").
+#
+# This job holds the prose to the shipped binaries. It fetches every
+# binaryTarget, checks each sha256 against the pinned checksum, and re-measures
+# the `strings -a` token counts the manifest claims. Five rules, each with a
+# mutation arm; `--prove-by-mutation` requires all of them to turn RED, and an
+# arm whose edit changes no bytes is itself an error.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'Package.swift'
+      - 'scripts/check-manifest-truth.py'
+      - '.github/workflows/manifest-truth.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Package.swift'
+      - 'scripts/check-manifest-truth.py'
+      - '.github/workflows/manifest-truth.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  manifest-truth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: strings(1) must be present, or R2 cannot read a binary at all
+        run: |
+          command -v strings
+          strings --version | head -1
+
+      - name: Check the manifest against the shipped binaries
+        run: python3 scripts/check-manifest-truth.py
+
+      - name: Prove every rule by mutation (each arm must turn the guard RED)
+        run: python3 scripts/check-manifest-truth.py --prove-by-mutation
