@@ -34,6 +34,36 @@ resolved online by CDHash on first launch. Shipping a stapled artifact would mea
 publishing a `.dmg`/`.pkg` instead of a `.tar.gz`, which is a distribution change,
 not a signing one.
 
+## ★STANDING RED — `release-cli` cannot cut a Linux tarball (opened 2026-09-02)
+
+`release-cli` has run 7 times and succeeded once (2026-08-02). Both dispatches on
+2026-09-02 failed at the same place, and it is **not a CI defect** — it is a
+published-artifact defect that the gate is correctly refusing to ship past.
+
+| | |
+|---|---|
+| **What is red** | `release-cli` → `linux-tarball` → *"Build + vendor + gate the linux tarball"*, gate 2 (host↔engine) |
+| **Runs** | 33602563547, 33603750648 (both `workflow_dispatch`, 2026-09-02) |
+| **Verdict** | `host-engine gate: host exited before READY (rc=3)` |
+| **Root cause** | The published showcase avatar **`wise-pup.imx`** carries `identity.tflite` (the two-artifact split's DELTA half), declares no `expr2-shared-enc` base in `dependencies[]`, and carries no `shared-enc.tflite`. Confirmed on the published bytes with `bithuman info --json` (sha256 `d677173de4a4025b…`, 89,354,265 B, 14 members, `dependencies` null). The freshly-built LiteRT host freezes `shared_enc_dep.py` and refuses it at load. |
+| **Why it must stay red** | Pairing the wrong shared encoder renders **a different face with no error** — 181 of 181 frames wrong, silently (measured 2026-09-01). Shipping this host would break `bithuman run`, the out-of-box showcase, for every Linux customer. |
+| **Owner action** | Re-emit `wise-pup.imx` through `tools/imx_from_bundle.py` so it stamps its base content address, then re-dispatch with `build_linux=true`. This is an **expression-2 artifact publish** — it replaces bytes customers already hold — so it is deliberately not automated. |
+| **Owner** | expression-2 artifact publishing (owner action; not a CI lane) |
+| **Expiry** | **2026-09-17.** If it is still red then, either the re-emit has stalled or the CLI's Linux lane should stop claiming a vendored engine. Do not extend it silently. |
+
+★ **Do not buy this green.** Widening the gate, skipping gate 2, or pinning the
+old host all ship a CLI whose showcase avatar renders the wrong face. The 2.5.0
+and 2.5.1 Linux tarballs were cut by vendoring the host `cli-v2.4.2` already
+shipped, unchanged — that is the workaround, and it is why those releases exist
+at all.
+
+### What this red costs, beyond the workflow
+
+`release-cli` is the **only** path that builds both halves from one `cli_ref` in
+one dispatch. While it is unavailable, halves get uploaded by hand — and that is
+how `cli-v2.5.1` came to carry two assets built from two different source trees
+(see below).
+
 ## CLI platform coverage (a partial release must go RED)
 
 `install.sh` resolves the **newest `cli-v*` tag** and downloads
@@ -76,6 +106,51 @@ rather than failing.
 no loss to detect): `install.sh` will ask for `x86_64-apple-darwin` (Intel Mac)
 and `aarch64-unknown-linux-gnu` (ARM Linux); no `cli-v*` release has ever
 carried either. Linux ARM was last published at `cli-v2.3.27`.
+
+## Atomicity: what the gate closes, and what it does NOT (measured 2026-09-03)
+
+`check-release-atomic.sh` runs six checks. Five of them run in CI:
+
+| | closes |
+|---|---|
+| C1 COMPLETE | both tarballs + both sidecars present |
+| C2 NONEMPTY | each asset above its size floor |
+| C3 SIDECAR-SHAPE | each sidecar is `<64 hex>  <its own filename>` |
+| C4 FORMULA-PIN | the formula's url/sha256 point at this tag's macOS asset |
+| C5 ATOMIC | no asset was created after `published_at` |
+| C6 BYTES | recomputed sha256 matches the sidecar — **needs `--verify-bytes --assets DIR`, which `release-atomic` does not pass, so C6 SKIPs on every CI run** |
+
+★**No check binds an asset to a source commit.** `git grep` over `scripts/`,
+`tools/` and `.github/` finds no commit, provenance or build-id comparison
+anywhere. So this shape passes all six:
+
+> two tarballs, built from **two different trees**, both printing the same
+> `--version`, both matching their own sidecar, both uploaded before publish.
+
+That is not hypothetical — it is `cli-v2.5.1`, minus the timing:
+
+* tag published `2026-09-02T12:44:19Z`
+* macOS asset created `12:43:36Z` — newest CLI commit then was `38e75ba`
+* Linux asset created `19:42:49Z` — **44 seconds** after CLI commit `2f210b3`,
+  *"expr2 linux engine: re-pin to the clean-room rebuild"* — a different engine pin
+* `release-cli` had **zero successful runs** that day (7 total, last success 08-02),
+  and no workflow in `bithuman-product/bithuman` uploads a release asset
+  (verified by grep) — so **both halves were uploaded by hand, 7 h apart**
+
+C5 catches that pair *today* only because the Linux half landed after publish.
+Upload both before flipping the draft and the same two-tree release goes green.
+
+The sidecar cannot help: it is generated from the tarball at upload time, so it
+agrees with whatever bytes were just built. **A sidecar can never disagree with
+the artifact it was cut from** — it proves transport, not identity.
+
+**The gap to close** (not done here — it needs a stamp in the tarball, which is a
+CLI build change, not a tap change): have each tarball carry the CLI commit it
+was built from, and add a C7 that refuses a release whose halves name different
+commits. Until then, one dispatch of `release-cli` with both `build_mac` and
+`build_linux` ON is the *only* thing that makes the two halves share a tree — it
+takes `cli_ref` once and both jobs check out that same ref. Cutting halves in
+separate dispatches, or by hand, reopens this every time.
 
 ## Secrets (this repo, or org-level — all repos inherit)
 `PYPI_API_TOKEN`, `PYPI_USERNAME` (=`__token__`), `BITHUMAN_MODELS_SSH_KEY` (private half of the read-only deploy key `homebrew-bithuman-ci-ro` on the `bithuman-models` engine monorepo — probe it with the `preflight` workflow). No Maven/Android/OSSRH/GPG.
