@@ -86,14 +86,16 @@ generates speech). Pick one of two paths via env vars:
 | Brain | How to enable | Notes |
 |-------|---------------|-------|
 | Cloud (default) | `export OPENAI_API_KEY=sk-...` | OpenAI Realtime; instant, no downloads. |
-| On-device | `export BITHUMAN_LOCAL=1` | whisper.cpp + llama.cpp + Supertonic + Silero. Needs `pip install 'bithuman-cli[local]'`. ~5 GB first-run download, then offline. |
+| On-device | `export BITHUMAN_LOCAL=1` | whisper.cpp + llama.cpp + Supertonic + Silero. Needs `pip install 'livekit-agents[silero]~=1.5' supertonic pywhispercpp llama-cpp-python soxr`. ~5 GB first-run download, then offline. |
 
 ```bash
 export OPENAI_API_KEY=sk-...     # cloud (default)
 bithuman run model.imx
 
-# or, fully on-device:
-pip install 'bithuman-cli[local]'
+# or, fully on-device. (NOT `bithuman-cli[local]`: that wheel is macOS-arm64
+# only and cannot resolve on Linux. NOT `bithuman[local]` either: there is no
+# such extra — pip warns and exits 0 having installed none of it.)
+pip install 'livekit-agents[silero]~=1.5' supertonic pywhispercpp llama-cpp-python soxr
 BITHUMAN_LOCAL=1 bithuman run model.imx
 ```
 

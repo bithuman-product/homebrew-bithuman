@@ -195,8 +195,17 @@ class BithumanCli < Formula
         export BITHUMAN_API_KEY=...
 
       Offline tooling:
-        bithuman render avatar.imx -a a.wav -o out.mp4   # MP4 render
         bithuman info   avatar.imx                       # inspect .imx
+
+      `bithuman render` (offline MP4) does NOT work on macOS today.
+      essence-1 exits with "video encoder unavailable on macOS in this
+      libessence build"; expression-2 under-produces frames, exits
+      non-zero, and still leaves a TRUNCATED mp4 at --output. Measured
+      2026-09-04 on 2.5.1. For offline renders use a Linux host:
+        expression-2   the CLI, via install.sh          (verified)
+        essence-2      pip install 'bithuman[tessera]' and
+                       bithuman.tessera_offline.render_offline()
+                       (borrows the teeth; reports borrow_state)
 
       Docs:    https://docs.bithuman.ai
       Source:  https://github.com/bithuman-product/homebrew-bithuman
