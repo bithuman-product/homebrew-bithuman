@@ -116,6 +116,14 @@ target_availability() {
 # must come back MISSING on the release that dropped it and OK on the release
 # that carries it, so "MISSING for everything" cannot pass.
 if [ "${1:-}" = "--self-test" ]; then
+  # ★NO RECURSION. The arms below re-run THIS FILE with a `uname` shim, and a
+  # self-test that can re-enter itself is a fork bomb — this estate has built
+  # one. The child is invoked with no arguments, so it can never reach here;
+  # this refuses anyway, because "can never" is what the fork bomb also said.
+  if [ -n "${BITHUMAN_INSTALL_SELFTEST_CHILD:-}" ]; then
+    printf 'install.sh: refusing to self-test inside a self-test child\n' >&2
+    exit 2
+  fi
   _t_fail=0
   _t() { # <label> <tag> <asset> <expected>
     _got=$(target_availability "$2" "$3" || true)
@@ -131,6 +139,78 @@ if [ "${1:-}" = "--self-test" ]; then
   _t "cli-v2.5.1 HAS arm64 macOS (control)"     cli-v2.5.1  bithuman-aarch64-apple-darwin.tar.gz      OK
   _t "cli-v2.3.27 HAS aarch64 Linux (★control)" cli-v2.3.27 bithuman-aarch64-unknown-linux-gnu.tar.gz OK
   _t "a tag that cannot exist -> SKIP not OK"   cli-v0.0.0-nope bithuman-x86_64-unknown-linux-gnu.tar.gz SKIP
+
+  # ★AND THE GUIDANCE ITSELF, GRADED ON THE RENDERED REFUSAL — not on the
+  # source text. DISTRIBUTION-SURFACE.md §5a's finding was that the
+  # aarch64-Linux refusal named an x86_64 host, an old pin and an email, but
+  # NOT the channel that serves that platform today. A text fix nothing grades
+  # regresses silently.
+  #
+  # ★AND IT MUST GRADE THE OUTPUT, BECAUSE GRADING THE SOURCE WAS BLIND — twice,
+  # measured. A `grep` for the sentence in this file matched its OWN call site;
+  # assembling the pattern from halves fixed that, and then it matched the
+  # explanatory COMMENT beside the fix, so deleting the actual `err` line still
+  # passed. Two blind versions in a row, both caught by mutation. So this runs
+  # the installer under a `uname` shim and reads what a developer would see.
+  _st_tmp=$(mktemp -d 2>/dev/null || mktemp -d -t 'bithuman-selftest')
+  mkdir -p "$_st_tmp/shim" "$_st_tmp/bin"
+  _mkshim() { # <machine>
+    cat > "$_st_tmp/shim/uname" <<SHIM
+#!/bin/sh
+case "\${1:-}" in
+  -s) echo Linux ;;
+  -m) echo $1 ;;
+  *)  echo Linux ;;
+esac
+SHIM
+    chmod 755 "$_st_tmp/shim/uname"
+  }
+  # ★PROVE THE INSTRUMENT FIRES: the shim must change what `uname -m` says.
+  # If this host already reports aarch64 the shim is indistinguishable, and
+  # the honest answer is SKIP — not a pass.
+  _mkshim aarch64
+  _real_m=$(uname -m)
+  _shim_m=$(PATH="$_st_tmp/shim:$PATH" uname -m)
+  if [ "$_shim_m" != aarch64 ]; then
+    printf '  FAIL  %-58s shim did not fire (got %s)\n' "uname shim is reachable" "$_shim_m"; _t_fail=1
+  elif [ "$_real_m" = aarch64 ]; then
+    printf '  SKIP  %-58s host is already aarch64\n' "uname shim is reachable"
+  else
+    printf '  PASS  %-58s %s -> %s\n' "★uname shim is reachable" "$_real_m" "$_shim_m"
+  fi
+
+  _pat_ok="pip install bit""human"
+  _run_child() { # <machine>  -> prints the installer's own stderr+stdout
+    _mkshim "$1"
+    PATH="$_st_tmp/shim:$PATH" \
+      BITHUMAN_INSTALL_DIR="$_st_tmp/bin" \
+      BITHUMAN_INSTALL_SELFTEST_CHILD=1 \
+      sh "$0" 2>&1 || true
+  }
+  _out_arm=$(_run_child aarch64)
+  case "$_out_arm" in
+    *"$_pat_ok"*)
+      printf '  PASS  %-58s FOUND\n' "aarch64-Linux refusal NAMES the channel that serves it" ;;
+    *)
+      printf '  FAIL  %-58s the rendered refusal does not name it\n' \
+             "aarch64-Linux refusal NAMES the channel that serves it"; _t_fail=1 ;;
+  esac
+  # ★THE NEAR-TWIN CONTROL: an architecture we serve nowhere must NOT be told
+  # to `pip install bithuman`. If it were, the arm above would be passing on a
+  # sentence this script prints unconditionally.
+  _out_ctl=$(_run_child riscv64)
+  case "$_out_ctl" in
+    *"$_pat_ok"*)
+      printf '  FAIL  %-58s it is printed unconditionally\n' \
+             "★control: an unserved arch is NOT sent to that channel"; _t_fail=1 ;;
+    *"unsupported architecture"*)
+      printf '  PASS  %-58s ABSENT\n' "★control: an unserved arch is NOT sent to that channel" ;;
+    *)
+      printf '  FAIL  %-58s the control arm did not refuse at all\n' \
+             "★control: an unserved arch is NOT sent to that channel"; _t_fail=1 ;;
+  esac
+  rm -rf "$_st_tmp"
+
   if [ "$_t_fail" = 0 ]; then
     printf 'SELF-TEST PASSED: the same target is MISSING on cli-v2.5.1 and OK on cli-v2.3.27,\n'
     printf '                  so the check discriminates rather than refusing everything.\n'
@@ -224,13 +304,36 @@ case "$(target_availability "$version" "$tarball_name")" in
     err ""
     case "$target" in
       aarch64-unknown-linux-gnu)
+        # ★THE FIRST OPTION IS THE ONE THAT ACTUALLY WORKS ON THIS MACHINE.
+        # Until 2026-09-04 this block offered an x86_64 host, a pinned old
+        # release, and an email address — and never mentioned that a supported
+        # channel serves aarch64 Linux TODAY. `pip install bithuman` has the
+        # broadest platform coverage in the estate and is the only channel that
+        # carries this one. Telling a developer to change machines while we
+        # ship a working package for the machine they have is the kind of
+        # refusal that reads as "unsupported" when it means "use the other
+        # door". DISTRIBUTION-SURFACE.md §5a / D-U3.
         err "  aarch64 Linux was published through cli-v2.3.27 and dropped at cli-v2.4.0,"
         err "  when the tarball began vendoring the expression-2 render engine and only an"
         err "  x86_64 Linux engine was built. Options, in order of preference:"
+        err "    * ★USE THE PYTHON LIBRARY — it supports aarch64 Linux today:"
+        err "          pip install bithuman        # docs.bithuman.ai"
+        err "      Same engine, in your process; it is a library, not this command."
         err "    * use an x86_64 Linux host (or run the x86_64 build under emulation);"
         err "    * pin the last aarch64 release — note it predates engine vendoring, so"
         err "      \`bithuman run\` cannot render locally on it:"
         err "          BITHUMAN_VERSION=cli-v2.3.27 sh install.sh"
+        err "    * tell us you need it: hello@bithuman.ai"
+        ;;
+      x86_64-apple-darwin)
+        # ★AN INTEL MAC IS A DIFFERENT ANSWER FROM "not published yet".
+        # No release has ever carried an x86_64-apple-darwin asset and no other
+        # channel serves it either — `pip install bithuman` resolves an Intel
+        # Mac to a 2026-04-29 wheel, which is worse than a refusal. So this arm
+        # says the true thing and offers nothing that would not work.
+        err "  Intel Macs are not built, and no other channel serves one either."
+        err "  On Apple Silicon this installs normally. Options:"
+        err "    * run on an Apple Silicon Mac or an x86_64 Linux host;"
         err "    * tell us you need it: hello@bithuman.ai"
         ;;
       *)
