@@ -165,10 +165,36 @@ That is not hypothetical — it is `cli-v2.5.1`, minus the timing:
 * tag published `2026-09-02T12:44:19Z`
 * macOS asset created `12:43:36Z` — newest CLI commit then was `38e75ba`
 * Linux asset created `19:42:49Z` — **44 seconds** after CLI commit `2f210b3`,
-  *"expr2 linux engine: re-pin to the clean-room rebuild"* — a different engine pin
+  *"expr2 linux engine: re-pin to the clean-room rebuild"*
 * `release-cli` had **zero successful runs** that day (7 total, last success 08-02),
   and no workflow in `bithuman-product/bithuman` uploads a release asset
   (verified by grep) — so **both halves were uploaded by hand, 7 h apart**
+
+★ **CORRECTED 2026-09-04 — "two different trees" IS NOT WHAT THE ARTIFACTS SAY,
+and the difference matters.** The bullets above read the UPLOAD clock. Reading the
+BUILD clock inside each tarball, and lining it up against the CLI repo's commit
+graph, gives a sharper and less alarming picture:
+
+```
+38e75ba committed            2026-09-02 12:41:34Z
+  mac  ./bithuman built      2026-09-02 12:42:02Z   <- 28 s after that commit
+  mac  asset uploaded        2026-09-02 12:43:36Z
+  linux bithuman built       2026-09-02 19:32:58Z   <- 6 h 51 m later
+2f210b3 committed            2026-09-02 19:42:05Z   <- 9 min AFTER the linux BUILD
+  linux asset uploaded       2026-09-02 19:42:49Z   <- 44 s after that commit
+```
+
+★ **There are ZERO CLI commits, on ANY ref, between 12:41:34Z and 19:42:05Z**
+(`git log --all --since --until`, count 0). So the two halves were almost certainly
+built from the SAME commit, `38e75ba` — the `44 seconds after 2f210b3` above is the
+UPLOAD, and `2f210b3` landed *after* the Linux build, recording the engine re-pin
+that build had already used rather than being the tree it came from.
+
+What is established is **two BUILDS, 6 h 51 m apart, one release** — which is what
+`C7 ONE BUILD` refuses, and it is enough: the two halves were assembled by hand, in
+two sittings, with a live tree between them, and the only reason they agree is that
+nobody happened to commit. What is NOT established from the artifacts is two
+different CLI source trees. Saying the stronger thing was not measured.
 
 C5 catches that pair *today* only because the Linux half landed after publish.
 Upload both before flipping the draft and the same two-tree release goes green.
