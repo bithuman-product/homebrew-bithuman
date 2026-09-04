@@ -66,6 +66,17 @@
 #                    tight -- every member within a minute or two -- so this is
 #                    not clock noise, it is two builds. One release, two source
 #                    trees, and every checksum on both of them is correct.
+##   C8 ONE TREE      (--verify-bytes) every asset carries the SAME source
+#                    commit, read out of the binary's own bytes.
+#                    ★ AND IT IS WHAT REPLACES C7, NOT WHAT SUPPLEMENTS IT.
+#                    C7 reads member mtimes; a reproducible pack fixes those,
+#                    so C7 measures 0.00 h spread on a release built from two
+#                    different commits -- MEASURED 2026-09-04 on two real
+#                    packs. C8 reads a stamp the compiler put inside the
+#                    binary, which no repack can smooth over. An asset that
+#                    carries no stamp is REFUSED, not skipped: that is the
+#                    state of every release published to date, and it is
+#                    precisely what may not happen again.
 #
 # ── USAGE ────────────────────────────────────────────────────────────────────
 #   scripts/check-release-atomic.sh cli-v2.5.1
@@ -359,6 +370,139 @@ else:
             ok("C7", f"one build: every tarball's clock within {spread/3600:.2f} h "
                      f"({detail})")
 
+# ── C8 ONE TREE ─────────────────────────────────────────────────────────────
+# ★C7 IS NOT ENOUGH ANY MORE, AND THAT IS MEASURED, NOT FEARED.
+# C7 grades the member mtimes the build machine stamped inside each archive.
+# The moment a release is packed REPRODUCIBLY -- which is the whole point of
+# `bithuman-cli scripts/release_pack.sh`, and which is what makes "gate this
+# file, publish this file" possible at all -- every member carries a FIXED
+# mtime from SOURCE_DATE_EPOCH.  Measured 2026-09-04 on two real packs of two
+# genuinely different binaries built from two different commits:
+#
+#     relC (one tree)  mac 1756900000  linux 1756900000   spread 0.00 h
+#     relM (TWO trees) mac 1756900000  linux 1756900000   spread 0.00 h
+#
+# C7 reports "one build" for BOTH.  The defect it was written for becomes
+# invisible to it the day we fix packing.  So the discriminator has to move
+# INSIDE the artifact, and it has: each tarball now carries the source commit
+# in a self-delimiting stamp in the binary's own bytes, plus a PROVENANCE.json
+# derived from it.  C8 reads them.
+#
+# ★AND IT REFUSES AN ARTIFACT THAT CANNOT NAME ITS TREE, rather than skipping
+# it.  "No stamp" is the state every published release is in today (the estate
+# graded 15 findings against a population of 15), and the whole point is that
+# such an artifact may not be published again.  Historical auditing is
+# unaffected: without --verify-bytes there are no bytes to read and C8 SKIPs.
+_PB = "BITHUMAN-PROV" + "ENANCE-V1{"
+_PE = "}END-BITHUMAN-" + "PROVENANCE"
+
+def _scan_stamps(blob):
+    """Every parseable stamp in `blob`.  Anchored on the END marker, then the
+    LAST begin before it -- a stray begin marker (llvm really does pool one
+    next to the stamp) must not swallow the real one."""
+    b, e = _PB.encode(), _PE.encode()
+    out, at = [], 0
+    while True:
+        end = blob.find(e, at)
+        if end < 0:
+            break
+        start = blob.rfind(b, 0, end)
+        if start >= 0:
+            body = blob[start + len(b) - 1:end + 1]
+            try:
+                out.append(json.loads(body.decode("utf-8", "replace")))
+            except Exception:
+                pass
+        at = end + len(e)
+    return out
+
+def _scan_member(tf, m, chunk=4 << 20):
+    """Chunked scan of one tar member -- the binary is ~80 MB and this runs on
+    a CI runner.  The overlap is longer than any stamp, so a stamp straddling
+    a chunk boundary is still found."""
+    f = tf.extractfile(m)
+    if f is None:
+        return []
+    found, tail = [], b""
+    while True:
+        buf = f.read(chunk)
+        if not buf:
+            break
+        found += _scan_stamps(tail + buf)
+        tail = (tail + buf)[-4096:]
+    return found
+
+if not verify_bytes:
+    print("  [C8] SKIP  --verify-bytes not given (the stamp is inside the tarball)")
+elif asset_dir == "-":
+    bad("C8", "--verify-bytes needs --assets DIR")
+else:
+    import tarfile
+    trees, probs, unread = {}, [], []
+    for name in required:
+        if not name.endswith(".tar.gz"):
+            continue
+        path = os.path.join(asset_dir, name)
+        try:
+            with tarfile.open(path, "r:gz") as tf:
+                sidecar, in_binary = None, []
+                for m in tf.getmembers():
+                    if not m.isfile():
+                        continue
+                    if os.path.basename(m.name) == "PROVENANCE.json":
+                        try:
+                            sidecar = json.loads(tf.extractfile(m).read().decode())
+                        except Exception:
+                            probs.append(f"{name}: PROVENANCE.json is not readable JSON")
+                    else:
+                        # ★NO SIZE THRESHOLD. An earlier draft only scanned
+                        # members over 1 MiB — a magic number that decides
+                        # which bytes count, and the kind of rule that goes
+                        # wrong silently the day an artifact is repackaged.
+                        # Every member is scanned; the scan is chunked, so a
+                        # small member costs almost nothing.
+                        in_binary += _scan_member(tf, m)
+        except Exception as exc:
+            unread.append(f"{name}: {type(exc).__name__}")
+            continue
+
+        if not in_binary:
+            probs.append(f"{name}: carries NO provenance stamp — it cannot name "
+                         f"the tree that built it")
+            continue
+        if len(in_binary) > 1:
+            probs.append(f"{name}: {len(in_binary)} stamps inside — which one is "
+                         f"the artifact talking?")
+            continue
+        stamp = in_binary[0]
+        commit = str(stamp.get("commit", ""))
+        if not re.fullmatch(r"[0-9a-f]{40}", commit):
+            probs.append(f"{name}: stamped commit {commit!r} does not name a tree")
+            continue
+        if stamp.get("dirty") == "true":
+            probs.append(f"{name}: built from a tree with uncommitted changes")
+        if sidecar is None:
+            probs.append(f"{name}: no PROVENANCE.json beside the binary")
+        elif str(sidecar.get("commit", "")) != commit:
+            probs.append(f"{name}: PROVENANCE.json says {str(sidecar.get('commit',''))[:12]}, "
+                         f"the binary says {commit[:12]}")
+        trees[name] = commit
+
+    if unread and not trees:
+        print("  [C8] SKIP  could not open any tarball ({})".format("; ".join(unread)))
+    elif probs:
+        bad("C8", "; ".join(probs))
+    elif len(set(trees.values())) > 1:
+        detail = ", ".join(f"{n} <- {c[:12]}" for n, c in sorted(trees.items()))
+        bad("C8", f"the assets name {len(set(trees.values()))} DIFFERENT SOURCE TREES: "
+                  f"{detail}. One release is one tree.")
+    elif not trees:
+        print("  [C8] SKIP  no tarball readable — nothing to compare")
+    else:
+        one = next(iter(set(trees.values())))
+        bad_note = "" if len(trees) > 1 else "  (only one tarball — no comparison)"
+        ok("C8", f"one tree: every asset built from {one[:12]}{bad_note}")
+
 open(os.environ["FAILED_OUT"], "w").write("\n".join(failed))
 sys.exit(1 if failed else 0)
 CHECKS
@@ -538,10 +682,19 @@ MUT
   # Real .tar.gz files this time — C7 reads the clock the build machine stamped
   # on the members, so a text file cannot stand in for one.
   C7D="$WORK/c7"; mkdir -p "$C7D/src"
-  echo payload > "$C7D/src/bithuman"
+  # ★THE FIXTURE CARRIES A VALID STAMP, because a fixture that is broken in a
+  # SECOND way cannot isolate the defect under test. Without this the C7
+  # control was red on C8 ("no provenance stamp") and reported itself failed —
+  # which is a fixture bug wearing a check's clothes.
+  C7_COMMIT=$(printf '7%.0s' $(seq 1 40))
+  {
+    printf 'payload BITHUMAN-PROV'
+    printf 'ENANCE-V1{"product":"bithuman-cli","commit":"%s","dirty":"false","target":"t"}END-BITHUMAN-PROVENANCE\n' "$C7_COMMIT"
+  } > "$C7D/src/bithuman"
+  printf '{"commit":"%s","dirty":"false","target":"t"}\n' "$C7_COMMIT" > "$C7D/src/PROVENANCE.json"
   mk_tar() { # <out.tar.gz> <epoch>
-    touch -d "@$2" "$C7D/src/bithuman"
-    tar -czf "$1" -C "$C7D/src" bithuman
+    touch -d "@$2" "$C7D/src/bithuman" "$C7D/src/PROVENANCE.json"
+    tar -czf "$1" -C "$C7D/src" bithuman PROVENANCE.json
   }
   # Control: both built inside one window (12 minutes apart, like one dispatch).
   mk_tar "$C7D/bithuman-aarch64-apple-darwin.tar.gz"     1788400000
@@ -602,6 +755,113 @@ MK7B
 
   echo
   echo "=============================================================="
+  echo "MUTATION: reproducible packing BLINDS C7 — C8 must see it"
+  echo "=============================================================="
+  # ★THE POINT OF THESE ARMS. Every member below carries the SAME fixed mtime,
+  # exactly as a reproducible pack produces, so C7 measures 0.00 h spread and
+  # PASSES on all three. The only thing that differs is the stamp inside the
+  # binary. If C8 ever goes quiet, these arms go green with a release built
+  # from two trees — which is the defect the whole file exists for.
+  C8D="$WORK/c8"; mkdir -p "$C8D/src"
+  C8_A=$(printf 'a%.0s' $(seq 1 40) | tr 'a' '1')
+  C8_B=$(printf 'b%.0s' $(seq 1 40) | tr 'b' '2')
+  mk8() { # <out.tar.gz> <commit-or-empty>
+    if [[ -n "$2" ]]; then
+      printf 'noise%sBITHUMAN-PROV' "$(head -c 2000 /dev/zero | tr '\0' 'x')" > "$C8D/src/bithuman"
+      printf 'ENANCE-V1{"product":"bithuman-cli","commit":"%s","dirty":"false","target":"t"}END-BITHUMAN-PROVENANCE\n' "$2" >> "$C8D/src/bithuman"
+      printf '{"commit":"%s","dirty":"false","target":"t"}\n' "$2" > "$C8D/src/PROVENANCE.json"
+    else
+      head -c 2000 /dev/zero | tr '\0' 'x' > "$C8D/src/bithuman"
+      rm -f "$C8D/src/PROVENANCE.json"
+    fi
+    # ★ the member must be over C8's 1 MiB "this is the binary" threshold
+    head -c 1200000 /dev/zero | tr '\0' 'z' >> "$C8D/src/bithuman"
+    tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='@1788400000' \
+        --format=gnu -cf - -C "$C8D/src" . 2>/dev/null | gzip -9 -n > "$1"
+  }
+  mkman8() { # <dir> <manifest-out> <formula-out>
+    local d="$1" out="$2" rb="$3" ms ls
+    ms="$(sha256sum "$d/bithuman-aarch64-apple-darwin.tar.gz" | cut -d' ' -f1)"
+    ls="$(sha256sum "$d/bithuman-x86_64-unknown-linux-gnu.tar.gz" | cut -d' ' -f1)"
+    printf '%s  bithuman-aarch64-apple-darwin.tar.gz\n' "$ms" > "$d/bithuman-aarch64-apple-darwin.tar.gz.sha256"
+    printf '%s  bithuman-x86_64-unknown-linux-gnu.tar.gz\n' "$ls" > "$d/bithuman-x86_64-unknown-linux-gnu.tar.gz.sha256"
+    "$PY" - "$out" "$ms" "$ls" <<'MK8'
+import json, sys
+out, mac, lnx = sys.argv[1], sys.argv[2], sys.argv[3]
+def a(n, s, body=None):
+    d = {"name": n, "size": s, "created_at": "2026-09-03T11:50:00Z",
+         "updated_at": "2026-09-03T11:50:00Z"}
+    if body is not None: d["body_text"] = body
+    return d
+json.dump({"tag_name": "cli-v9.9.9", "draft": False,
+           "published_at": "2026-09-03T12:00:00Z",
+           "assets": [
+             a("bithuman-aarch64-apple-darwin.tar.gz", 1200000),
+             a("bithuman-aarch64-apple-darwin.tar.gz.sha256", 103,
+               f"{mac}  bithuman-aarch64-apple-darwin.tar.gz\n"),
+             a("bithuman-x86_64-unknown-linux-gnu.tar.gz", 1200000),
+             a("bithuman-x86_64-unknown-linux-gnu.tar.gz.sha256", 107,
+               f"{lnx}  bithuman-x86_64-unknown-linux-gnu.tar.gz\n"),
+           ]}, open(out, "w"), indent=1)
+MK8
+    { echo 'class BithumanCli < Formula'
+      echo '  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v9.9.9/bithuman-aarch64-apple-darwin.tar.gz"'
+      echo "  sha256 \"$ms\""
+      echo 'end'; } > "$rb"
+  }
+  REQUIRED_TARBALLS=(
+    "bithuman-aarch64-apple-darwin.tar.gz:1"
+    "bithuman-x86_64-unknown-linux-gnu.tar.gz:1"
+  )
+
+  # ── control: one tree, reproducibly packed ────────────────────────────────
+  mk8 "$C8D/bithuman-aarch64-apple-darwin.tar.gz"     "$C8_A"
+  mk8 "$C8D/bithuman-x86_64-unknown-linux-gnu.tar.gz" "$C8_A"
+  mkman8 "$C8D" "$WORK/c8ok.json" "$C8D/ok.rb"
+  if run_checks "$WORK/c8ok.json" "$C8D/ok.rb" "$C8D" 1; then
+    echo "  ★one-tree control: PASS (C8 is not red on a correct release)"
+  else
+    echo "*** one-tree control FAILED — C8 refuses a correct release: $(tr '\n' ' ' < "$WORK/failed")"
+    fails=$((fails+1))
+  fi
+
+  # ── mutation A: two trees, identical mtimes ───────────────────────────────
+  mk8 "$C8D/bithuman-x86_64-unknown-linux-gnu.tar.gz" "$C8_B"
+  mkman8 "$C8D" "$WORK/c8two.json" "$C8D/two.rb"
+  if run_checks "$WORK/c8two.json" "$C8D/two.rb" "$C8D" 1; then
+    echo "*** NOT CAUGHT — two SOURCE TREES accepted as one release"
+    fails=$((fails+1))
+  else
+    got="$(tr '\n' ' ' < "$WORK/failed")"
+    if [[ " $got " == *" C8 "* && " $got " != *" C7 "* ]]; then
+      echo "REFUSED on C8 alone — and C7 was silent, which is the whole point (failed: $got)"
+    elif [[ " $got " == *" C8 "* ]]; then
+      echo "REFUSED on C8 (failed: $got)"
+    else
+      echo "*** REFUSED on the WRONG check: $got"
+      fails=$((fails+1))
+    fi
+  fi
+
+  # ── mutation B: no stamp at all — the state of every release to date ──────
+  mk8 "$C8D/bithuman-aarch64-apple-darwin.tar.gz"     ""
+  mk8 "$C8D/bithuman-x86_64-unknown-linux-gnu.tar.gz" ""
+  mkman8 "$C8D" "$WORK/c8non.json" "$C8D/non.rb"
+  if run_checks "$WORK/c8non.json" "$C8D/non.rb" "$C8D" 1; then
+    echo "*** NOT CAUGHT — an artifact that cannot name its own tree was accepted"
+    fails=$((fails+1))
+  else
+    got="$(tr '\n' ' ' < "$WORK/failed")"
+    if [[ " $got " == *" C8 "* ]]; then
+      echo "REFUSED on C8 — an unstamped asset may not be published (failed: $got)"
+    else
+      echo "*** REFUSED on the WRONG check: $got"
+      fails=$((fails+1))
+    fi
+  fi
+
+  echo
+  echo "=============================================================="
   echo "DRAFT GATE truth table (the decision the workflow makes)"
   echo "=============================================================="
   #        state    require_draft   expected
@@ -633,7 +893,7 @@ TT
     echo "SELF-TEST: FAIL — $fails control(s)/mutation(s) behaved wrongly"
     exit 1
   fi
-  echo "SELF-TEST: PASS — baseline green, 9 mutations each refused on their own check,"
+  echo "SELF-TEST: PASS — baseline green, 11 mutations each refused on their own check,"
   echo "                  draft-gate truth table 7/7"
   exit 0
 fi
