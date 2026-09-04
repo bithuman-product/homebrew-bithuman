@@ -110,6 +110,7 @@ public enum Bhci {
         case planeUnavailable      = "PLANE_UNAVAILABLE"
         case modelNotOnTarget      = "MODEL_NOT_ON_TARGET"
         case modelUnruledOnTarget  = "MODEL_UNRULED_ON_TARGET"
+        case artifactModelUnresolved = "ARTIFACT_MODEL_UNRESOLVED"
         case tesseraMembersMissing = "TESSERA_MEMBERS_MISSING"
         case tesseraMembersInvalid = "TESSERA_MEMBERS_INVALID"
         case borrowUnavailable     = "BORROW_UNAVAILABLE"
@@ -123,7 +124,8 @@ public enum Bhci {
             switch self {
             case .artifactNotFound, .artifactUnreadable, .manifestKeyMissing: return 66
             case .runtimeAssetMissing, .planeUnavailable, .modelNotOnTarget,
-                 .modelUnruledOnTarget, .tesseraMembersMissing,
+                 .modelUnruledOnTarget, .artifactModelUnresolved,
+                 .tesseraMembersMissing,
                  .tesseraMembersInvalid, .borrowUnavailable: return 69
             case .borrowNotApplicable: return 2
             case .notSignedIn: return 77
@@ -143,7 +145,8 @@ public enum Bhci {
             case .manifestKeyMissing: return "TESSERA_MEMBERS_INVALID"
             case .runtimeAssetMissing, .planeUnavailable: return "BE_ERR_FILE_CORRUPT"
             case .modelNotOnTarget: return "UNSUPPORTED_MODEL_FAMILY"
-            case .modelUnruledOnTarget, .borrowNotApplicable: return nil
+            case .modelUnruledOnTarget, .artifactModelUnresolved,
+                 .borrowNotApplicable: return nil
             case .tesseraMembersMissing: return "TESSERA_MEMBERS_MISSING"
             case .tesseraMembersInvalid: return "TESSERA_MEMBERS_INVALID"
             case .borrowUnavailable: return "TESSERA_ATTACH_REFUSED"
@@ -162,6 +165,7 @@ public enum Bhci {
             case .runtimeAssetMissing: return "asset-name"
             case .planeUnavailable: return "engine-and-target"
             case .modelNotOnTarget, .modelUnruledOnTarget: return "model-and-target"
+            case .artifactModelUnresolved: return "path-or-code"
             case .tesseraMembersMissing: return "member-filenames"
             case .tesseraMembersInvalid: return "member-filename"
             case .borrowUnavailable: return "borrow-condition"
@@ -351,7 +355,16 @@ public enum Bhci {
             && source.allSatisfy { $0.isUppercase || $0.isNumber }
             && (source.first?.isLetter ?? false)
         if isCode {
-            return Artifact(source: source, model: "", locality: .cloud, declaredEngine: "")
+            // ★A BARE CLOUD AGENT CODE HAS NO MODEL YET, AND THAT IS A
+            // REFUSAL. This used to return a handle with model "", whose
+            // `state` then answered `.notApplicable` — "this model has no
+            // borrow concept" when the truth is "nobody has said which model
+            // this is". Collapsing cannot-measure into nothing-to-measure is
+            // the one thing this interface exists to refuse.
+            throw BhciError(.artifactModelUnresolved, subject: source,
+                message: "a cloud agent code names an artifact whose MODEL the "
+                    + "platform owns; no SDK can resolve it offline. Ask the "
+                    + "platform for the model, then capability(model:target:)")
         }
         guard let slug = declaredEngine else {
             throw BhciError(.manifestKeyMissing, subject: "manifest.engine",
