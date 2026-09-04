@@ -53,6 +53,92 @@ need_cmd tar
 need_cmd uname
 need_cmd mktemp
 
+# ----- ★ does a release actually CARRY a target? -----------------------------
+#
+# It did not, for aarch64 Linux, for seven weeks. MEASURED 2026-09-04 by
+# fetching every URL this script would build:
+#
+#   tag          aarch64-unknown-linux-gnu   x86_64-unknown-linux-gnu   aarch64-apple-darwin
+#   cli-v2.5.1   404                         200                        200
+#   cli-v2.5.0   404                         200                        200
+#   cli-v2.4.2   404                         200                        200
+#   cli-v2.3.27  200                         200                        200
+#
+# The platform block below happily produces `aarch64-unknown-linux-gnu` on any
+# arm64 Linux box — Graviton, Ampere, a Pi, an arm64 container on an Apple
+# laptop — because nothing here ever knew which targets a release carries. It
+# built the URL, curl 404'd, and the user was told "download failed … may not be
+# published": that reads like a network problem, and it names neither what IS
+# published nor what to do instead.
+#
+# So ASK THE RELEASE. One request, the same API the tag lookup already uses.
+# This makes advertising a target that does not exist structurally impossible
+# rather than a hand-maintained list that drifts out of date.
+#
+# ★ AND IT SKIPS RATHER THAN PASSES when it cannot read the list: an installer
+# that stops working because GitHub rate-limited an anonymous request would be a
+# worse defect than the one being fixed. Skipped is reported, not swallowed.
+
+assets_for_tag() {
+  # $1 = tag. Prints one tarball asset name per line. No output = could not read.
+  #
+  # ★ `|| true` is not defensive noise. This script runs under `set -eu`, and
+  # BOTH `curl -f` on a tag that does not exist AND `grep` matching nothing exit
+  # non-zero — so without it the SKIP path kills the installer instead of
+  # skipping, which is the precise failure the check was added to avoid. That is
+  # not a hypothetical: the first version of this function did exactly that, and
+  # `--self-test`'s fifth arm (a tag that cannot exist) is what caught it.
+  curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/$1" 2>/dev/null \
+    | grep '"name"' \
+    | sed -e 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' \
+    | grep '^bithuman-.*\.tar\.gz$' || true
+}
+
+# target_availability <tag> <tarball-name>
+#   prints  OK      the release carries it
+#           MISSING the release exists and does NOT carry it
+#           SKIP    the asset list could not be read
+target_availability() {
+  _avail=$(assets_for_tag "$1" || true)
+  if [ -z "$_avail" ]; then
+    printf 'SKIP\n'
+  elif printf '%s\n' "$_avail" | grep -qx "$2"; then
+    printf 'OK\n'
+  else
+    printf 'MISSING\n'
+  fi
+}
+
+# ----- self-test -------------------------------------------------------------
+# `sh install.sh --self-test`. A `curl | sh` never passes an argument, so this
+# is unreachable on the install path. It is a LIVE probe against the real
+# releases, and it is built so that a blind instrument fails it: the SAME target
+# must come back MISSING on the release that dropped it and OK on the release
+# that carries it, so "MISSING for everything" cannot pass.
+if [ "${1:-}" = "--self-test" ]; then
+  _t_fail=0
+  _t() { # <label> <tag> <asset> <expected>
+    _got=$(target_availability "$2" "$3" || true)
+    if [ "$_got" = "$4" ]; then
+      printf '  PASS  %-58s %s\n' "$1" "$_got"
+    else
+      printf '  FAIL  %-58s got %s, want %s\n' "$1" "$_got" "$4"; _t_fail=1
+    fi
+  }
+  printf 'install.sh --self-test  (live, against %s)\n' "$GITHUB_REPO"
+  _t "cli-v2.5.1 has no aarch64 Linux"          cli-v2.5.1  bithuman-aarch64-unknown-linux-gnu.tar.gz MISSING
+  _t "cli-v2.5.1 HAS x86_64 Linux (control)"    cli-v2.5.1  bithuman-x86_64-unknown-linux-gnu.tar.gz  OK
+  _t "cli-v2.5.1 HAS arm64 macOS (control)"     cli-v2.5.1  bithuman-aarch64-apple-darwin.tar.gz      OK
+  _t "cli-v2.3.27 HAS aarch64 Linux (★control)" cli-v2.3.27 bithuman-aarch64-unknown-linux-gnu.tar.gz OK
+  _t "a tag that cannot exist -> SKIP not OK"   cli-v0.0.0-nope bithuman-x86_64-unknown-linux-gnu.tar.gz SKIP
+  if [ "$_t_fail" = 0 ]; then
+    printf 'SELF-TEST PASSED: the same target is MISSING on cli-v2.5.1 and OK on cli-v2.3.27,\n'
+    printf '                  so the check discriminates rather than refusing everything.\n'
+    exit 0
+  fi
+  printf 'SELF-TEST FAILED\n'; exit 1
+fi
+
 # ----- platform detection ----------------------------------------------------
 
 uname_s=$(uname -s)
@@ -124,6 +210,38 @@ info "install dir: $install_dir"
 
 tarball_name="bithuman-${target}.tar.gz"
 tarball_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${tarball_name}"
+
+case "$(target_availability "$version" "$tarball_name")" in
+  OK)   ;;
+  SKIP) info "could not read $version's asset list (offline or rate-limited) — availability check SKIPPED, not passed" ;;
+  *)
+    err "the bithuman CLI is NOT published for $target."
+    err ""
+    err "  release : $version"
+    err "  wanted  : $tarball_name"
+    err "  release carries:"
+    assets_for_tag "$version" | sed -e 's/^/install: error:     /' >&2
+    err ""
+    case "$target" in
+      aarch64-unknown-linux-gnu)
+        err "  aarch64 Linux was published through cli-v2.3.27 and dropped at cli-v2.4.0,"
+        err "  when the tarball began vendoring the expression-2 render engine and only an"
+        err "  x86_64 Linux engine was built. Options, in order of preference:"
+        err "    * use an x86_64 Linux host (or run the x86_64 build under emulation);"
+        err "    * pin the last aarch64 release — note it predates engine vendoring, so"
+        err "      \`bithuman run\` cannot render locally on it:"
+        err "          BITHUMAN_VERSION=cli-v2.3.27 sh install.sh"
+        err "    * tell us you need it: hello@bithuman.ai"
+        ;;
+      *)
+        err "  If you need this target, tell us: hello@bithuman.ai"
+        ;;
+    esac
+    err ""
+    err "  Full asset list: https://github.com/${GITHUB_REPO}/releases/tag/${version}"
+    exit 1
+    ;;
+esac
 
 tmpdir=$(mktemp -d 2>/dev/null || mktemp -d -t 'bithuman-install')
 trap 'rm -rf "$tmpdir"' EXIT INT TERM HUP

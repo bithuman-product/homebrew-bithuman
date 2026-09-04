@@ -102,14 +102,46 @@ rather than failing.
   neither release ever had — which is why the predecessor's target set is always
   printed, and why `--require <triples>` exists to pin a floor.
 
-★ **Known standing gaps it will not flag** (both releases lack them, so there is
-no loss to detect): `install.sh` will ask for `x86_64-apple-darwin` (Intel Mac)
-and `aarch64-unknown-linux-gnu` (ARM Linux); no `cli-v*` release has ever
-carried either. Linux ARM was last published at `cli-v2.3.27`.
+★ **Known standing gaps it will not flag** (the release under test and its
+predecessor both lack them, so there is no *loss* to detect): `install.sh`
+computes `x86_64-apple-darwin` (Intel Mac) and `aarch64-unknown-linux-gnu`
+(ARM Linux) as targets.
+
+★ **CORRECTED 2026-09-04, and the correction matters more than the typo.** The
+two sentences that used to stand here contradicted each other — *"no `cli-v*`
+release has ever carried either"* immediately followed by *"Linux ARM was last
+published at `cli-v2.3.27`"*. The second is the true one, measured by fetching
+every URL:
+
+| tag | `aarch64-unknown-linux-gnu` | `x86_64-unknown-linux-gnu` | `aarch64-apple-darwin` |
+|---|---|---|---|
+| `cli-v2.5.1`  | **404** | 200 | 200 |
+| `cli-v2.5.0`  | **404** | 200 | 200 |
+| `cli-v2.4.2`  | **404** | 200 | 200 |
+| `cli-v2.3.27` | **200** (40,082,649 B) | 200 | 200 |
+
+ARM Linux was published through `cli-v2.3.27` and dropped at `cli-v2.4.0`, when
+the tarball began vendoring the expression-2 render engine and only an x86_64
+Linux engine was built. `x86_64-apple-darwin` really has never shipped.
+
+A false *"never had it"* is worse than a missing check, because it is the
+sentence a reader uses to decide the 404 is expected. The coverage tool compares
+against the PREDECESSOR only, so a platform dropped five releases ago is
+permanently invisible to it — and this paragraph was the thing standing in for
+the check it cannot make.
+
+★ **What actually closed the customer-visible half**: `install.sh` no longer
+builds a URL for a target the release does not carry. It asks the release for
+its asset list first and REFUSES, naming what *is* published and what to do
+instead, rather than emitting a 404 dressed as *"download failed … may not be
+published"*. `sh install.sh --self-test` proves it discriminates: the same
+target is `MISSING` on `cli-v2.5.1` and `OK` on `cli-v2.3.27`.
+Restoring the platform is a separate, costed job: it needs an aarch64 Linux
+render engine, which does not exist.
 
 ## Atomicity: what the gate closes, and what it does NOT (measured 2026-09-03)
 
-`check-release-atomic.sh` runs six checks. Five of them run in CI:
+`check-release-atomic.sh` runs seven checks. Five of them run in CI:
 
 | | closes |
 |---|---|
@@ -119,8 +151,9 @@ carried either. Linux ARM was last published at `cli-v2.3.27`.
 | C4 FORMULA-PIN | the formula's url/sha256 point at this tag's macOS asset |
 | C5 ATOMIC | no asset was created after `published_at` |
 | C6 BYTES | recomputed sha256 matches the sidecar — **needs `--verify-bytes --assets DIR`, which `release-atomic` does not pass, so C6 SKIPs on every CI run** |
+| C7 ONE BUILD | ★ **added 2026-09-04** — every tarball's *interior* build clock agrees to within 4 h. Same `--verify-bytes --assets DIR` requirement as C6, so it also SKIPs on a manifest-only CI run |
 
-★**No check binds an asset to a source commit.** `git grep` over `scripts/`,
+★**No check bound an asset to a source tree until 2026-09-04.** `git grep` over `scripts/`,
 `tools/` and `.github/` finds no commit, provenance or build-id comparison
 anywhere. So this shape passes all six:
 
@@ -144,13 +177,43 @@ The sidecar cannot help: it is generated from the tarball at upload time, so it
 agrees with whatever bytes were just built. **A sidecar can never disagree with
 the artifact it was cut from** — it proves transport, not identity.
 
-**The gap to close** (not done here — it needs a stamp in the tarball, which is a
-CLI build change, not a tap change): have each tarball carry the CLI commit it
-was built from, and add a C7 that refuses a release whose halves name different
-commits. Until then, one dispatch of `release-cli` with both `build_mac` and
-`build_linux` ON is the *only* thing that makes the two halves share a tree — it
-takes `cli_ref` once and both jobs check out that same ref. Cutting halves in
-separate dispatches, or by hand, reopens this every time.
+★ **THE GAP IS CLOSED, and without the CLI build change this section asked for.**
+The paragraph here used to say the fix "needs a stamp in the tarball, which is a
+CLI build change, not a tap change". It does not. **The build clock is already in
+the archive** — the mtimes the build machine stamped on every member — and
+`C7 ONE BUILD` reads it. That matters for three reasons: it needs no cooperation
+from the CLI repo, it works **retroactively on every release already published**,
+and unlike C5 it survives a tidy re-upload, because it grades when the bytes were
+*made*, not when they were *pushed*.
+
+Measured on the real `cli-v2.5.1` assets, 2026-09-04 (`--verify-bytes --assets`):
+
+```
+[C5] FAIL  … uploaded 6h58m after publish
+[C6] PASS  recomputed sha256 matches the sidecar for 2 tarball(s)
+[C7] FAIL  the assets are from DIFFERENT BUILDS:
+           bithuman-aarch64-apple-darwin.tar.gz     built 2026-09-02T12:42:02Z
+           bithuman-x86_64-unknown-linux-gnu.tar.gz built 2026-09-02T19:32:58Z
+           — 6.85 h apart, window is 4 h.
+```
+
+C6 PASSES beside it: **both halves match their own sidecars perfectly and the
+release is still two builds** — which is the whole point, and the reason a
+checksum was never going to catch this. The interior clocks also sit 1.5 min and
+10 min *before* the upload times recorded above, exactly as build-then-upload
+predicts, so the two instruments corroborate rather than repeat each other.
+
+The positive control is a real release, not a fixture: `cli-v2.3.27`'s three
+tarballs were built 16:10, 16:23 and 17:05 — **0.22 h apart, C7 PASS**. So C7
+discriminates instead of reddening everything. `--self-test` carries both arms
+too (12 min apart green, the 6h58m gap red on C7 and only C7).
+
+**What C7 still cannot see**: two builds of the same commit made minutes apart,
+and two builds made in one window from two different trees. A commit stamp in
+the tarball would close those, and it is still worth doing. Until then, one
+dispatch of `release-cli` with both `build_mac` and `build_linux` ON remains the
+only thing that makes the two halves *share* a tree — it takes `cli_ref` once and
+both jobs check out that same ref.
 
 ## Secrets (this repo, or org-level — all repos inherit)
 `PYPI_API_TOKEN`, `PYPI_USERNAME` (=`__token__`), `BITHUMAN_MODELS_SSH_KEY` (private half of the read-only deploy key `homebrew-bithuman-ci-ro` on the `bithuman-models` engine monorepo — probe it with the `preflight` workflow). No Maven/Android/OSSRH/GPG.

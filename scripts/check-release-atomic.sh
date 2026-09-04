@@ -50,6 +50,22 @@
 #                    one every release above violates
 #   C6 BYTES         (--verify-bytes) recomputed sha256 of the downloaded
 #                    tarball equals its sidecar
+#   C7 ONE BUILD     (--verify-bytes) the tarballs were produced by ONE build.
+#                    ★ THIS IS THE SECOND PROVEN DEFECT AND C5 CANNOT SEE IT.
+#                    C5 grades UPLOAD times, which a re-upload can make look
+#                    tidy. C7 grades the BUILD clock carried INSIDE each
+#                    archive -- the mtimes the build machine stamped on the
+#                    members -- so it survives re-uploading, renaming and
+#                    re-tagging. Measured on the real cli-v2.5.1 assets,
+#                    2026-09-04:
+#                        bithuman-aarch64-apple-darwin.tar.gz  ./bithuman
+#                            2026-09-02 08:42:02   (and ./engines/ 08:41)
+#                        bithuman-x86_64-unknown-linux-gnu.tar.gz  bithuman
+#                            2026-09-02 15:32:58   (and engines/ 15:32)
+#                    Six hours fifty minutes apart. Each archive is internally
+#                    tight -- every member within a minute or two -- so this is
+#                    not clock noise, it is two builds. One release, two source
+#                    trees, and every checksum on both of them is correct.
 #
 # ── USAGE ────────────────────────────────────────────────────────────────────
 #   scripts/check-release-atomic.sh cli-v2.5.1
@@ -127,7 +143,7 @@ run_checks() {
   MAN="$man" FORMULA_FILE="$formula" ASSET_DIR="$assets" VERIFY="$bytes" \
   FAILED_OUT="$WORK/failed" \
   "$PY" <<'CHECKS'
-import hashlib, json, os, re, sys
+import hashlib, json, os, re, sys, time
 from datetime import datetime, timezone
 
 man       = json.load(open(os.environ["MAN"]))
@@ -290,6 +306,58 @@ else:
         bad("C6", "; ".join(probs))
     else:
         ok("C6", f"recomputed sha256 matches the sidecar for {checked} tarball(s)")
+
+# ── C7 ONE BUILD ───────────────────────────────────────────────────────────
+# The build clock lives inside the archive. Take the LATEST member mtime in each
+# tarball -- when the build finished writing it -- and require every tarball in
+# the release to agree to within C7_WINDOW_H hours. The two jobs of one dispatch
+# run in parallel and finish within minutes of each other; the mac job's own
+# timeout is 60 minutes. Four hours is therefore generous by design: it is wide
+# enough that a slow, retried, but SINGLE release passes, and narrow enough that
+# the seven-hour gap on cli-v2.5.1 cannot.
+#
+# ★ It SKIPS rather than passes when it cannot read a tarball. An unreadable
+# archive is C2/C6's finding, not a licence for C7 to report green.
+window_h = float(os.environ.get("C7_WINDOW_H", "4"))
+if not verify_bytes:
+    print("  [C7] SKIP  --verify-bytes not given (the build clock is inside the tarball)")
+elif asset_dir == "-":
+    bad("C7", "--verify-bytes needs --assets DIR")
+else:
+    import tarfile
+    clocks = {}
+    unread = []
+    for name in required:
+        if not name.endswith(".tar.gz"):
+            continue
+        path = os.path.join(asset_dir, name)
+        try:
+            with tarfile.open(path, "r:gz") as tf:
+                mt = [m.mtime for m in tf.getmembers() if m.mtime]
+            if not mt:
+                unread.append(f"{name}: no member carries an mtime")
+            else:
+                clocks[name] = (min(mt), max(mt))
+        except Exception as e:
+            unread.append(f"{name}: {type(e).__name__}")
+    if unread and not clocks:
+        print("  [C7] SKIP  could not read a build clock out of any tarball "
+              f"({'; '.join(unread)})")
+    elif len(clocks) < 2:
+        print(f"  [C7] SKIP  only {len(clocks)} tarball(s) readable — nothing to compare")
+    else:
+        def ts(x): return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(x))
+        finals = {n: v[1] for n, v in clocks.items()}
+        lo_n = min(finals, key=finals.get); hi_n = max(finals, key=finals.get)
+        spread = finals[hi_n] - finals[lo_n]
+        detail = ", ".join(f"{n} built {ts(v[1])}" for n, v in sorted(clocks.items()))
+        if spread > window_h * 3600:
+            bad("C7", f"the assets are from DIFFERENT BUILDS: {detail} — "
+                      f"{spread/3600:.2f} h apart, window is {window_h:g} h. "
+                      f"One release must be one build from one commit.")
+        else:
+            ok("C7", f"one build: every tarball's clock within {spread/3600:.2f} h "
+                     f"({detail})")
 
 open(os.environ["FAILED_OUT"], "w").write("\n".join(failed))
 sys.exit(1 if failed else 0)
@@ -465,6 +533,75 @@ MUT
 
   echo
   echo "=============================================================="
+  echo "MUTATION: the two tarballs are from two builds  (must trip C7)"
+  echo "=============================================================="
+  # Real .tar.gz files this time — C7 reads the clock the build machine stamped
+  # on the members, so a text file cannot stand in for one.
+  C7D="$WORK/c7"; mkdir -p "$C7D/src"
+  echo payload > "$C7D/src/bithuman"
+  mk_tar() { # <out.tar.gz> <epoch>
+    touch -d "@$2" "$C7D/src/bithuman"
+    tar -czf "$1" -C "$C7D/src" bithuman
+  }
+  # Control: both built inside one window (12 minutes apart, like one dispatch).
+  mk_tar "$C7D/bithuman-aarch64-apple-darwin.tar.gz"     1788400000
+  mk_tar "$C7D/bithuman-x86_64-unknown-linux-gnu.tar.gz" 1788400720
+  C7_MAC="$(sha256sum "$C7D/bithuman-aarch64-apple-darwin.tar.gz" | cut -d' ' -f1)"
+  C7_LNX="$(sha256sum "$C7D/bithuman-x86_64-unknown-linux-gnu.tar.gz" | cut -d' ' -f1)"
+  printf '%s  bithuman-aarch64-apple-darwin.tar.gz\n'     "$C7_MAC" > "$C7D/bithuman-aarch64-apple-darwin.tar.gz.sha256"
+  printf '%s  bithuman-x86_64-unknown-linux-gnu.tar.gz\n' "$C7_LNX" > "$C7D/bithuman-x86_64-unknown-linux-gnu.tar.gz.sha256"
+  "$PY" - "$FIX/good.json" "$WORK/c7.json" "$C7_MAC" "$C7_LNX" <<'MK7'
+import json, sys
+m = json.load(open(sys.argv[1]))
+A = {a["name"]: a for a in m["assets"]}
+A["bithuman-aarch64-apple-darwin.tar.gz.sha256"]["body_text"] = sys.argv[3] + "  bithuman-aarch64-apple-darwin.tar.gz\n"
+A["bithuman-x86_64-unknown-linux-gnu.tar.gz.sha256"]["body_text"] = sys.argv[4] + "  bithuman-x86_64-unknown-linux-gnu.tar.gz\n"
+m["assets"] = list(A.values())
+json.dump(m, open(sys.argv[2], "w"), indent=1)
+MK7
+  cat > "$C7D/good.rb" <<RB7
+class BithumanCli < Formula
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v9.9.9/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "$C7_MAC"
+RB7
+  echo "end" >> "$C7D/good.rb"
+  REQUIRED_TARBALLS=(
+    "bithuman-aarch64-apple-darwin.tar.gz:1"
+    "bithuman-x86_64-unknown-linux-gnu.tar.gz:1"
+  )
+  if run_checks "$WORK/c7.json" "$C7D/good.rb" "$C7D" 1; then
+    echo "  one-build control: PASS (12 minutes apart is ONE build)"
+  else
+    echo "*** one-build control FAILED — C7 is red on a correct release and proves nothing"
+    fails=$((fails+1))
+  fi
+  # Mutation: rebuild the linux tarball 6h58m later — the real cli-v2.5.1 gap.
+  mk_tar "$C7D/bithuman-x86_64-unknown-linux-gnu.tar.gz" 1788425080
+  C7_LNX2="$(sha256sum "$C7D/bithuman-x86_64-unknown-linux-gnu.tar.gz" | cut -d' ' -f1)"
+  printf '%s  bithuman-x86_64-unknown-linux-gnu.tar.gz\n' "$C7_LNX2" > "$C7D/bithuman-x86_64-unknown-linux-gnu.tar.gz.sha256"
+  "$PY" - "$WORK/c7.json" "$WORK/c7mut.json" "$C7_LNX2" <<'MK7B'
+import json, sys
+m = json.load(open(sys.argv[1]))
+A = {a["name"]: a for a in m["assets"]}
+A["bithuman-x86_64-unknown-linux-gnu.tar.gz.sha256"]["body_text"] = sys.argv[3] + "  bithuman-x86_64-unknown-linux-gnu.tar.gz\n"
+m["assets"] = list(A.values())
+json.dump(m, open(sys.argv[2], "w"), indent=1)
+MK7B
+  if run_checks "$WORK/c7mut.json" "$C7D/good.rb" "$C7D" 1; then
+    echo "*** NOT CAUGHT — two builds accepted as one release"
+    fails=$((fails+1))
+  else
+    got="$(tr '\n' ' ' < "$WORK/failed")"
+    if [[ " $got " == *" C7 "* ]]; then
+      echo "REFUSED on C7 — correct check fired (failed: $got)"
+    else
+      echo "*** REFUSED on the WRONG check: $got"
+      fails=$((fails+1))
+    fi
+  fi
+
+  echo
+  echo "=============================================================="
   echo "DRAFT GATE truth table (the decision the workflow makes)"
   echo "=============================================================="
   #        state    require_draft   expected
@@ -496,7 +633,7 @@ TT
     echo "SELF-TEST: FAIL — $fails control(s)/mutation(s) behaved wrongly"
     exit 1
   fi
-  echo "SELF-TEST: PASS — baseline green, 8 mutations each refused on their own check,"
+  echo "SELF-TEST: PASS — baseline green, 9 mutations each refused on their own check,"
   echo "                  draft-gate truth table 7/7"
   exit 0
 fi

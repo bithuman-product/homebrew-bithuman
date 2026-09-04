@@ -51,11 +51,26 @@ refuses.
  1. WHETHER THE TARBALL WORKS.  It reads asset names off the API.  Running the
     installer end-to-end on the target OS is what binds published bytes to a
     working `bithuman --version`.
- 2. A PLATFORM NEITHER RELEASE EVER HAD.  It compares to the predecessor, not
-    to an ideal.  install.sh will happily ask for `x86_64-apple-darwin` and
-    `aarch64-unknown-linux-gnu`; no `cli-v*` release has ever carried either,
-    so both stay green here -- which is why the predecessor's target set is
-    PRINTED, always, and why --require may be used to pin a floor.
+ 2. A PLATFORM DROPPED BEFORE THE PREDECESSOR.  It compares to the PREDECESSOR,
+    not to an ideal, so a platform lost several releases ago is permanently
+    invisible here -- which is why the predecessor's target set is PRINTED,
+    always, and why --require may be used to pin a floor.
+    ★CORRECTED 2026-09-04.  This paragraph used to say "no `cli-v*` release has
+    ever carried either" of `x86_64-apple-darwin` and `aarch64-unknown-linux-gnu`.
+    That is FALSE for ARM Linux and the falsehood was load-bearing: it is the
+    sentence a reader used to decide the 404 was expected.  Measured by fetching
+    every URL, 2026-09-04:
+        cli-v2.3.27  bithuman-aarch64-unknown-linux-gnu.tar.gz  200 (40,082,649 B)
+        cli-v2.4.2   same name                                  404
+        cli-v2.5.0   same name                                  404
+        cli-v2.5.1   same name                                  404
+    ARM Linux shipped through cli-v2.3.27 and was dropped at cli-v2.4.0, when the
+    tarball began vendoring the expression-2 render engine and only an x86_64
+    Linux engine was built.  `x86_64-apple-darwin` really has never shipped.
+    The customer-visible half is closed in install.sh, which now asks the release
+    for its assets and REFUSES by name instead of building a URL that 404s; this
+    tool is deliberately NOT made red for it, because a permanent red for
+    something nobody has been asked to fix teaches people to ignore the gate.
  3. DRAFTS AND PRE-RELEASES.  A draft release is invisible to an anonymous
     reader and is skipped; a pre-release is included (cli-v2.4.1 is one, and
     it is exactly the "shipped no assets at all" shape this refuses).
