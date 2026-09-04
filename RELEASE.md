@@ -215,6 +215,49 @@ dispatch of `release-cli` with both `build_mac` and `build_linux` ON remains the
 only thing that makes the two halves *share* a tree — it takes `cli_ref` once and
 both jobs check out that same ref.
 
+## SwiftPM: three artifacts, two vintages, and why no new tag was cut (2026-09-04)
+
+`Package.swift` declares three `binaryTarget`s and pins a sha256 for each.
+**All three checksums are correct** — `check-manifest-truth.py` R1 verifies exactly
+that and is green. Which is the problem: a checksum binds bytes to a pin and says
+nothing about *when*, or from what, those bytes were made.
+
+`tools/spm_artifact_vintages.py` reads the clock stored inside each zip's central
+directory — the build machine's mtimes, which travel with the archive and survive
+re-uploading, re-tagging and renaming. Measured 2026-09-04:
+
+```
+bitHumanKit                  105 entries   built 2026-04-28 13:42:16 .. 13:49:18   checksum MATCHES
+Expression2                   38 entries   built 2026-08-29 08:47:18               checksum MATCHES
+BithumanEngineProtocolBinary  38 entries   built 2026-08-29 08:47:18               checksum MATCHES
+
+★ 3 artifacts, 2 VINTAGES, 123 days apart
+```
+
+★ **Two vintages, not three.** The two August artifacts agree **to the second** —
+they really are one build. It is `bitHumanKit` that is old, and **older than its
+own release**: it was uploaded to `v2.4.0` on 2026-06-30 but *built* on
+2026-04-28. An upload date understates the gap by two months; the interior clock
+does not.
+
+★ **This is REPORTED, not refused, and that is deliberate.** The split base
+constants are a *fix*, and `Package.swift` carries its own measurement for them:
+`releaseBase` is shared by every binaryTarget, so bumping `releaseTag` v2.4.0 →
+v2.5.0 re-points `bitHumanKit.xcframework.zip` at a tag that does not carry it —
+**both URLs HTTP 404**, measured. `expression2Base` is what keeps the shipping
+product resolvable. A permanent red for the consequence of a correct fix teaches
+people to ignore the gate; what is not acceptable is that nobody could *see* the
+spread, and that is what this closes. `--self-test` has four arms including a
+same-clock control and the manifest parser.
+
+★ **NO NEW SWIFTPM TAG WAS CUT, and the reason is the standing rule: one build,
+one commit, or refuse.** Making the tag atomic requires one release carrying all
+three zips built from one commit, with every `binaryTarget` on that one tag. That
+needs an **Apple** build of `bitHumanKit`, which cannot be produced on the Linux
+host this work was done from — and re-uploading the April bytes under a new tag
+would change the tag, not the vintage. Refusing is the correct outcome here;
+"authorized" is not "obliged".
+
 ## Secrets (this repo, or org-level — all repos inherit)
 `PYPI_API_TOKEN`, `PYPI_USERNAME` (=`__token__`), `BITHUMAN_MODELS_SSH_KEY` (private half of the read-only deploy key `homebrew-bithuman-ci-ro` on the `bithuman-models` engine monorepo — probe it with the `preflight` workflow). No Maven/Android/OSSRH/GPG.
 
