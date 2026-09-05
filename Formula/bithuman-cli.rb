@@ -109,7 +109,30 @@ class BithumanCli < Formula
   # version below is scanned from the cli-v* tag in the URL.)
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.5.1/bithuman-aarch64-apple-darwin.tar.gz"
   sha256 "94a282cf786a1b4fd37a2198a1f571e77a1c33ca0513a6d74f5522f94c7e6bbe"
-  license "Apache-2.0"
+  # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
+  # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
+  # printed to every customer and what every SPDX scanner recorded. The tarball
+  # this formula installs is NOT Apache-2.0 and never was:
+  #
+  #   * the `bithuman` binary STATICALLY LINKS `libessence.a`, built from the
+  #     PRIVATE bithuman-product/bithuman-models — no public source, no
+  #     Apache grant;
+  #   * the tarball vendors proprietary model weights (`expression2-model`,
+  #     `embody.model`, `engines/mac-arm64-1.0.0.engine`);
+  #   * this repo's own docs/CONSOLIDATION.md §H calls it, in those words, a
+  #     "shipped proprietary binary", and measured FFmpeg (LGPL-2.1) statically
+  #     linked into it (47 `third_party/ffmpeg/libav*` paths in the published
+  #     2.5.1 Linux tarball, against 0 in `expression2-model` and 0 in
+  #     `lib/libonnxruntime.so.1` as controls);
+  #   * the tarball ships 37 members and not one LICENSE or NOTICE file, so
+  #     nothing inside it ever carried an Apache grant either.
+  #
+  # `:cannot_represent` is Homebrew's own value for a licence with no SPDX
+  # identifier, and it is the honest one here. The Apache-2.0 badge on this
+  # repo's README covers the TAP and the EXAMPLE code, which really are
+  # Apache-2.0 — it does not reach the binary this formula downloads.
+  # Terms for the installed software: https://www.bithuman.ai/terms
+  license :cannot_represent
 
   depends_on arch: :arm64
   depends_on macos: :sonoma

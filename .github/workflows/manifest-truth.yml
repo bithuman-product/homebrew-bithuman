@@ -18,13 +18,17 @@ on:
   pull_request:
     paths:
       - 'Package.swift'
+      - 'Formula/**'
       - 'scripts/check-manifest-truth.py'
+      - 'scripts/check-formula-license.sh'
       - '.github/workflows/manifest-truth.yml'
   push:
     branches: [main]
     paths:
       - 'Package.swift'
+      - 'Formula/**'
       - 'scripts/check-manifest-truth.py'
+      - 'scripts/check-formula-license.sh'
       - '.github/workflows/manifest-truth.yml'
 
 permissions:
@@ -36,6 +40,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+
+      # ★THE FORMULA'S `license` FIELD IS PROSE TOO, AND NOTHING GRADED IT.
+      # It read `Apache-2.0` for a binary that statically links libessence.a
+      # from a private repo — a live licensing misstatement on a published
+      # channel that `brew audit` accepts, because Apache-2.0 is a valid SPDX
+      # id. The self-test runs first: an open-source id in every plausible
+      # spelling must go RED, or the pass below means nothing.
+      - name: The formula may not claim an open-source licence for a proprietary binary
+        run: |
+          set -e
+          bash scripts/check-formula-license.sh --self-test
+          bash scripts/check-formula-license.sh
 
       - name: strings(1) must be present, or R2 cannot read a binary at all
         run: |
