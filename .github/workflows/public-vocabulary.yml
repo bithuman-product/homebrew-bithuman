@@ -9,11 +9,36 @@ name: Public vocabulary
 # Deliberately NOT path-filtered. A filter that omits its own subject is the
 # defect this guard exists to prevent, and the guard scans every tracked file —
 # so scoping it to a subset would make a green run mean less than it appears to.
+#
+# ★2026-09-06 — THE SECOND SURFACE. Everything above grades TRACKED FILES, and
+# the corpus of that scan is `git ls-files`. A published release title and its
+# notes are NOT files: they live only in GitHub's database, they are
+# world-readable at the same URL as the tarballs they ship, and they are the
+# first English a customer reads after `brew upgrade`. So that text was never
+# EXEMPTED from this guard — it was INVISIBLE to it, and a green over the tree
+# read as a green over the repo. Measured 2026-09-06 across all 70 releases of
+# this repository: 3 carried internal vocabulary, 67 did not.
+#
+# The `releases` job below closes that. It shares this repo's ONE matching
+# primitive (`scan_text`), so the two surfaces cannot drift apart about what a
+# word is, and it ratchets against scripts/public-vocabulary-releases-baseline
+# .json exactly as the tree scan ratchets against its own.
 
 on:
   push:
     branches: ['**']
   pull_request:
+  # The post-publish trigger for the second surface. `edited` matters as much
+  # as `published`: release notes are routinely rewritten in the web UI after
+  # the fact, and such an edit touches no commit, so neither `push` nor
+  # `pull_request` would ever see it.
+  release:
+    types: [published, edited, released, prereleased]
+  # Backstop for what changes neither a commit nor a release event — a
+  # baseline that drifts, or a release removed from somewhere else.
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -34,3 +59,27 @@ jobs:
         run: python3 scripts/guard-public-vocabulary.py --selftest
       - name: no internal vocabulary in the tracked tree
         run: python3 scripts/guard-public-vocabulary.py
+
+  releases:
+    name: no internal vocabulary reaches the published release text
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # Same discipline as the job above: the guard proves it can FAIL before
+      # any green from it is read as evidence. The self-test's release arms are
+      # offline — they inject their own corpus — so this step is also the
+      # instrument check for the step below, which needs the network.
+      - name: the guard proves itself
+        run: python3 scripts/guard-public-vocabulary.py --selftest
+      # GITHUB_TOKEN only lifts the 60/hour unauthenticated rate limit; the
+      # releases of a public repo are readable without it. The guard never
+      # prints a token — it reports the boolean `authenticated:` and nothing
+      # more.
+      - name: no internal vocabulary in the published release titles + notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/guard-public-vocabulary.py --releases

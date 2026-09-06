@@ -1,0 +1,31 @@
+{
+  "_": "Pinned occurrences of internal vocabulary in the PUBLISHED release titles and notes of this PUBLIC repo -- the surface the tree scan cannot see, because a release note is not a file. Codes are defined by scripts/guard-public-vocabulary.py --legend; they are codes rather than words so that this file needs no self-exclusion from the tree scan that also reads it. Every entry carries a measured count and a reason; an entry without a real reason is a defect. Keys are release TAGS.",
+  "releases": {
+    "cli-v2.5.0": {
+      "V1": {
+        "n": 1,
+        "why": "a SCRIPT PATH named in a dated packaging note. A release note is a contemporaneous record; rewriting a path inside one falsifies the record. Measured 2026-09-06: that path is not tracked in this repo, in bithuman-models or in bithuman-cli today, which makes it history rather than a live instruction and reinforces that it must not be re-spelled."
+      },
+      "V2": {
+        "n": 2,
+        "why": "TWO LITERAL TOKENS MEASURED INSIDE A SHIPPED BINARY -- the note quotes what the pinned engine's own counters read. Editing the quoted token would make a published measurement FALSE, which is a worse defect than the word. Same class as the marked-as-retired measurement statements the docs site keeps on purpose."
+      }
+    },
+    "cli-v2.5.1": {
+      "V1": {
+        "n": 3,
+        "why": "the three JSON KEYS `render --json` actually emits on essence-2, quoted so a caller can grep for them. Re-derived 2026-09-06 against bithuman-cli origin/main: the three key spellings occur 45, 10 and 15 times in the shipped source (control: an invented key scores 0). Rewriting them here would document an API that does not exist. The V1 and V6 PROSE that stood beside them was edited out of this body on 2026-09-06; only the keys remain."
+      },
+      "V3": {
+        "n": 1,
+        "why": "the fourth of those JSON keys, same measurement (8 occurrences in the shipped CLI source, control 0). An exact-match key a caller greps for."
+      }
+    },
+    "v2.5.0": {
+      "V2": {
+        "n": 1,
+        "why": "one member of an explicit `strings -a` search list, published as the EVIDENCE that the artifact contains none of them (the note's claim is 'zero occurrences of ... or <this token>'). Removing the token from the list would delete the measurement it proves. The V9 prose that stood in the same body was edited out on 2026-09-06."
+      }
+    }
+  }
+}
