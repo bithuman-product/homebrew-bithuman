@@ -51,7 +51,16 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.5.1 — the CLI that has to be installed
+  # Current published release: cli-v2.6.0. It fixes `bithuman render` on
+  # macOS, which used to stop short of the end of the audio and refuse the
+  # command: measured at five clip lengths on Apple Silicon, three of the five
+  # came up as much as 11 frames short. Every length now exits 0 with
+  # ceil(seconds x 20) frames and a playable file. It also stops a refused
+  # render leaving a partial file at --output, and makes `run` accept the name
+  # `pull` hands out. Both halves of cli-v2.6.0 were built from ONE commit
+  # (3d69679) and each tarball carries a PROVENANCE.json naming it.
+  #
+  # cli-v2.5.1 (superseded) was the CLI that had to be installed
   # BEFORE platform 685b2c4b (the unified `<CODE>.imx` download filename) is
   # deployed. cmd/cloud.rs::route chose LOCAL Apple-Silicon render vs a PAID
   # cloud session by testing that server-supplied filename for `.avatar`, so
@@ -84,8 +93,10 @@ class BithumanCli < Formula
   # gate correctly REFUSES to publish from CI. Same scripts either way
   # (tap scripts/sign-macos.sh + notarize-macos.sh + verify-macos-release.sh,
   # cli scripts/bundle-macos.sh + check-engine-dedup.sh). The Linux x86_64
-  # tarball on the same release IS workflow-built; this formula stays
-  # mac-only, matching 2.4.0/2.4.2.
+  # tarball on the same release was cut the same way for cli-v2.6.0 — on
+  # lafayette, in the manylinux image, packed by the CLI repo's own
+  # scripts/release_pack.sh so both halves carry one commit. This formula
+  # stays mac-only, matching 2.4.0/2.4.2.
   #
   # Apple Silicon (arm64). The macOS tarball is self-contained AND ships the
   # expression-2 render engine next to the binary (expression2-model +
@@ -102,8 +113,8 @@ class BithumanCli < Formula
   # libessence2.dylib, which is an honest refusal, not a render.
   # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.5.1/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "94a282cf786a1b4fd37a2198a1f571e77a1c33ca0513a6d74f5522f94c7e6bbe"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.0/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "523a4e4ccda0b763b1060182a881f0a488f7b84115689455f5c04f365a264bf2"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
