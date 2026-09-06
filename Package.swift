@@ -74,7 +74,7 @@
 //                  `Expression2Engine.create(modelPath:sharedEngineDir:warmSpeech:)`,
 //                  the instance `load(modelPath:…)`, and the container opener
 //                  `Expression2Container.members(of:)` with
-//                  `Expression2ContainerError.notAnAvatarDirectory(path:)`.
+//                  `Expression2LoadError.notAnAvatarDirectory(path:)`.
 //                  MEASURED on the two zips themselves, ios-arm64 slice, aggregated
 //                  over all nine emitted .swiftinterface files
 //                  (`grep -F -o`, with warmUp / isReady / "func pull" /
