@@ -18,8 +18,9 @@
 //     product 'Expression' ... not found in package 'homebrew-bithuman'
 //
 //   - bitHumanKit              binary umbrella, tag v2.4.0. `import bitHumanKit`.
-//   - Expression2              expression-2 engine alone, tag v2.5.0.
-//                              `import Expression2`.
+//   - Expression2              expression-2 engine alone, tag v2.6.0.
+//                              `import Expression2`. FOUR binaryTargets ride
+//                              under it now, not three — see UnifiedModelHeader.
 //   - BithumanEngineProtocol   source-only Layer-0 engine interface.
 //                              `import BithumanEngineProtocol`.
 //
@@ -61,13 +62,30 @@
 //                  `Bithuman.create(modelPath:)`. The `Bithuman` ACTOR is real;
 //                  "the portable libessence C++ runtime" was not.
 //   - Expression2  Layer-1 expression-2 avatar engine, pure Swift + CoreML.
-//                  Published at tag v2.5.0 (see `expression2Tag` below).
-//                  `import Expression2`, then `Expression2Engine()`.
-//                  ★ CODE ONLY — NO MODEL WEIGHTS. `Expression2Engine.init()`
-//                  takes no model path; it looks for a per-identity CoreML bundle
-//                  in $BITHUMAN_EXPRESSION2_DIR or in the app bundle, and
-//                  `isReady` stays false until it finds one. No such bundle is
-//                  published yet, so this product does not render out of the box.
+//                  Published at tag v2.6.0 (see `expression2Tag` below).
+//                  `import Expression2`, then `Expression2Engine.create(modelPath:)`.
+//                  ★ CODE ONLY — NO MODEL WEIGHTS, AND THAT PART IS UNCHANGED.
+//                  What DID change at v2.6.0: the engine can now be GIVEN a model.
+//                  Through v2.5.0 the only initializer was `Expression2Engine()`,
+//                  which took no model path — it searched $BITHUMAN_EXPRESSION2_DIR
+//                  or the app bundle and left `isReady` false when it found
+//                  nothing, so a consumer that had DOWNLOADED an avatar had no way
+//                  to point the engine at it. v2.6.0 adds
+//                  `Expression2Engine.create(modelPath:sharedEngineDir:warmSpeech:)`,
+//                  the instance `load(modelPath:…)`, and the container opener
+//                  `Expression2Container.members(of:)` with
+//                  `Expression2ContainerError.notAnAvatarDirectory(path:)`.
+//                  MEASURED on the two zips themselves, ios-arm64 slice, aggregated
+//                  over all nine emitted .swiftinterface files
+//                  (`grep -F -o`, with warmUp / isReady / "func pull" /
+//                  "public init()" as controls that FIRE 9 each on BOTH, and a
+//                  nonsense token reading 0 on both):
+//                      token                   v2.5.0   v2.6.0
+//                      create(modelPath             0        9
+//                      Expression2Container         0       45
+//                      notAnAvatarDirectory         0        9
+//                  Still no avatar bundle is published, so this product does not
+//                  render out of the box; it can now be handed one.
 //   - BithumanEngineProtocol
 //                  Layer-0 common engine interface, pure Swift SOURCE. Consumed
 //                  by the engine SDKs in bithuman-models for their standalone
@@ -106,10 +124,16 @@
 //
 // RELEASE NOTE:
 //   `bitHumanKit` (the umbrella, tag v2.4.0) and `Expression2` + its binary
-//   `BithumanEngineProtocol` (tag v2.5.0) ship today, and every one of the
-//   three binaryTargets below was re-fetched on 2026-09-03 and re-hashed
-//   against the checksum it pins — three MATCH, and a one-byte mutation of the
-//   same zip MISMATCHes, so the check is not vacuous.
+//   `BithumanEngineProtocol` + `UnifiedModelHeader` (tag v2.6.0) ship today.
+//   ★ FOUR binaryTargets below now, not three, and the fourth is not optional:
+//   the engine's emitted .swiftinterface carries `import UnifiedModelHeader` at
+//   line 14 (it registers itself in the shared EngineLoaderRegistry), so a
+//   consumer taking only the v2.5.0 pair dies at import with
+//   `no such module 'UnifiedModelHeader'`. Every one of the four was re-fetched
+//   and re-hashed against the checksum it pins — the three v2.6.0 checksums came
+//   out of the `.sha256` sidecars the build wrote, never from a human, and
+//   bitHumanKit's is UNCHANGED at 5c536e37… (bumping the shared `releaseTag`
+//   would 404 the shipping product; see the block above `expression2Tag`).
 //   Nothing else ships. There is no pending `Expression` or `Bithuman`
 //   per-product zip: the release flow can emit one
 //   (scripts/build-binary-xcframework.sh; `swift package compute-checksum
@@ -148,7 +172,7 @@ let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/release
 // tag the consumer's `from:` picks and then reads absolute URLs out of the
 // manifest it finds there — the asset does not have to live on the resolved tag.
 // ---------------------------------------------------------------------------
-let expression2Tag = "v2.5.0"
+let expression2Tag = "v2.6.0"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 let package = Package(
@@ -198,7 +222,7 @@ let package = Package(
         // ★ HAZARD, and it is measured too: a consumer that depends on BOTH this
         //   product AND the `BithumanEngineProtocol` product gets the module twice
         //   and fails to link (arm C3, exit 1). Depend on `Expression2` alone.
-        .library(name: "Expression2", targets: ["Expression2", "BithumanEngineProtocolBinary"]),
+        .library(name: "Expression2", targets: ["Expression2", "BithumanEngineProtocolBinary", "UnifiedModelHeader"]),
     ],
     targets: [
         .binaryTarget(
@@ -224,12 +248,17 @@ let package = Package(
         .binaryTarget(
             name: "Expression2",
             url: "\(expression2Base)/Expression2.xcframework.zip",
-            checksum: "18c8e71037600a570acaf05c2c8e3e917069705191860ce4dc84a69a56dccab7"
+            checksum: "d4ce14b6b9c463aa7310ca8200f59ded20931cc33f40b6c530eef13b5a40d326"
         ),
         .binaryTarget(
             name: "BithumanEngineProtocolBinary",
             url: "\(expression2Base)/BithumanEngineProtocol.xcframework.zip",
-            checksum: "ce4ae409afbf378039c9a28e0871d2e37740cabf57daff3461777bf11be436a2"
+            checksum: "048a5d271d61fe4689dd9f1a6f209c00e358e4fd77aa249e55dc59dcd7051759"
+        ),
+        .binaryTarget(
+            name: "UnifiedModelHeader",
+            url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
+            checksum: "33b7d575ec90055a4894fb1fbbb507b9264694752c6a2a5e35c7bf8c069e180e"
         ),
     ]
 )
