@@ -11,7 +11,7 @@ weights** — models are fetched at runtime.
 | expression-2 | `ai.bithuman:expression2-android` | 0.3.0 |
 
 `essence-2-max` and `expression-1` are GPU-only and have no Android
-coordinate; `dream-1` is unruled. (`tools/model_scope.py` is the authority.)
+coordinate. (`tools/model_scope.py` is the authority.)
 
 ## ★ expression-2 needs `google()` — Maven Central alone is NOT enough
 

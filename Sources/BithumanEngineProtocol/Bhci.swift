@@ -61,7 +61,7 @@ public enum Bhci {
 
     public static let models = [
         "essence-1", "essence-2", "essence-2-max",
-        "expression-1", "expression-2", "dream-1",
+        "expression-1", "expression-2",
     ]
 
     /// Kept in step with `cloudOnlyEngineSlugs` above — same fact, model names
@@ -80,7 +80,6 @@ public enum Bhci {
         "essence-2-max": ["gpu": .inScope, "apple": .notApplicable, "web": .notApplicable, "android": .notApplicable, "macOS/iOS": .notApplicable],
         "expression-1":  ["gpu": .inScope, "apple": .notApplicable, "web": .notApplicable, "android": .notApplicable, "macOS/iOS": .notApplicable],
         "expression-2":  ["gpu": .inScope, "apple": .inScope, "web": .inScope, "android": .inScope, "macOS/iOS": .inScope],
-        "dream-1":       ["gpu": .unruled, "apple": .unruled, "web": .unruled, "android": .unruled, "macOS/iOS": .unruled],
     ]
 
     /// Declared engine slug -> model. Every key is a frozen carrier; the
@@ -93,7 +92,6 @@ public enum Bhci {
         "essence2-quality": "essence-2-max", "essence2-max": "essence-2-max",
         "expression1": "expression-1",
         "expression2": "expression-2", "embody": "expression-2",
-        "dream1": "dream-1",
     ]
 
     public static let notApplicableWhy =
@@ -337,7 +335,7 @@ public enum Bhci {
     public static func capability(model: String, target: String) throws -> Capability {
         guard let row = scopeTable[model] else {
             throw BhciError(.modelNotOnTarget, subject: model,
-                            message: "\(model) is not one of the six models")
+                            message: "\(model) is not one of the five models")
         }
         guard let sc = row[target] else {
             throw BhciError(.planeUnavailable, subject: target,
