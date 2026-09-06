@@ -1,0 +1,36 @@
+name: Public vocabulary
+
+# This repository is PUBLIC. Internal model names and mechanism words must not
+# reach it. On 2026-09-05 the internal-only model family name was published here
+# in four places and stayed readable until an owner ruling removed it; nothing in
+# CI could have caught that, because no workflow ran scripts/guard-public-vocabulary.py
+# and no workflow triggered on Sources/** at all.
+#
+# Deliberately NOT path-filtered. A filter that omits its own subject is the
+# defect this guard exists to prevent, and the guard scans every tracked file —
+# so scoping it to a subset would make a green run mean less than it appears to.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  vocabulary:
+    name: no internal vocabulary reaches the public tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # Each command is its own step. A single `run:` block under `bash -e`
+      # reports its FIRST failure and hides the rest — that shape hid seven
+      # commands in a sibling repo's CI on 2026-09-05.
+      - name: the guard proves itself
+        run: python3 scripts/guard-public-vocabulary.py --self-test
+      - name: no internal vocabulary in the tracked tree
+        run: python3 scripts/guard-public-vocabulary.py
