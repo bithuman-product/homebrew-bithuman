@@ -25,12 +25,21 @@ nothing is how a guard passes by testing air).
                   never `grep` on a binary: without -a, grep reads 0 silently
                   and every absence claim would confirm itself.)
   R3 IMPORTS      every `import X` written as an instruction in a comment names
-                  a product this package actually declares.
+                  something a consumer can really import: a declared product, OR
+                  a module MEASURED inside a declared binaryTarget's archive.
+                  The second half exists because a product name and a module
+                  name are not the same thing -- `Essence2` vends `CLibEssence2`
+                  -- and the module set is read out of the downloaded bytes, so
+                  a name nothing vends is still red.
   R4 DOCUMENTED   the set of declared products equals the set named in the
                   "WHAT THIS PACKAGE ACTUALLY VENDS" block.
   R5 NO-CLAIM     no comment may mention a library token measured ABSENT
                   (libessence, libelevate, onnxruntime, tessera) without a
-                  negation/quotation marker on the same line.
+                  negation/quotation marker on the same line -- UNLESS every
+                  occurrence on that line sits inside a name this manifest
+                  itself vends (a binaryTarget name, or a module measured in its
+                  archive). A bare `libessence` is still a claim about the
+                  umbrella, and still red.
 
 Exit 0 = all rules pass. Exit 1 = a rule failed. Exit 2 = harness error.
 """
@@ -131,6 +140,46 @@ def parse_binary_targets(src: str) -> list[dict]:
 
 def parse_products(src: str) -> list[str]:
     return re.findall(r'\.library\(name:\s*"([^"]+)"', code_text(src))
+
+
+# A PRODUCT NAME AND A MODULE NAME ARE NOT THE SAME THING, and R3/R5 used to
+# assume they were. That assumption held while every binaryTarget here shipped a
+# Swift .framework whose module happened to match the product carrying it. It
+# broke on 2026-09-06: the `Essence2` product vends a static C library whose
+# Clang module is `CLibEssence2`, declared by a module.modulemap INSIDE the
+# xcframework. Under the old rule the manifest could not tell a reader the one
+# thing they must know to compile — and telling them a falsehood instead would
+# have passed. So the module set is MEASURED out of the downloaded bytes rather
+# than assumed from the manifest's own words; a name nothing vends is still red.
+MODULE_DECL = re.compile(
+    r'^\s*(?:explicit\s+|framework\s+)*module\s+([A-Za-z][A-Za-z0-9_]*)', re.M)
+FRAMEWORK_IN_PATH = re.compile(r'/([A-Za-z][A-Za-z0-9_]*)\.framework/')
+
+
+def modules_in_archive(data: bytes) -> set[str]:
+    """Module names an artifact really vends, read out of its own bytes."""
+    mods: set[str] = set()
+    zf = zipfile.ZipFile(io.BytesIO(data))
+    for n in zf.namelist():
+        if n.rsplit("/", 1)[-1] == "module.modulemap":
+            mods.update(MODULE_DECL.findall(zf.read(n).decode("utf-8", "replace")))
+        m = FRAMEWORK_IN_PATH.search(n)
+        if m:
+            mods.add(m.group(1))
+    return mods
+
+
+def vended_modules(src: str, cache: Path) -> tuple[set[str], list[str]]:
+    mods: set[str] = set()
+    errs: list[str] = []
+    for t in parse_binary_targets(src):
+        try:
+            mods |= modules_in_archive(fetch(t["url"], cache))
+        except Failure as e:
+            errs.append(f"binary target {t['name']}: {e}")
+        except zipfile.BadZipFile:
+            errs.append(f"binary target {t['name']}: not a zip archive")
+    return mods, errs
 
 
 # ---------------------------------------------------------------------------
@@ -261,17 +310,23 @@ IMPORT_INSTRUCTION = re.compile(r'`import ([A-Za-z][A-Za-z0-9_]*)`')
 def rule_R3_imports(src, cache, workdir, state) -> list[str]:
     errs = []
     products = set(parse_products(src))
+    mods, ferrs = vended_modules(src, cache)
+    errs.extend(f"R3 {e}" for e in ferrs)
+    importable = products | mods
     seen = set()
     for ln, line in comment_lines(src):
         for name in IMPORT_INSTRUCTION.findall(line):
             seen.add(name)
-            if name not in products:
+            if name not in importable:
                 errs.append(
                     f"R3 line {ln}: comment instructs `import {name}` but the package "
-                    f"declares no such product (products: {sorted(products)})"
+                    f"declares no such product and no binaryTarget archive vends "
+                    f"such a module (products: {sorted(products)}; modules measured "
+                    f"in the downloaded archives: {sorted(mods)})"
                 )
     if not errs:
-        log(f"    R3 ok  {len(seen)} `import` instructions, all declared products: {sorted(seen)}")
+        log(f"    R3 ok  {len(seen)} `import` instructions, all reachable: {sorted(seen)} "
+            f"({len(products)} products, {len(mods)} modules measured in the archives)")
     return errs
 
 
@@ -311,9 +366,24 @@ def rule_R4_documented(src, cache, workdir, state) -> list[str]:
     return errs
 
 
+# An occurrence of an "absent" token INSIDE a name this manifest itself declares
+# is not a claim about the umbrella. `libessence2` is a binaryTarget here and
+# `CLibEssence2` is a module measured inside its archive; both contain the token
+# `libessence`, and R5 would have forbidden the manifest from naming either one
+# without pretending to deny it. The exemption is per-occurrence and it is
+# earned by the BYTES (R1 fetches them, modules_in_archive reads them), so a
+# bare `libessence` -- the umbrella claim R5 exists to stop -- is still red.
+IDENT_RUN = re.compile(r'[a-z0-9_]+')
+
+
 def rule_R5_noclaim(src, cache, workdir, state) -> list[str]:
     errs = []
     checked = 0
+    exempt = 0
+    mods, ferrs = vended_modules(src, cache)
+    errs.extend(f"R5 {e}" for e in ferrs)
+    declared = {t["name"].lower() for t in parse_binary_targets(src)}
+    declared |= {m.lower() for m in mods}
     cl = comment_lines(src)
     for idx, (ln, line) in enumerate(cl):
         body = line.lstrip("/").strip()
@@ -325,13 +395,20 @@ def rule_R5_noclaim(src, cache, workdir, state) -> list[str]:
         for tok in ABSENT_LIB_TOKENS:
             if tok in body.lower():
                 checked += 1
+                runs = [r.group(0) for r in IDENT_RUN.finditer(body.lower())
+                        if tok in r.group(0)]
+                if runs and all(r in declared for r in runs):
+                    exempt += 1
+                    continue
                 if not any(m in low for m in NEGATION_MARKERS):
                     errs.append(
                         f"R5 line {ln}: mentions '{tok}' — measured ABSENT from the shipped "
                         f"umbrella — with no negation on the line: {body[:100]!r}"
                     )
     if not errs:
-        log(f"    R5 ok  {checked} mentions of absent library tokens, all negated or quoted")
+        log(f"    R5 ok  {checked} mentions of absent library tokens, all negated, "
+            f"quoted, or naming something this manifest vends ({exempt} exempt "
+            f"by measurement)")
     return errs
 
 
@@ -387,6 +464,12 @@ def _mut_import_ghost(src: str) -> str:
     return src.replace("`import bitHumanKit`.", "`import bitHumanKit`. Or `import Expression`.", 1)
 
 
+def _mut_import_ghost_module(src: str) -> str:
+    # The new R3 path accepts a module MEASURED inside an archive. This proves it
+    # is not a blanket accept: one character off, and nothing vends it.
+    return src.replace("`import CLibEssence2`", "`import CLibEssence2Zzz`", 1)
+
+
 def _mut_undocumented_product(src: str) -> str:
     return src.replace(
         '.library(name: "bitHumanKit", targets: ["bitHumanKit"]),',
@@ -411,6 +494,8 @@ ARMS = [
     ("R2-TOKENS", "overstate a PRESENT token count (ImxContainer 141 -> 142)", _mut_count_nonzero),
     ("R2-TOKENS", "claim an ABSENT token is present (libessence 0 -> 7)", _mut_count_zero),
     ("R3-IMPORTS", "instruct `import Expression`, a product that does not exist", _mut_import_ghost),
+    ("R3-IMPORTS", "instruct an import no archive vends (CLibEssence2 -> …Zzz)",
+     _mut_import_ghost_module),
     ("R4-DOCUMENTED", "declare a product the VENDS block does not list", _mut_undocumented_product),
     ("R5-NO-CLAIM", "re-add the 're-exports the libessence runtime' claim", _mut_reexports_claim),
 ]

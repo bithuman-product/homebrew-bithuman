@@ -86,21 +86,9 @@
       }
     },
     "Package.swift": {
-      "V1": {
-        "n": 4,
-        "why": "a measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls that ran with it. Internal vocabulary in a public tree; plain removable text, not yet removed."
-      },
-      "V10": {
-        "n": 1,
-        "why": "a measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls that ran with it. Internal vocabulary in a public tree; plain removable text, not yet removed."
-      },
       "V2": {
         "n": 1,
-        "why": "a measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls that ran with it. Internal vocabulary in a public tree; plain removable text, not yet removed."
-      },
-      "V6": {
-        "n": 1,
-        "why": "a measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls that ran with it. Internal vocabulary in a public tree; plain removable text, not yet removed."
+        "why": "one occurrence of V2, and it is a MEASURED ZERO inside the bitHumanKit `strings -a` count block -- the reading that proves the umbrella does not carry it. Deleting the word would delete the evidence. The other four pins (V1 x4, V10, V6) are gone: they lived in the block that said essence-2 was not on this rail, which was rewritten on 2026-09-06 when the Essence2 product landed."
       }
     },
     "Sources/BithumanEngineProtocol/Bhci.swift": {
