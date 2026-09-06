@@ -1,298 +1,298 @@
 {
-  "_": "Tier-2 pins for the PUBLIC tap. Each entry is a MEASURED count plus a reason for why that occurrence still stands. Tier 1 (the internal-only model family name) has no baseline mechanism at all -- it is a hard zero. An increase, or a hit in an unpinned file, is red; a decrease is green and prints a tighten hint. Counts are over TRACKED REAL FILES ONLY: this tree carries 28 tracked symlinks (Aliases/bithuman and 27 under packages/flutter-plugin/{ios,macos}/Classes) that point at the one real copy under shared/Classes, and following them counted that copy three times.",
+  "_": "Tier-2 pins for the PUBLIC tap: each entry is a MEASURED count plus a reason the occurrence still stands. Tier 1 has no baseline mechanism at all -- it is a hard zero. An increase, or a hit in an unpinned file, is red; a decrease is green with a tighten hint. REASONS NAME THE V-CODES AND NEVER SPELL THE WORDS: this file is scanned like any other and must itself read zero, so a reason written in plain words would make the baseline the biggest leak in the tree. Counts cover TRACKED REAL FILES ONLY -- 28 tracked symlinks point at the one real copy under shared/Classes, and following them counted that copy three times.",
   "files": {
     ".github/workflows/release-cli.yml": {
       "V1": {
         "n": 7,
-        "why": "internal build/measurement notes in a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight; pinned rather than edited to avoid a collision. Next owner of this file should delete the block."
+        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
       },
       "V10": {
         "n": 2,
-        "why": "internal build/measurement notes in a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight; pinned rather than edited to avoid a collision. Next owner of this file should delete the block."
+        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
       },
       "V2": {
         "n": 9,
-        "why": "internal build/measurement notes in a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight; pinned rather than edited to avoid a collision. Next owner of this file should delete the block."
+        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
       },
       "V4": {
         "n": 1,
-        "why": "internal build/measurement notes in a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight; pinned rather than edited to avoid a collision. Next owner of this file should delete the block."
+        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
       },
       "V5": {
         "n": 6,
-        "why": "internal build/measurement notes in a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight; pinned rather than edited to avoid a collision. Next owner of this file should delete the block."
+        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
       },
       "V6": {
         "n": 1,
-        "why": "internal build/measurement notes in a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight; pinned rather than edited to avoid a collision. Next owner of this file should delete the block."
+        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
       }
     },
     "Examples/android/README.md": {
       "V1": {
         "n": 7,
-        "why": "internal implementation vocabulary in customer-facing prose. Removable text; not yet removed."
+        "why": "internal implementation vocabulary sitting in customer-facing prose. Plain removable text -- no contract depends on it. Not yet removed."
       },
       "V2": {
         "n": 4,
-        "why": "the literal PyPI extra and module path a customer must type -- pip install 'bithuman[tessera]' / bithuman.tessera_offline. Editing the text here would hand customers a command that does not work. Renaming the extra is a decision in the Python SDK, not in this repo."
+        "why": "the literal PyPI extra and module path a customer must TYPE: the V2 extra in pip install, and the V2_offline module. Editing the text here would hand customers a command that does not work. Renaming the extra is a decision in the Python SDK, not in this repo."
       },
       "V3": {
         "n": 1,
-        "why": "internal implementation vocabulary in customer-facing prose. Removable text; not yet removed."
+        "why": "internal implementation vocabulary sitting in customer-facing prose. Plain removable text -- no contract depends on it. Not yet removed."
       }
     },
     "Examples/cli/render-video.sh": {
       "V1": {
         "n": 2,
-        "why": "internal implementation vocabulary in customer-facing prose. Removable text; not yet removed."
+        "why": "internal implementation vocabulary sitting in customer-facing prose. Plain removable text -- no contract depends on it. Not yet removed."
       },
       "V2": {
         "n": 2,
-        "why": "the literal PyPI extra and module path a customer must type -- pip install 'bithuman[tessera]' / bithuman.tessera_offline. Editing the text here would hand customers a command that does not work. Renaming the extra is a decision in the Python SDK, not in this repo."
+        "why": "the literal PyPI extra and module path a customer must TYPE: the V2 extra in pip install, and the V2_offline module. Editing the text here would hand customers a command that does not work. Renaming the extra is a decision in the Python SDK, not in this repo."
       }
     },
     "Examples/swift/compare-quality/Sources/CompareQuality/CompareQuality.swift": {
       "V10": {
         "n": 5,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       }
     },
     "Examples/swift/compare-quality/Sources/CompareQuality/Putback.swift": {
       "V10": {
         "n": 1,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       }
     },
     "Examples/swift/essence-server/ARCHITECTURE.md": {
       "V10": {
         "n": 1,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       }
     },
     "Examples/swift/essence-server/Sources/EssenceServer/Config.swift": {
       "V10": {
         "n": 1,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       }
     },
     "Formula/bithuman-cli.rb": {
       "V1": {
         "n": 2,
-        "why": "internal implementation vocabulary in customer-facing prose. Removable text; not yet removed."
+        "why": "internal implementation vocabulary sitting in customer-facing prose. Plain removable text -- no contract depends on it. Not yet removed."
       },
       "V2": {
         "n": 2,
-        "why": "the literal PyPI extra and module path a customer must type -- pip install 'bithuman[tessera]' / bithuman.tessera_offline. Editing the text here would hand customers a command that does not work. Renaming the extra is a decision in the Python SDK, not in this repo."
+        "why": "the literal PyPI extra and module path a customer must TYPE: the V2 extra in pip install, and the V2_offline module. Editing the text here would hand customers a command that does not work. Renaming the extra is a decision in the Python SDK, not in this repo."
       }
     },
     "Package.swift": {
       "V1": {
         "n": 4,
-        "why": "measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls. Internal vocabulary in a public tree; removable text, not yet removed."
+        "why": "a measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls that ran with it. Internal vocabulary in a public tree; plain removable text, not yet removed."
       },
       "V10": {
         "n": 1,
-        "why": "measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls. Internal vocabulary in a public tree; removable text, not yet removed."
+        "why": "a measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls that ran with it. Internal vocabulary in a public tree; plain removable text, not yet removed."
       },
       "V2": {
         "n": 1,
-        "why": "measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls. Internal vocabulary in a public tree; removable text, not yet removed."
+        "why": "a measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls that ran with it. Internal vocabulary in a public tree; plain removable text, not yet removed."
       },
       "V6": {
         "n": 1,
-        "why": "measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls. Internal vocabulary in a public tree; removable text, not yet removed."
+        "why": "a measured-evidence comment recording an on-device probe (iPhone 15, 2026-09-02) and the absence controls that ran with it. Internal vocabulary in a public tree; plain removable text, not yet removed."
       }
     },
     "Sources/BithumanEngineProtocol/Bhci.swift": {
       "V1": {
         "n": 43,
-        "why": "public API of this SwiftPM package. The word is in the declared surface customers compile against -- enum Borrow, borrowEvaluate/borrowFor/borrowApplicable, the borrowUnavailable/borrowNotApplicable cases -- and in the doc comments that explain them. Renaming is a SOURCE-BREAKING change to a published package: owner-level."
+        "why": "public API of this SwiftPM package. V1 names a public enum, three public static functions and two error cases that customers compile against, plus the doc comments that explain them. Renaming them is a SOURCE-BREAKING change to a published package, so it is an owner decision, not a text edit."
       },
       "V11": {
         "n": 11,
-        "why": "public refusal contract. These are the wire strings a caller switches on (BORROW_UNAVAILABLE, BORROW_NOT_APPLICABLE, TESSERA_ATTACH_REFUSED) and the verdict strings borrowEvaluate returns (CAN-BORROW, TAP-NO-BANK, STAMPED-PASSTHROUGH, ARMS-AND-SYNTHESIZES, NO-DIRECTOR-GRAPH, PI-UNARMED). Changing them changes behaviour, not prose: owner-level."
+        "why": "public refusal and verdict CONTRACT, not prose. These are the wire strings a caller switches on: two V1_* error codes, one V2_ATTACH_REFUSED code, and the six hyphenated verdicts the evaluator returns (each spells a V-code by construction). Changing any of them changes behaviour for every integrator: owner-level."
       },
       "V2": {
         "n": 19,
-        "why": "public refusal contract. These are the wire strings a caller switches on (BORROW_UNAVAILABLE, BORROW_NOT_APPLICABLE, TESSERA_ATTACH_REFUSED) and the verdict strings borrowEvaluate returns (CAN-BORROW, TAP-NO-BANK, STAMPED-PASSTHROUGH, ARMS-AND-SYNTHESIZES, NO-DIRECTOR-GRAPH, PI-UNARMED). Changing them changes behaviour, not prose: owner-level."
+        "why": "public refusal and verdict CONTRACT, not prose. These are the wire strings a caller switches on: two V1_* error codes, one V2_ATTACH_REFUSED code, and the six hyphenated verdicts the evaluator returns (each spells a V-code by construction). Changing any of them changes behaviour for every integrator: owner-level."
       },
       "V3": {
         "n": 5,
-        "why": "public refusal contract. These are the wire strings a caller switches on (BORROW_UNAVAILABLE, BORROW_NOT_APPLICABLE, TESSERA_ATTACH_REFUSED) and the verdict strings borrowEvaluate returns (CAN-BORROW, TAP-NO-BANK, STAMPED-PASSTHROUGH, ARMS-AND-SYNTHESIZES, NO-DIRECTOR-GRAPH, PI-UNARMED). Changing them changes behaviour, not prose: owner-level."
+        "why": "public refusal and verdict CONTRACT, not prose. These are the wire strings a caller switches on: two V1_* error codes, one V2_ATTACH_REFUSED code, and the six hyphenated verdicts the evaluator returns (each spells a V-code by construction). Changing any of them changes behaviour for every integrator: owner-level."
       },
       "V4": {
         "n": 1,
-        "why": "public API of this SwiftPM package. The word is in the declared surface customers compile against -- enum Borrow, borrowEvaluate/borrowFor/borrowApplicable, the borrowUnavailable/borrowNotApplicable cases -- and in the doc comments that explain them. Renaming is a SOURCE-BREAKING change to a published package: owner-level."
+        "why": "public API of this SwiftPM package. V1 names a public enum, three public static functions and two error cases that customers compile against, plus the doc comments that explain them. Renaming them is a SOURCE-BREAKING change to a published package, so it is an owner decision, not a text edit."
       },
       "V5": {
         "n": 3,
-        "why": "public refusal contract. These are the wire strings a caller switches on (BORROW_UNAVAILABLE, BORROW_NOT_APPLICABLE, TESSERA_ATTACH_REFUSED) and the verdict strings borrowEvaluate returns (CAN-BORROW, TAP-NO-BANK, STAMPED-PASSTHROUGH, ARMS-AND-SYNTHESIZES, NO-DIRECTOR-GRAPH, PI-UNARMED). Changing them changes behaviour, not prose: owner-level."
+        "why": "public refusal and verdict CONTRACT, not prose. These are the wire strings a caller switches on: two V1_* error codes, one V2_ATTACH_REFUSED code, and the six hyphenated verdicts the evaluator returns (each spells a V-code by construction). Changing any of them changes behaviour for every integrator: owner-level."
       },
       "V6": {
         "n": 2,
-        "why": "public refusal contract. These are the wire strings a caller switches on (BORROW_UNAVAILABLE, BORROW_NOT_APPLICABLE, TESSERA_ATTACH_REFUSED) and the verdict strings borrowEvaluate returns (CAN-BORROW, TAP-NO-BANK, STAMPED-PASSTHROUGH, ARMS-AND-SYNTHESIZES, NO-DIRECTOR-GRAPH, PI-UNARMED). Changing them changes behaviour, not prose: owner-level."
+        "why": "public refusal and verdict CONTRACT, not prose. These are the wire strings a caller switches on: two V1_* error codes, one V2_ATTACH_REFUSED code, and the six hyphenated verdicts the evaluator returns (each spells a V-code by construction). Changing any of them changes behaviour for every integrator: owner-level."
       },
       "V7": {
         "n": 3,
-        "why": "public refusal contract. These are the wire strings a caller switches on (BORROW_UNAVAILABLE, BORROW_NOT_APPLICABLE, TESSERA_ATTACH_REFUSED) and the verdict strings borrowEvaluate returns (CAN-BORROW, TAP-NO-BANK, STAMPED-PASSTHROUGH, ARMS-AND-SYNTHESIZES, NO-DIRECTOR-GRAPH, PI-UNARMED). Changing them changes behaviour, not prose: owner-level."
+        "why": "public refusal and verdict CONTRACT, not prose. These are the wire strings a caller switches on: two V1_* error codes, one V2_ATTACH_REFUSED code, and the six hyphenated verdicts the evaluator returns (each spells a V-code by construction). Changing any of them changes behaviour for every integrator: owner-level."
       },
       "V8": {
         "n": 3,
-        "why": "public refusal contract. These are the wire strings a caller switches on (BORROW_UNAVAILABLE, BORROW_NOT_APPLICABLE, TESSERA_ATTACH_REFUSED) and the verdict strings borrowEvaluate returns (CAN-BORROW, TAP-NO-BANK, STAMPED-PASSTHROUGH, ARMS-AND-SYNTHESIZES, NO-DIRECTOR-GRAPH, PI-UNARMED). Changing them changes behaviour, not prose: owner-level."
+        "why": "public refusal and verdict CONTRACT, not prose. These are the wire strings a caller switches on: two V1_* error codes, one V2_ATTACH_REFUSED code, and the six hyphenated verdicts the evaluator returns (each spells a V-code by construction). Changing any of them changes behaviour for every integrator: owner-level."
       },
       "V9": {
         "n": 1,
-        "why": "internal implementation vocabulary in customer-facing prose. Removable text; not yet removed."
+        "why": "internal implementation vocabulary sitting in customer-facing prose. Plain removable text -- no contract depends on it. Not yet removed."
       }
     },
     "Sources/BithumanEngineProtocol/BithumanEngine.swift": {
       "V3": {
         "n": 6,
-        "why": "names a native runtime shape in this package's own protocol (essence2 native passthrough, the zero-alloc passthroughs). Descriptive of the shipped ABI, not of the teeth path."
+        "why": "names a native runtime SHAPE in this package's own protocol -- the zero-alloc forms and the essence2 native form of the pull path. Descriptive of the shipped ABI, not of the teeth path it is banned for."
       }
     },
     "install.sh": {
       "V11": {
         "n": 1,
-        "why": "'a Pi' -- the Raspberry Pi hardware name in a list of arm64 hosts. A third party's product name, not our deriver symbol. One occurrence, measured."
+        "why": "a third party's single-board-computer brand, listed among arm64 hosts alongside Graviton and Ampere. A hardware product name that collides with V11's two letters, not our deriver symbol. One occurrence, measured."
       }
     },
     "packages/flutter-plugin/ARCHITECTURE.md": {
       "V8": {
         "n": 1,
-        "why": "names an engine component in this package's own architecture notes (m4b director, Expression actor + director, the director's CoreML load). Internal vocabulary in a public tree; removable text, not yet removed."
+        "why": "names an engine component in this package's own architecture notes and doc comments. Internal vocabulary in a public tree; plain removable text, not yet removed."
       }
     },
     "packages/flutter-plugin/docs/TRANSPORT.md": {
       "V6": {
         "n": 1,
-        "why": "internal implementation vocabulary in customer-facing prose. Removable text; not yet removed."
+        "why": "internal implementation vocabulary sitting in customer-facing prose. Plain removable text -- no contract depends on it. Not yet removed."
       }
     },
     "packages/flutter-plugin/e2e/README.md": {
       "V8": {
         "n": 1,
-        "why": "names an engine component in this package's own architecture notes (m4b director, Expression actor + director, the director's CoreML load). Internal vocabulary in a public tree; removable text, not yet removed."
+        "why": "names an engine component in this package's own architecture notes and doc comments. Internal vocabulary in a public tree; plain removable text, not yet removed."
       }
     },
     "packages/flutter-plugin/e2e/run_all.sh": {
       "V10": {
         "n": 1,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       }
     },
     "packages/flutter-plugin/e2e/scenarios/README.md": {
       "V10": {
         "n": 2,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       }
     },
     "packages/flutter-plugin/e2e/scenarios/gate_metrics.py": {
       "V10": {
         "n": 3,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       }
     },
     "packages/flutter-plugin/lib/bithuman.dart": {
       "V8": {
         "n": 1,
-        "why": "names an engine component in this package's own architecture notes (m4b director, Expression actor + director, the director's CoreML load). Internal vocabulary in a public tree; removable text, not yet removed."
+        "why": "names an engine component in this package's own architecture notes and doc comments. Internal vocabulary in a public tree; plain removable text, not yet removed."
       }
     },
     "packages/flutter-plugin/lib/bithuman_realtime.dart": {
       "V10": {
         "n": 1,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       }
     },
     "packages/flutter-plugin/lib/src/engine_protocol.dart": {
       "V8": {
         "n": 1,
-        "why": "names an engine component in this package's own architecture notes (m4b director, Expression actor + director, the director's CoreML load). Internal vocabulary in a public tree; removable text, not yet removed."
+        "why": "names an engine component in this package's own architecture notes and doc comments. Internal vocabulary in a public tree; plain removable text, not yet removed."
       }
     },
     "packages/flutter-plugin/macos/bithuman.podspec": {
       "V8": {
         "n": 1,
-        "why": "names an engine component in this package's own architecture notes (m4b director, Expression actor + director, the director's CoreML load). Internal vocabulary in a public tree; removable text, not yet removed."
+        "why": "names an engine component in this package's own architecture notes and doc comments. Internal vocabulary in a public tree; plain removable text, not yet removed."
       }
     },
     "packages/flutter-plugin/scripts/e2e-all.sh": {
       "V10": {
         "n": 3,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       }
     },
     "packages/flutter-plugin/scripts/stress-webrtc-iphone.sh": {
       "V6": {
         "n": 1,
-        "why": "internal implementation vocabulary in customer-facing prose. Removable text; not yet removed."
+        "why": "internal implementation vocabulary sitting in customer-facing prose. Plain removable text -- no contract depends on it. Not yet removed."
       }
     },
     "packages/flutter-plugin/shared/Classes/AvatarPiP.swift": {
       "V6": {
         "n": 1,
-        "why": "internal implementation vocabulary in customer-facing prose. Removable text; not yet removed."
+        "why": "internal implementation vocabulary sitting in customer-facing prose. Plain removable text -- no contract depends on it. Not yet removed."
       }
     },
     "packages/flutter-plugin/shared/Classes/BithumanAvatarPlugin.swift": {
       "V10": {
         "n": 6,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       },
       "V3": {
         "n": 3,
-        "why": "names a native runtime shape in this package's own protocol (essence2 native passthrough, the zero-alloc passthroughs). Descriptive of the shipped ABI, not of the teeth path."
+        "why": "names a native runtime SHAPE in this package's own protocol -- the zero-alloc forms and the essence2 native form of the pull path. Descriptive of the shipped ABI, not of the teeth path it is banned for."
       },
       "V6": {
         "n": 1,
-        "why": "internal implementation vocabulary in customer-facing prose. Removable text; not yet removed."
+        "why": "internal implementation vocabulary sitting in customer-facing prose. Plain removable text -- no contract depends on it. Not yet removed."
       }
     },
     "packages/flutter-plugin/shared/Classes/ConverseSession.swift": {
       "V10": {
         "n": 1,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       }
     },
     "packages/flutter-plugin/shared/Classes/LocalConverseController.swift": {
       "V10": {
         "n": 1,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       }
     },
     "packages/flutter-plugin/shared/Classes/Protocol/BithumanEngine.swift": {
       "V3": {
         "n": 6,
-        "why": "names a native runtime shape in this package's own protocol (essence2 native passthrough, the zero-alloc passthroughs). Descriptive of the shipped ABI, not of the teeth path."
+        "why": "names a native runtime SHAPE in this package's own protocol -- the zero-alloc forms and the essence2 native form of the pull path. Descriptive of the shipped ABI, not of the teeth path it is banned for."
       }
     },
     "packages/flutter-plugin/shared/Classes/RealtimeAudioIO.swift": {
       "V10": {
         "n": 2,
-        "why": "ordinary English/graphics-and-audio vocabulary in sample or plugin code -- composite a crop, a compose loop/buffer, OpenAI 'composing' a response. V10 deliberately matches the -ite/-ing forms, so it over-matches here; kept as a pin rather than a pattern hole because a narrowing would also blind the real blend-stage use."
+        "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
       },
       "V3": {
         "n": 1,
-        "why": "names a native runtime shape in this package's own protocol (essence2 native passthrough, the zero-alloc passthroughs). Descriptive of the shipped ABI, not of the teeth path."
+        "why": "names a native runtime SHAPE in this package's own protocol -- the zero-alloc forms and the essence2 native form of the pull path. Descriptive of the shipped ABI, not of the teeth path it is banned for."
       },
       "V6": {
         "n": 1,
-        "why": "internal implementation vocabulary in customer-facing prose. Removable text; not yet removed."
+        "why": "internal implementation vocabulary sitting in customer-facing prose. Plain removable text -- no contract depends on it. Not yet removed."
       },
       "V8": {
         "n": 2,
-        "why": "names an engine component in this package's own architecture notes (m4b director, Expression actor + director, the director's CoreML load). Internal vocabulary in a public tree; removable text, not yet removed."
+        "why": "names an engine component in this package's own architecture notes and doc comments. Internal vocabulary in a public tree; plain removable text, not yet removed."
       }
     },
     "scripts/check-manifest-truth.py": {
       "V2": {
         "n": 2,
-        "why": "functional token list / assertion strings inside a repo script -- the words are DATA the check matches on, so editing them changes what the check tests."
+        "why": "functional token list and assertion strings inside a repo script: the words are DATA that the check matches on, so editing them changes what the check tests."
       },
       "V6": {
         "n": 2,
-        "why": "functional token list / assertion strings inside a repo script -- the words are DATA the check matches on, so editing them changes what the check tests."
+        "why": "functional token list and assertion strings inside a repo script: the words are DATA that the check matches on, so editing them changes what the check tests."
       }
     }
   }

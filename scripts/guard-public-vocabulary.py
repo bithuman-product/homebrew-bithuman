@@ -230,13 +230,27 @@ def selftest() -> int:
     checks.append(("clean text is clean", scan_text("a perfectly ordinary sentence") == {},
                    "clean input must score zero"))
 
-    # this file and the baseline must themselves be clean
+    # This file AND the baseline must themselves be clean.
+    #
+    # These checks are appended UNCONDITIONALLY. They used to be guarded by
+    # os.path.exists, and that hole cost a bad push on 2026-09-05: the baseline
+    # did not exist yet, so its check silently vanished, the run still printed
+    # a confident "11/11", and a baseline whose reasons SPELLED the banned
+    # words went out green. A self-test whose denominator moves on its own
+    # cannot be read as coverage. An absent baseline is now a visible FAIL,
+    # not a skipped line -- write reasons that name the V-codes instead of the
+    # words and both files stay clean without any self-exclusion.
     for p in (os.path.abspath(__file__), BASELINE):
-        if os.path.exists(p):
-            t = read_text(p)
-            checks.append((f"self-clean {os.path.basename(p)}",
-                           t is not None and scan_text(t) == {},
-                           "the guard and its baseline must not need a self-exclusion"))
+        name = os.path.basename(p)
+        if not os.path.exists(p):
+            checks.append((f"self-clean {name}", False,
+                           f"{name} is missing -- run --update to write it"))
+            continue
+        t = read_text(p)
+        checks.append((f"self-clean {name}",
+                       t is not None and scan_text(t) == {},
+                       "the guard and its baseline must not need a self-exclusion; "
+                       "write baseline reasons with the V-codes, never the words"))
 
     bad = [(n, w) for n, ok, w in checks if not ok]
     for name, ok, _ in checks:
