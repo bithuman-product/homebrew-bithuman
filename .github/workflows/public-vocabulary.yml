@@ -31,6 +31,6 @@ jobs:
       # reports its FIRST failure and hides the rest — that shape hid seven
       # commands in a sibling repo's CI on 2026-09-05.
       - name: the guard proves itself
-        run: python3 scripts/guard-public-vocabulary.py --self-test
+        run: python3 scripts/guard-public-vocabulary.py --selftest
       - name: no internal vocabulary in the tracked tree
         run: python3 scripts/guard-public-vocabulary.py
