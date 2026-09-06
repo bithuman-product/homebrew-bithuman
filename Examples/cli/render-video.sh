@@ -17,8 +17,7 @@
 #   essence-1    · macOS arm64    ✗ "video encoder unavailable on macOS in this
 #                                   libessence build".
 #   essence-2    · Linux x86_64   ✗ the Linux tarball ships no lible_core.so.
-#                                   Use the Python SDK instead — and note that
-#                                   route BORROWS the teeth and reports it:
+#                                   Use the Python SDK instead:
 #                                     pip install 'bithuman[tessera]'
 #                                     python -c "from bithuman.tessera_offline \
 #                                       import render_offline; \

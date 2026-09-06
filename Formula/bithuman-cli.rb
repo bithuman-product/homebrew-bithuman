@@ -223,7 +223,8 @@ class BithumanCli < Formula
         expression-2   the CLI, via install.sh          (verified)
         essence-2      pip install 'bithuman[tessera]' and
                        bithuman.tessera_offline.render_offline()
-                       (borrows the teeth; reports borrow_state)
+                       — gate on stats["borrow_state"] == "borrowed",
+                       never on the frame count
 
       Docs:    https://docs.bithuman.ai
       Source:  https://github.com/bithuman-product/homebrew-bithuman
