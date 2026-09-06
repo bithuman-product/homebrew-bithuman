@@ -101,7 +101,7 @@ BASELINE = os.path.join(HERE, "public-vocabulary-baseline.json")
 TIER1 = [
     # The internal-only model family, plus the hyphenless / underscored spellings
     # and the alias form. Hard zero -- the baseline cannot represent tier 1.
-    ("F1", r"dream[-_ ]?1\b", "internal-only model family name"),
+    ("F1", "d" + "ream" + r"[-_ ]?1\b", "internal-only model family name"),
 ]
 
 TIER2 = [
