@@ -126,10 +126,13 @@
 //   `bitHumanKit` (the umbrella, tag v2.4.0) and `Expression2` + its binary
 //   `BithumanEngineProtocol` + `UnifiedModelHeader` (tag v2.6.0) ship today.
 //   ★ FOUR binaryTargets below now, not three, and the fourth is not optional:
-//   the engine's emitted .swiftinterface carries `import UnifiedModelHeader` at
-//   line 14 (it registers itself in the shared EngineLoaderRegistry), so a
-//   consumer taking only the v2.5.0 pair dies at import with
-//   `no such module 'UnifiedModelHeader'`. Every one of the four was re-fetched
+//   line 14 of the engine's emitted .swiftinterface is an import OF the module
+//   UnifiedModelHeader (the engine registers itself in the shared
+//   EngineLoaderRegistry), so a consumer taking only the v2.5.0 pair dies at
+//   import with `no such module 'UnifiedModelHeader'`. ★ It is a binaryTarget,
+//   NOT a product, and that is deliberate: nobody writes that import by hand —
+//   it rides under the `Expression2` library product and must merely be
+//   RESOLVABLE when the compiler reads the engine's interface. Every one of the four was re-fetched
 //   and re-hashed against the checksum it pins — the three v2.6.0 checksums came
 //   out of the `.sha256` sidecars the build wrote, never from a human, and
 //   bitHumanKit's is UNCHANGED at 5c536e37… (bumping the shared `releaseTag`
