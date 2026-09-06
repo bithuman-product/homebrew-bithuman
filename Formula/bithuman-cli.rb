@@ -92,17 +92,12 @@ class BithumanCli < Formula
   # embody.model blessed 90e4cf31cf71 + engines/mac-arm64-1.0.0.engine), so
   # `bithuman run` renders Wise Pup out of the box with ZERO engine fetch.
   # It ships NO essence-2 engine, deliberately and declared
-  # (BITHUMAN_TARBALL_NO_ESSENCE2=1), and ★the REASON has changed since this
-  # comment was written, so read it again rather than trusting the old one.
-  # It used to say the pinned essence2-libessence2-v1.0-a2x slices SYNTHESIZE
-  # teeth and check-libessence2-borrows.sh refuses them. The pin moved: it now
-  # resolves essence2-libessence2-v1.1-tessera, which the SAME gate passes
-  # (rc 0, bank 6 / head 7, with v1.0-a2x kept as the rc-3 control). What
-  # actually keeps the engine out is (a) no credential on this estate can read
-  # bithuman-models RELEASE ASSETS from the mac build host, and (b) vendoring
-  # it roughly DOUBLES the tarball (373 MB of resources + a 56 MB dylib on
-  # top of today's 276 MB) — an owner-level product trade, not a packaging
-  # oversight. Until it is made, `bithuman run <X.elevatedir>` and
+  # (BITHUMAN_TARBALL_NO_ESSENCE2=1). What keeps the engine out is (a) the mac
+  # build host holds no credential for the private repository that publishes
+  # the engine's release assets, and (b) vendoring it roughly DOUBLES the
+  # tarball (373 MB of resources + a 56 MB dylib on top of today's 276 MB) —
+  # an owner-level product trade, not a packaging oversight. Until it is
+  # made, `bithuman run <X.elevatedir>` and
   # `bithuman render <essence-2>.imx` exit 69 UNAVAILABLE naming
   # libessence2.dylib, which is an honest refusal, not a render.
   # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
