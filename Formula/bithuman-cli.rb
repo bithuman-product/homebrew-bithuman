@@ -51,7 +51,15 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.6.0. It fixes `bithuman render` on
+  # Current published release: cli-v2.6.1. The essence-2 native runtime now
+  # ships INSIDE the tarball (lib/lible_core.dylib, Developer ID signed with
+  # the rest), so `bithuman render` and `bithuman run` play a downloaded
+  # essence-2 <CODE>.imx locally on Apple Silicon — the thing 2.6.0 refused
+  # (exit 69). Measured from the published tarball on a real served avatar:
+  # a 5.0 s clip exits 0 with 125 frames, every speech frame with the real
+  # mouth. Both halves of cli-v2.6.1 were built from ONE commit (d946a1d).
+  #
+  # cli-v2.6.0 (superseded) fixed `bithuman render` on
   # macOS, which used to stop short of the end of the audio and refuse the
   # command: measured at five clip lengths on Apple Silicon, three of the five
   # came up as much as 11 frames short. Every length now exits 0 with
@@ -93,7 +101,7 @@ class BithumanCli < Formula
   # gate correctly REFUSES to publish from CI. Same scripts either way
   # (tap scripts/sign-macos.sh + notarize-macos.sh + verify-macos-release.sh,
   # cli scripts/bundle-macos.sh + check-engine-dedup.sh). The Linux x86_64
-  # tarball on the same release was cut the same way for cli-v2.6.0 — on
+  # tarball on the same release was cut the same way for cli-v2.6.1 — on
   # lafayette, in the manylinux image, packed by the CLI repo's own
   # scripts/release_pack.sh so both halves carry one commit. This formula
   # stays mac-only, matching 2.4.0/2.4.2.
@@ -113,8 +121,8 @@ class BithumanCli < Formula
   # libessence2.dylib, which is an honest refusal, not a render.
   # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.0/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "523a4e4ccda0b763b1060182a881f0a488f7b84115689455f5c04f365a264bf2"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.1/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "0fb359a8b709e2606af1f7e26b1df1ac705c8dc1da6f954131641b012d4f953c"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
