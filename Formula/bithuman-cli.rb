@@ -51,18 +51,29 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.6.3. A self-hosted essence-2 or
-  # expression-2 session (`bithuman run <CODE>.imx`) is billed on WALL-CLOCK
+  # Current published release: cli-v2.6.4. A key the metering service
+  # REJECTS (HTTP 401 / 402 / 403 — revoked, from another environment, out
+  # of credits) now gets a grace of 300 s from the first rejection, behind a
+  # countdown line once a minute, re-checked every minute; still rejected at
+  # 300 s the session STOPS (`run` closes the preview, `render` exits
+  # METERING_REFUSED / 77 with no output). A meter that cannot be REACHED
+  # (no network, timeout, 5xx) still never stops a render — loud line, keep
+  # trying, however long. The same rule and number apply to the Python
+  # package, the Apple engine and the Android SDK. Billing is unchanged
+  # from 2.6.3 (wall-clock for a live session, clip duration for a render,
+  # nothing for a download). Both halves of cli-v2.6.4 were built from ONE
+  # commit (01325a3), each tarball's clock is that commit's time, and each
+  # tarball's PROVENANCE.json says dirty:false.
+  #
+  # cli-v2.6.3 (superseded) billed a self-hosted session on WALL-CLOCK
   # while it is live, idle animation included, at the published self-host
   # rate (2 credits per minute) — the pricing page's definition — and an
-  # offline `bithuman render` is billed on the duration of the clip it
-  # writes. 2.6.2 counted frames delivered / fps, which under-counted a live
-  # preview on a slow-painting machine (a 90 s essence-2 session on an M4
-  # was recorded as 7.5 s). The live preview also holds its nominal frame
-  # rate now (2.6.2 settled at a third of it on a Mac whose timers
-  # coalesce). Both halves of cli-v2.6.3 were built from ONE commit
-  # (b7a1005), each tarball's clock is that commit's time, and each
-  # tarball's PROVENANCE.json says dirty:false.
+  # offline `bithuman render` on the duration of the clip it writes. 2.6.2
+  # counted frames delivered / fps, which under-counted a live preview on a
+  # slow-painting machine (a 90 s essence-2 session on an M4 was recorded
+  # as 7.5 s). The live preview also holds its nominal frame rate (2.6.2
+  # settled at a third of it on a Mac whose timers coalesce). Both halves
+  # from ONE commit (b7a1005).
   #
   # cli-v2.6.2 (superseded) made a self-hosted session on macOS meter at
   # all (the CLI carries the beat where the macOS render tool does not;
@@ -121,7 +132,7 @@ class BithumanCli < Formula
   # gate correctly REFUSES to publish from CI. Same scripts either way
   # (tap scripts/sign-macos.sh + notarize-macos.sh + verify-macos-release.sh,
   # cli scripts/bundle-macos.sh + check-engine-dedup.sh). The Linux x86_64
-  # tarball on the same release was cut the same way for cli-v2.6.3 — on
+  # tarball on the same release was cut the same way for cli-v2.6.4 — on
   # lafayette, in the manylinux image, packed by the CLI repo's own
   # scripts/release_pack.sh so both halves carry one commit. This formula
   # stays mac-only, matching 2.4.0/2.4.2.
@@ -141,8 +152,8 @@ class BithumanCli < Formula
   # libessence2.dylib, which is an honest refusal, not a render.
   # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.3/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "14ee0490a6bec87f26357bcdeb77160834ffdad6434200d77fdc3c806d043506"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.4/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "ed827aaa0b3918100e6c6776ca0527d7b7cabb8e4618f3ce91ef437f205f1bbc"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
