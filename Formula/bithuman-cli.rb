@@ -51,17 +51,25 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.6.2. A self-hosted essence-2 or
-  # expression-2 session on macOS (`bithuman run <CODE>.imx`, `bithuman
-  # render`) is now billed at the published self-host rate (2 credits per
-  # whole minute of frames delivered), the way Linux already was — the CLI
-  # carries the beat where the macOS render tool does not. Metering never
-  # stops a render (a missing or rejected key is a loud `★ UNMETERED RENDER`
-  # line; BITHUMAN_METER_ENFORCE=1 makes it a refusal); a model download is
-  # free. `run --help` no longer says essence-2 / expression-2 have "no local
-  # runtime": a local .imx renders on this machine for all three families.
-  # Both halves of cli-v2.6.2 were built from ONE commit (679b9a6) and each
-  # tarball's clock is that commit's time.
+  # Current published release: cli-v2.6.3. A self-hosted essence-2 or
+  # expression-2 session (`bithuman run <CODE>.imx`) is billed on WALL-CLOCK
+  # while it is live, idle animation included, at the published self-host
+  # rate (2 credits per minute) — the pricing page's definition — and an
+  # offline `bithuman render` is billed on the duration of the clip it
+  # writes. 2.6.2 counted frames delivered / fps, which under-counted a live
+  # preview on a slow-painting machine (a 90 s essence-2 session on an M4
+  # was recorded as 7.5 s). The live preview also holds its nominal frame
+  # rate now (2.6.2 settled at a third of it on a Mac whose timers
+  # coalesce). Both halves of cli-v2.6.3 were built from ONE commit
+  # (b7a1005), each tarball's clock is that commit's time, and each
+  # tarball's PROVENANCE.json says dirty:false.
+  #
+  # cli-v2.6.2 (superseded) made a self-hosted session on macOS meter at
+  # all (the CLI carries the beat where the macOS render tool does not;
+  # metering never stops a render — a missing or rejected key is a loud
+  # `★ UNMETERED RENDER` line, BITHUMAN_METER_ENFORCE=1 makes it a refusal;
+  # a model download is free) and made `run --help` say where a model
+  # renders. Both halves from ONE commit (679b9a6).
   #
   # cli-v2.6.1 (superseded) put the essence-2 native runtime
   # INSIDE the tarball (lib/lible_core.dylib, Developer ID signed with
@@ -113,7 +121,7 @@ class BithumanCli < Formula
   # gate correctly REFUSES to publish from CI. Same scripts either way
   # (tap scripts/sign-macos.sh + notarize-macos.sh + verify-macos-release.sh,
   # cli scripts/bundle-macos.sh + check-engine-dedup.sh). The Linux x86_64
-  # tarball on the same release was cut the same way for cli-v2.6.2 — on
+  # tarball on the same release was cut the same way for cli-v2.6.3 — on
   # lafayette, in the manylinux image, packed by the CLI repo's own
   # scripts/release_pack.sh so both halves carry one commit. This formula
   # stays mac-only, matching 2.4.0/2.4.2.
@@ -133,8 +141,8 @@ class BithumanCli < Formula
   # libessence2.dylib, which is an honest refusal, not a render.
   # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.2/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "0dab98763ecf7b25414abfbfecfc9071edcbda859eb88616e6dc1942b6373025"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.3/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "14ee0490a6bec87f26357bcdeb77160834ffdad6434200d77fdc3c806d043506"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
