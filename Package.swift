@@ -268,7 +268,44 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // sidecars are directly usable and `shasum -c` on them is not: the file names
 // they would need are not in them.
 //
-// ★ ROLLED TO essence2-v1.2.0 ON 2026-09-06 (same day, same convention). The
+// ★ ROLLED TO essence2-v1.3.0 ON 2026-09-07 — THE FIRST APPLE ENGINE THAT BILLS
+// THE SESSION IT SERVES. docs.bithuman.ai/guides/pricing tells the customer a
+// self-hosted essence-2 session is metered at the published rate (2 credits per
+// MINUTE of session wall-clock, idle animation included). Through
+// essence2-v1.2.0 this engine sent NOTHING: measured on that published archive
+// (sha256 4371321f…, re-downloaded anonymously and re-hashed),
+// `v1/auth/validate` 0 · `selfhost-meter` 0 · `self-hosted-essence-2-model` 0 ·
+// `BITHUMAN_UNMETERED` 0 in the macos-arm64 slice, against `apiSecret` 10 /
+// `Essence2Avatar` 18 as controls that fire and a nonsense token at 0.
+// `Essence2Avatar.create(labPath:chunk:apiSecret:)` took the credential and its
+// first line threw it away.
+//
+// v1.3.0 (158,639,628 B, sha256 2f3c3672…, built from bithuman-models
+// 7c5e4d5a6 on alpharetta) carries `Sources/Essence2/SelfHostMeter.swift`: the
+// same contract as the CLI's meter.rs and the Linux selfhost_meter.py — 60 s
+// cadence plus a stop-flush, wall-clock `served_s` from READY, one ledger row
+// per session, a failed beat re-claimed and never doubled, FAIL-OPEN with a
+// loud `★ UNMETERED RENDER` line, `BITHUMAN_METER_ENFORCE` to make it a
+// refusal and `BITHUMAN_UNMETERED` as the lab escape. Re-measured on the
+// PUBLISHED archive, all three slices identical: `v1/auth/validate` 2 ·
+// `selfhost-meter` 2 · `self-hosted-essence-2-model` 4 ·
+// `BITHUMAN_METER_ENFORCE` 4 · `BITHUMAN_UNMETERED` 2 · `billing_type` 2, with
+// `apiSecret` now 42 (was 10), `Essence2Avatar` 20 and the nonsense token 0.
+//
+// ★ AND `strings` CANNOT SEE THE WHOLE BEAT, WHICH IS WHY THE GATE DOES NOT ASK
+// IT TO. `served_s`, `install_id`, `Bearer ` and even `v1/meter/beats` all score
+// 0 in these archives — every one of them is ≤ 15 UTF-8 bytes, so Swift stores
+// it INLINE in the String struct and there is no literal in the binary to find.
+// A gate that required them would be red on a perfectly metered engine, and a
+// probe that reported them as absent would be reporting its own blindness.
+// `tools/check-libessence2-meters.sh` requires only the tokens that are really
+// there and proves its controls fire in the same command.
+//
+// `onnxruntime` and `libessence2-resources` are carried forward BYTE-IDENTICAL
+// from essence2-v1.2.0 (verified by re-computing each sidecar before upload),
+// so the `onnxruntime` checksum below does not move.
+//
+// ★ THE PREVIOUS ROLL, essence2-v1.2.0 ON 2026-09-06 (same convention). The
 // engine archive is REBUILT (158,440,195 B, sha256 4371321f…, from
 // bithuman-models 10a30f097): it applies one rule for when a model renders on
 // every platform — all four of the model's recorded-mouth files present, or a
@@ -278,7 +315,7 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // byte-identical to v1.1.0 and its checksum below does not move. Re-fetched
 // anonymously after upload and re-hashed; the sidecars are again 65 bytes.
 // ---------------------------------------------------------------------------
-let essence2Tag = "essence2-v1.2.0"
+let essence2Tag = "essence2-v1.3.0"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -380,7 +417,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "4371321f7b036b35d38c63580ff651cb95a1d75f6c7fbe1707e97e324c06f5f7"
+            checksum: "2f3c3672a02217b7cccd84d3865e1a128cb420bb82605be09eb85806895ac9e4"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
