@@ -498,6 +498,17 @@ jobs:
             bash scripts/bundle-macos.sh "$STAGE/bithuman"
           cp "engine-src/mac-arm64-$ENGINE_VERSION.engine" "$STAGE/engines/"
           BIN_DIR="$STAGE" bash scripts/check-engine-dedup.sh      # DISTRIBUTION.md §13
+          # ★The mac artifact can BILL a self-hosted session. Measured on the
+          # published cli-v2.5.1 / 2.6.0 / 2.6.1 macOS tarballs: the meter
+          # vocabulary occurred 0 times in every macOS payload — the beat
+          # lived in the Linux render host alone — so every macOS self-host
+          # session was unmetered against the published 2 credits/min. Since
+          # cli-v2.6.2 the CLI carries the beat itself; this gate refuses to
+          # ship a `bithuman` without it. The Linux lane runs the same gate
+          # inside scripts/build-linux.sh (gate 3). Self-test first: the gate
+          # must be shown to refuse before its green is trusted.
+          bash scripts/check-selfhost-meter-parity.sh --self-test
+          bash scripts/check-selfhost-meter-parity.sh "$STAGE/bithuman"
           # The tarball is NOT built here any more. $STAGE must be Developer ID
           # signed and notarized FIRST -- signing rewrites every Mach-O in place,
           # so a tarball rolled before signing would ship the ad-hoc bytes.
