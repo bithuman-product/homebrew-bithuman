@@ -268,7 +268,26 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // sidecars are directly usable and `shasum -c` on them is not: the file names
 // they would need are not in them.
 //
-// ★ ROLLED TO essence2-v1.3.0 ON 2026-09-07 — THE FIRST APPLE ENGINE THAT BILLS
+// ★ ROLLED TO essence2-v1.4.0 ON 2026-09-07 — A REJECTED KEY GETS 300 s, THEN THE
+// ENGINE STOPS. Owner ruling 2026-09-07: a credential the metering service
+// REJECTS (HTTP 401 / 402 / 403) renders for a grace of 300 s from the first
+// rejection behind a countdown line, is re-checked every minute, and at 300 s
+// of continuous rejection the engine stops — `be_essence2_pull_frame` and
+// `be_essence2_idle_frame` return -3 from then on. A meter that cannot be
+// REACHED still never stops a render. Through essence2-v1.3.0 a rejected key
+// logged `refused 401 … This render CONTINUES` once a minute for as long as
+// the session ran. v1.4.0 (158,661,991 B, checksum 75b1919b…, built from
+// bithuman-models b71d71679 on alpharetta) carries the grace in
+// Sources/Essence2/SelfHostMeter.swift; the 26-test meter suite was shown to
+// go RED under twelve mutations (tools/prove-meter-tests-can-fail.py, arms
+// G1-G4 for the grace) before the archive was cut, and the two gates
+// (check-libessence2-fails-closed.sh, check-libessence2-meters.sh) read 0 on
+// these exact bytes. Billing is unchanged from v1.3.0. `onnxruntime` and
+// `libessence2-resources` are carried forward BYTE-IDENTICAL from
+// essence2-v1.3.0 (each sidecar re-computed before upload), so their
+// checksums below do not move.
+//
+// ★ THE PREVIOUS ROLL, essence2-v1.3.0 ON 2026-09-07 — THE FIRST APPLE ENGINE THAT BILLS
 // THE SESSION IT SERVES. docs.bithuman.ai/guides/pricing tells the customer a
 // self-hosted essence-2 session is metered at the published rate (2 credits per
 // MINUTE of session wall-clock, idle animation included). Through
@@ -315,7 +334,7 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // byte-identical to v1.1.0 and its checksum below does not move. Re-fetched
 // anonymously after upload and re-hashed; the sidecars are again 65 bytes.
 // ---------------------------------------------------------------------------
-let essence2Tag = "essence2-v1.3.0"
+let essence2Tag = "essence2-v1.4.0"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -417,7 +436,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "2f3c3672a02217b7cccd84d3865e1a128cb420bb82605be09eb85806895ac9e4"
+            checksum: "75b1919b848a0a8e13bdfe51999739813b610a42dad25d9fc5a3a4e408e29808"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
