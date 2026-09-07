@@ -22,8 +22,10 @@
 //                              `import Expression2`. FOUR binaryTargets ride
 //                              under it now, not three — see UnifiedModelHeader.
 //   - Essence2                 essence-2 engine alone, archives on tag
-//                              essence2-v1.1.0. ★ THE MODULE IS NOT THE PRODUCT
-//                              NAME: you write `import CLibEssence2`. Two
+//                              essence2-v1.2.0. `import Essence2` works since
+//                              that tag (the archive's module map declares both
+//                              `Essence2` and `CLibEssence2` over one header;
+//                              `import CLibEssence2` still works). Two
 //                              binaryTargets ride under it and BOTH are needed.
 //   - BithumanEngineProtocol   source-only Layer-0 engine interface.
 //                              `import BithumanEngineProtocol`.
@@ -92,11 +94,15 @@
 //                  render out of the box; it can now be handed one.
 //   - Essence2     Layer-1 essence-2 engine for Apple platforms (iOS device,
 //                  iOS Simulator, macOS — all arm64). Its archives ship on tag
-//                  essence2-v1.1.0; see `essence2Tag` below.
-//                  ★ THE MODULE IS `CLibEssence2`, NOT `Essence2`. What this
-//                  product vends is the engine's 15-function C interface, not a
-//                  Swift type — see the essence-2 section above for the whole
-//                  shape, including what linking does NOT give you.
+//                  essence2-v1.2.0; see `essence2Tag` below.
+//                  ★ TWO MODULE NAMES, ONE HEADER. What this product vends is
+//                  the engine's 15-function C interface, not a Swift type. Since
+//                  essence2-v1.2.0 the module map in every slice declares BOTH
+//                  `Essence2` (the product's own name) and `CLibEssence2` (the
+//                  original), so `import Essence2` and `import CLibEssence2`
+//                  reach the same declarations — see the essence-2 section
+//                  above for the whole shape, including what linking does NOT
+//                  give you.
 //   - BithumanEngineProtocol
 //                  Layer-0 common engine interface, pure Swift SOURCE. Consumed
 //                  by the engine SDKs in bithuman-models for their standalone
@@ -116,16 +122,21 @@
 //   2026-09-06, HTTP 200 for both, against a nonexistent asset on the same
 //   release that returns 404 — and the `Essence2` product below points at them.
 //
-//   ★ THE PRODUCT IS `Essence2`. THE MODULE IS `CLibEssence2`. They differ on
-//   purpose, and a reader who assumes they match gets
-//   `no such module 'Essence2'`. What ships is the engine's C interface: 15
-//   `be_essence2_*` functions declared in Headers/be_essence2.h and exposed as
-//   the Clang module `CLibEssence2` by a module map carried INSIDE the
-//   xcframework. So the two lines you write do not look alike, and both are
-//   right:
+//   ★ THE PRODUCT IS `Essence2`, AND SINCE essence2-v1.2.0 SO IS A MODULE.
+//   Through v1.1.0 the archive vended ONE Clang module, `CLibEssence2`, and a
+//   reader who assumed the module matched the product got
+//   `no such module 'Essence2'`. v1.2.0's module map (carried INSIDE every
+//   slice of the xcframework, measured by scripts/check-manifest-truth.py R3
+//   out of the downloaded bytes) declares a second module, `Essence2`, over the
+//   same header, so the two lines you write now agree — and the old spelling
+//   is unchanged:
 //
 //       .product(name: "Essence2", package: "homebrew-bithuman")   // Package.swift
-//       `import CLibEssence2`                                      // your Swift
+//       `import Essence2`                                          // your Swift
+//       `import CLibEssence2`                                      // still works
+//
+//   Either import gives you the engine's C interface: 15 `be_essence2_*`
+//   functions declared in Headers/be_essence2.h. Nothing else.
 //
 //   ★ THERE IS NO SWIFT `Essence2Engine` TYPE ON THIS RAIL, and that is an
 //   omission on purpose. A Swift adapter of that name exists in the private
@@ -150,14 +161,20 @@
 //   resolve` is not a build.
 //
 //   ★ WHAT LINKING DOES NOT BUY YOU. The runtime resources this engine loads at
-//   startup — its Metal library, the idle audio, and the ~377 MB audio encoder —
-//   are NOT attached to essence2-v1.1.0. Linking succeeds without them; starting
-//   a session does not. Delivering them is tracked separately, so until that
-//   lands `Essence2` is a build-time coordinate, not a running avatar.
+//   startup — its Metal library, the idle audio, and the audio encoder — are
+//   attached to the release as `libessence2-resources.zip` (231,597,193 B,
+//   sha256 94ce2120…, byte-identical on essence2-v1.1.0 and essence2-v1.2.0)
+//   but they are NOT a binaryTarget: SwiftPM cannot ship loose resource bundles
+//   through this product. Linking succeeds without them; starting a session
+//   does not. Your app must place those bundles in its own Resources, so
+//   `Essence2` alone is a build-time coordinate, not a running avatar.
 //
-//   ★ NO MODULE CLASH, unlike the `Expression2` / `BithumanEngineProtocol` pair
-//   above: `Essence2` carries no Swift module at all, so it cannot be taken
-//   twice. Depend on it alongside either of the others.
+//   ★ NO MODULE CLASH WITH THE OTHER PRODUCTS, unlike the `Expression2` /
+//   `BithumanEngineProtocol` pair above: `Essence2` carries no Swift module
+//   (both of its modules are Clang modules over one C header), so it cannot be
+//   taken twice by them. Depend on it alongside either of the others. The one
+//   name it CAN collide with is a Swift module also called `Essence2` in your
+//   own graph — the private engine repository has one — so do not link both.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // Hardware floor for the two bitHumanKit engines (gated at runtime via
@@ -185,9 +202,9 @@
 //   out of the `.sha256` sidecars the build wrote, never from a human, and
 //   bitHumanKit's is UNCHANGED at 5c536e37… (bumping the shared `releaseTag`
 //   would 404 the shipping product; see the block above `expression2Tag`).
-//   essence-2's two archives ship on `essence2Tag`, and their checksums came
-//   out of the `.sha256` sidecars the same way — see the note above that
-//   constant for what those sidecars do and do not contain.
+//   essence-2's two linkable archives ship on `essence2Tag`, and their
+//   checksums came out of the `.sha256` sidecars the same way — see the note
+//   above that constant for what those sidecars do and do not contain.
 //   Nothing else ships. There is no pending `Expression` or `Bithuman`
 //   per-product zip: the release flow can emit one
 //   (scripts/build-binary-xcframework.sh; `swift package compute-checksum
@@ -250,8 +267,18 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // anonymously downloaded zips reproduces both digests exactly. So these
 // sidecars are directly usable and `shasum -c` on them is not: the file names
 // they would need are not in them.
+//
+// ★ ROLLED TO essence2-v1.2.0 ON 2026-09-06 (same day, same convention). The
+// engine archive is REBUILT (158,440,195 B, sha256 4371321f…, from
+// bithuman-models 10a30f097): it applies one rule for when a model renders on
+// every platform — all four of the model's recorded-mouth files present, or a
+// refusal that names the missing one — where v1.1.0 read a descriptive manifest
+// block instead and refused complete packages that lacked it. It also declares
+// the `Essence2` module (see the essence-2 section). `onnxruntime` is
+// byte-identical to v1.1.0 and its checksum below does not move. Re-fetched
+// anonymously after upload and re-hashed; the sidecars are again 65 bytes.
 // ---------------------------------------------------------------------------
-let essence2Tag = "essence2-v1.1.0"
+let essence2Tag = "essence2-v1.2.0"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -347,12 +374,13 @@ let package = Package(
             checksum: "33b7d575ec90055a4894fb1fbbb507b9264694752c6a2a5e35c7bf8c069e180e"
         ),
         // The essence-2 engine itself. The target name matches the xcframework
-        // inside the archive; the MODULE it vends is `CLibEssence2`, declared by
-        // Headers/module.modulemap in every slice.
+        // inside the archive; the MODULES it vends are `CLibEssence2` and, since
+        // essence2-v1.2.0, `Essence2`, both declared by Headers/module.modulemap
+        // in every slice over the one header be_essence2.h.
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "7af53796e34214247b1c33bc194960cca9f0322f2f68612f0531d477caf68b63"
+            checksum: "4371321f7b036b35d38c63580ff651cb95a1d75f6c7fbe1707e97e324c06f5f7"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
