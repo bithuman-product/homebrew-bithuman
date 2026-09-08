@@ -8,6 +8,11 @@ name: preflight
 # file.
 on:
   workflow_dispatch:
+  # ★2026-09-07: this repo lands directly on main, so a pull_request-only arm
+  #  never fired — the probe now also runs on a push that touches this file.
+  push:
+    paths:
+      - '.github/workflows/preflight.yml'
   pull_request:
     paths:
       - '.github/workflows/preflight.yml'
