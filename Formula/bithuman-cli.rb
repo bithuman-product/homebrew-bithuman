@@ -263,9 +263,10 @@ class BithumanCli < Formula
     <<~EOS
       Quick start:
         bithuman doctor                    # host + auth + cache sanity check
-                                           # (from 2.6.5 it also grades ffmpeg;
-                                           #  2.6.4 and earlier print the same
-                                           #  report with or without it)
+                                           # (2.6.4 prints the same report with
+                                           #  or without ffmpeg; grading it landed
+                                           #  on main after 2.6.4 was cut and
+                                           #  reaches you in the next release)
         bithuman list                      # browse showcase avatars
         bithuman pull modern-court-jester  # download one
         bithuman run ~/.cache/bithuman/showcase/modern-court-jester.imx
@@ -314,8 +315,10 @@ class BithumanCli < Formula
       Both audio-driven and both verified frame-by-frame against the
       drive audio. essence-1 is not renderable by this CLI on any
       platform and is unchanged by that.
-      Offline renders need ffmpeg on PATH (a formula dependency since
-      2.6.5; before that, `brew install ffmpeg`).
+      Offline renders need ffmpeg on PATH, and this formula installs it
+      for you: `depends_on "ffmpeg"` as of the 2026-09-08 revision, which
+      serves 2.6.4. If you took the tarball instead of `brew install`,
+      run `brew install ffmpeg` yourself.
 
       Docs:    https://docs.bithuman.ai
       Source:  https://github.com/bithuman-product/homebrew-bithuman
