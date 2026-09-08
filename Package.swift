@@ -169,12 +169,74 @@
 //   does not. Your app must place those bundles in its own Resources, so
 //   `Essence2` alone is a build-time coordinate, not a running avatar.
 //
-//   ★ NO MODULE CLASH WITH THE OTHER PRODUCTS, unlike the `Expression2` /
-//   `BithumanEngineProtocol` pair above: `Essence2` carries no Swift module
-//   (both of its modules are Clang modules over one C header), so it cannot be
-//   taken twice by them. Depend on it alongside either of the others. The one
-//   name it CAN collide with is a Swift module also called `Essence2` in your
-//   own graph — the private engine repository has one — so do not link both.
+//   ★ NO *MODULE* CLASH, BUT A REAL *SYMBOL* CLASH — AND THIS BLOCK USED TO
+//   SAY "Depend on it alongside either of the others", WHICH IS FALSE ON THE
+//   iOS DEVICE AND ON macOS. The module half is still true: `Essence2` carries
+//   no Swift module (both of its modules are Clang modules over one C header),
+//   so it cannot be taken twice. The LINK half was never checked, and it fails.
+//
+//   MEASURED 2026-09-08 on the published bytes of `essence2-v1.4.0` +
+//   `v2.6.0`, four arms of ONE executable link that differ by one flag or one
+//   slice (tools/check-essence2-expression2-link.sh reproduces all four):
+//
+//       slice                 UnifiedModelHeader.framework   rc   duplicate symbols
+//       ios-arm64             linked                          1   116
+//       ios-arm64             NOT linked                      0     0   <- control
+//       macos-arm64           linked                          1   116
+//       ios-arm64-simulator   linked                          0     0   <- control
+//
+//       duplicate symbol 'type metadata for UnifiedModelHeader.EngineResolver' in:
+//           …/UnifiedModelHeader.xcframework/ios-arm64/UnifiedModelHeader[2](UnifiedModelHeader.o)
+//           …/libessence2.xcframework/ios-arm64/libessence2.a[4](EngineResolver.o)
+//
+//   WHY. `libessence2.a` is libtool'd from the engine's whole library closure,
+//   and that closure INCLUDES the UnifiedModelHeader objects. `nm -g` on the
+//   published archives counts UnifiedModelHeader symbols DEFINED in every
+//   slice — ios-arm64 317, ios-arm64-simulator 317, macos-arm64 321 — against
+//   122 defined by `UnifiedModelHeader.xcframework` itself and 0 for a
+//   nonsense control token. The `Expression2` product forces every consumer to
+//   link that framework (it is in the product's `targets:` below, and it must
+//   be: the engine's .swiftinterface imports the module). So
+//   `Expression2` + `Essence2` in one app is a link failure on the device.
+//
+//   ★ A GREEN `swift build` DOES NOT SEE THIS, and neither does the package
+//   matrix a CI usually runs: a library TARGET is compiled, never linked, so
+//   `xcodebuild -destination 'generic/platform=iOS' build` on a package that
+//   takes BOTH products exits 0. The collision only fires at an APP's final
+//   link. Nor does a Simulator-only CI see it — the simulator arm above is
+//   green on bytes that carry the same 317 definitions.
+//
+//   ★ THE WORKAROUND UNTIL THE ENGINE IS REBUILT: link `Expression2` and
+//   `Essence2` and do NOT let `UnifiedModelHeader.framework` reach the final
+//   link (an Xcode target can drop it; a pure-SwiftPM app cannot, because the
+//   product list below carries it). The ROOT fix is in the engine build —
+//   `models/essence-2/engine/light/apple/build-xcframework.sh` must stop
+//   libtool'ing the UnifiedModelHeader objects into the archive, and the
+//   `Essence2` product must then take the `UnifiedModelHeader` binaryTarget so
+//   an Essence2-only consumer still resolves — and it needs a republish.
+//
+//   The one NAME `Essence2` can still collide with is a Swift module also
+//   called `Essence2` in your own graph — the private engine repository has
+//   one — so do not link both.
+//
+//   ★ AND THE SIMULATOR SLICES ARE arm64-ONLY. `Expression2`,
+//   `UnifiedModelHeader` and `BithumanEngineProtocol` publish
+//   `ios-arm64-simulator`; `onnxruntime` publishes a fat
+//   `ios-arm64_x86_64-simulator`. A default `xcodebuild -destination
+//   'generic/platform=iOS Simulator'` also builds x86_64 and therefore fails —
+//   as `error: unable to resolve module dependency: 'Expression2'`, which
+//   reads like a broken package rather than "Apple Silicon only". MEASURED
+//   2026-09-08: the same command with `ARCHS=arm64` is BUILD SUCCEEDED.
+//
+//   ★ AND THE `platforms:` FLOOR BELOW IS NOT THE FLOOR THESE OBJECTS WERE
+//   BUILT FOR. Linking the published essence-2 archive at the declared floor
+//   makes `ld` warn on every object:
+//       object file (libessence2.xcframework/ios-arm64/libessence2.a[6](ANEDecoder.o))
+//         was built for newer 'iOS' version (26.0) than being linked (17.0)
+//       object file (libessence2.xcframework/macos-arm64/libessence2.a[2](le_bundle.cpp.o))
+//         was built for newer 'macOS' version (26.0) than being linked (14.0)
+//   The manifest declares `.macOS(.v13), .iOS(.v16)`; the essence-2 objects are
+//   iOS 26.0 / macOS 26.0. Build essence-2 consumers at 26.0.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // Hardware floor for the two bitHumanKit engines (gated at runtime via
@@ -183,9 +245,33 @@
 //   macOS:   M3+ Apple Silicon, macOS 26 (Tahoe)
 //   iPad:    iPad Pro M4+, 16 GB unified memory, iPadOS 26
 //   iPhone:  iPhone 16 Pro+ (A18 Pro), iOS 26
-// ★ That floor grades bitHumanKit ONLY. It is not `Expression2`'s floor:
+// ★ That floor grades bitHumanKit AND `Essence2` ON iOS — NOT `Expression2`.
 //   Expression2 is a separate binary with its own CoreML requirements and is
-//   not gated by HardwareCheck.
+//   not gated by HardwareCheck; this block used to say the floor graded
+//   bitHumanKit ONLY, and that is false for essence-2 on a phone. MEASURED
+//   2026-09-08 on an iPhone 15 (iPhone15,4, iOS 26.6.1) running an app built
+//   from these exact published slices: `be_essence2_create` returns 0, and
+//   then the warm-up refuses —
+//       [Essence2SyncEngine] runtime warm-up FAILED: DirectorRuntime:
+//       ExpressionAvatar.create: Bithuman.create: unsupported hardware —
+//       iPhone15,4 detected — bitHuman iOS SDK requires iPhone 16 Pro or later
+//       (A18 Pro+). — engine stays idle-only
+//   because the essence-2 director creates the Expression actor, which runs
+//   the same `hw.machine` gate. There is no environment override. On iPhone,
+//   essence-2 therefore needs an iPhone 16 Pro+ (A18 Pro), same as bitHumanKit.
+//   Expression2 has no such gate and was measured rendering 245 frames on that
+//   same iPhone 15 the same night.
+//
+// ★ AND THE iOS SIMULATOR CANNOT STAND IN FOR THE PHONE FOR essence-2. The
+//   documented behaviour there is a graceful typed refusal ("the elevate engine
+//   runs idle-only here"). MEASURED 2026-09-08 on the iOS 26.4 simulator with
+//   these slices: `be_essence2_create` returns 0 and the process then ABORTS —
+//   `NSInvalidArgumentException … object cannot be nil` inside
+//   `+[MPSGraphDevice deviceWithMTLDevice:]`, reached from
+//   `Essence2Director.Conv3DFast.init` <- `StudentDirector.init(bundle:)`
+//   <- `DirectorRuntime.init` <- `Essence2SyncEngine.warmUp`. The director
+//   touches MPSGraph before the actor's simulator guard. Expression2 renders
+//   on the simulator normally.
 //
 // RELEASE NOTE:
 //   `bitHumanKit` (the umbrella, tag v2.4.0) and `Expression2` + its binary
