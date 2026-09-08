@@ -256,8 +256,8 @@
 //       ExpressionAvatar.create: Bithuman.create: unsupported hardware —
 //       iPhone15,4 detected — bitHuman iOS SDK requires iPhone 16 Pro or later
 //       (A18 Pro+). — engine stays idle-only
-//   because the essence-2 director creates the Expression actor, which runs
-//   the same `hw.machine` gate. There is no environment override. On iPhone,
+//   because the essence-2 engine creates the Expression actor, which runs the
+//   same `hw.machine` gate. There is no environment override. On iPhone,
 //   essence-2 therefore needs an iPhone 16 Pro+ (A18 Pro), same as bitHumanKit.
 //   Expression2 has no such gate and was measured rendering 245 frames on that
 //   same iPhone 15 the same night.
@@ -269,8 +269,8 @@
 //   `NSInvalidArgumentException … object cannot be nil` inside
 //   `+[MPSGraphDevice deviceWithMTLDevice:]`, reached from
 //   `Essence2Director.Conv3DFast.init` <- `StudentDirector.init(bundle:)`
-//   <- `DirectorRuntime.init` <- `Essence2SyncEngine.warmUp`. The director
-//   touches MPSGraph before the actor's simulator guard. Expression2 renders
+//   <- `DirectorRuntime.init` <- `Essence2SyncEngine.warmUp`. That call chain
+//   reaches MPSGraph before the actor's simulator guard. Expression2 renders
 //   on the simulator normally.
 //
 // RELEASE NOTE:
