@@ -141,15 +141,24 @@ class BithumanCli < Formula
   # expression-2 render engine next to the binary (expression2-model +
   # embody.model blessed 90e4cf31cf71 + engines/mac-arm64-1.0.0.engine), so
   # `bithuman run` renders Wise Pup out of the box with ZERO engine fetch.
-  # It ships NO essence-2 engine, deliberately and declared
-  # (BITHUMAN_TARBALL_NO_ESSENCE2=1). What keeps the engine out is (a) the mac
-  # build host holds no credential for the private repository that publishes
-  # the engine's release assets, and (b) vendoring it roughly DOUBLES the
-  # tarball (373 MB of resources + a 56 MB dylib on top of today's 276 MB) —
-  # an owner-level product trade, not a packaging oversight. Until it is
-  # made, `bithuman run <X.elevatedir>` and
-  # `bithuman render <essence-2>.imx` exit 69 UNAVAILABLE naming
-  # libessence2.dylib, which is an honest refusal, not a render.
+  # ★CORRECTED 2026-09-08 — THIS BLOCK DESCRIBED A TARBALL THAT IS FOUR
+  # RELEASES OLD. From 2026-09-02 through cli-v2.6.1/2/3/4 it said the macOS
+  # tarball "ships NO essence-2 engine … BITHUMAN_TARBALL_NO_ESSENCE2=1" and
+  # that `bithuman render <essence-2>.imx` exits "69 UNAVAILABLE naming
+  # libessence2.dylib, which is an honest refusal, not a render". cli-v2.6.1
+  # vendored the essence-2 runtime into BOTH tarballs; the sentence was never
+  # re-measured and survived three formula bumps, because nothing in the tap
+  # reads the tarball back.
+  #
+  # MEASURED 2026-09-08 on the very bytes this formula pins (sha256
+  # ed827aaa…), extracted from a quarantined anonymous download on echelon:
+  # the tarball ships the essence-2 runtime as `lib/lible_core.dylib`, and
+  # `bithuman render <essence-2>.imx -a speech.wav -o out.mp4 --json` returns
+  # rc=0 — 300 frames, 1920x1080 @25 fps, on the CLI's own local render path.
+  # It is a render, on this machine, with no engine fetch, and the mouth
+  # tracks the drive audio. (`libessence2.dylib` is the APPLE/Swift engine — a
+  # different artifact on a different axis; it is indeed not in this tarball
+  # and the CLI does not use it.)
   # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
   # version below is scanned from the cli-v* tag in the URL.)
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.4/bithuman-aarch64-apple-darwin.tar.gz"
@@ -181,6 +190,33 @@ class BithumanCli < Formula
 
   depends_on arch: :arm64
   depends_on macos: :sonoma
+
+  # ★ffmpeg is a RUNTIME REQUIREMENT, and leaving it undeclared broke BOTH of
+  # the two commands this formula's own quick-start teaches. MEASURED
+  # 2026-09-08 on echelon against the published cli-v2.6.4 macOS tarball,
+  # PATH=/usr/bin:/bin:/usr/sbin:/sbin — a Mac that has Homebrew but has not
+  # run `brew install ffmpeg`:
+  #
+  #   $ bithuman run <essence-2>.imx --json
+  #   {"error":{"code":"UNAVAILABLE","command":"run", …}}     # rc=69, no serve
+  #   $ bithuman render <essence-2>.imx -a a.wav -o out.mp4 --json
+  #   {"error":{"code":"UNAVAILABLE","command":"render", …}}  # rc=69, no MP4
+  #
+  #   GREEN CONTROL — the same `run`, same host, /opt/homebrew/bin back on
+  #   PATH: engine loads, "teeth: ready … (1024 references)", and it serves
+  #   "essence-2 preview at http://127.0.0.1:8088/".
+  #
+  # The binary SHELLS OUT to an `ffmpeg` EXECUTABLE (the CLI's cmd/mux.rs):
+  # `render` to write the MP4, `run` to expand `target_frames` + `P.f16` at
+  # activate. The FFmpeg statically linked into `bithuman` is a decode-only
+  # subset — no MP4 muxer, no H.264, no AAC encoder — so it cannot be the
+  # sink, and the tarball vendors no `ffmpeg` of its own.
+  #
+  # This is why the "no runtime deps" rule below does NOT reach it: that rule
+  # is about DYLIBS resolved through @loader_path at a fixed soname, where a
+  # Homebrew bump can break a linked binary. A subprocess invoked as
+  # `ffmpeg -i … out.mp4` has no such coupling — a newer ffmpeg still muxes.
+  depends_on "ffmpeg"
 
   # No runtime `depends_on` dylibs. The macOS tarball is self-contained:
   # the `bithuman` binary references every third-party dylib (ONNX
@@ -227,6 +263,9 @@ class BithumanCli < Formula
     <<~EOS
       Quick start:
         bithuman doctor                    # host + auth + cache sanity check
+                                           # (from 2.6.5 it also grades ffmpeg;
+                                           #  2.6.4 and earlier print the same
+                                           #  report with or without it)
         bithuman list                      # browse showcase avatars
         bithuman pull modern-court-jester  # download one
         bithuman run ~/.cache/bithuman/showcase/modern-court-jester.imx
@@ -265,16 +304,18 @@ class BithumanCli < Formula
       Offline tooling:
         bithuman info   avatar.imx                       # inspect .imx
 
-      `bithuman render` (offline MP4) does NOT work on macOS today.
-      essence-1 exits with "video encoder unavailable on macOS in this
-      libessence build"; expression-2 under-produces frames, exits
-      non-zero, and still leaves a TRUNCATED mp4 at --output. Measured
-      2026-09-04 on 2.5.1. For offline renders use a Linux host:
-        expression-2   the CLI, via install.sh          (verified)
-        essence-2      pip install 'bithuman[tessera]' and
-                       bithuman.tessera_offline.render_offline()
-                       — gate on stats["borrow_state"] == "borrowed",
-                       never on the frame count
+      `bithuman render` (offline MP4) WORKS on macOS on 2.6.1+.
+      ★The paragraph that stood here said the opposite — "does NOT work
+      on macOS today … for offline renders use a Linux host" — measured
+      2026-09-04 on 2.5.1 and never re-measured. RE-MEASURED 2026-09-08
+      on the bytes this formula pins (cli-v2.6.4, arm64), Apple silicon:
+        essence-2     rc=0 · 300 frames · 1920x1080 @25 fps
+        expression-2  rc=0 · 240 frames · 416x720 @20 fps
+      Both audio-driven and both verified frame-by-frame against the
+      drive audio. essence-1 is not renderable by this CLI on any
+      platform and is unchanged by that.
+      Offline renders need ffmpeg on PATH (a formula dependency since
+      2.6.5; before that, `brew install ffmpeg`).
 
       Docs:    https://docs.bithuman.ai
       Source:  https://github.com/bithuman-product/homebrew-bithuman
