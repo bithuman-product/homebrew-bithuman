@@ -4,7 +4,7 @@ One repo, **one tag prefix per artifact**. Cut a tag, CI does the rest. Don't mi
 
 | Artifact | Tag | Ships to | Driven by |
 |---|---|---|---|
-| **CLI** (`bithuman`) | `cli-v<x.y.z>` | Homebrew tap + `curl\|bash` | a GitHub Release with the Rust tarballs here; bump `Formula/bithuman-cli.rb` |
+| **CLI** (`bithuman`) | `cli-v<x.y.z>` | Homebrew tap + `curl\|bash` | the CLI repo's tracked `scripts/release-macos.sh` + `scripts/release-linux.sh` (one `CLI_SHA` for both halves) and `scripts/release_pack.sh`, run on a signing host; `scripts/check-release-atomic.sh` here before the draft is published; then bump `Formula/bithuman-cli.rb`. `release-coverage.yml` audits every published release |
 | **Python SDK** (`bithuman`) | `pypi-v<x.y.z>` | PyPI | `.github/workflows/release-pypi.yml` |
 | **MCP** (`bithuman-mcp`) | `mcp-v<x.y.z>` | PyPI | `.github/workflows/publish-mcp.yml` |
 | **Flutter plugin** (`bithuman`) | `flutter-v<x.y.z>` | pub.dev | `.github/workflows/publish-pubdev.yml` |
@@ -15,12 +15,14 @@ One repo, **one tag prefix per artifact**. Cut a tag, CI does the rest. Don't mi
 
 ## macOS code signing (CLI)
 
-`release-cli.yml`'s `mac-tarball` job Developer ID signs every Mach-O it ships
-(`scripts/sign-macos.sh`), notarizes them with Apple (`scripts/notarize-macos.sh`),
-and then verifies the finished tarball **with the quarantine attribute set**
-(`scripts/verify-macos-release.sh`) — the only state that actually exercises
-Gatekeeper. Without the signing secrets the job **refuses to publish**; re-dispatch
-with `allow_unsigned=true` to override deliberately.
+The CLI repo's `scripts/release-macos.sh sign` Developer ID signs every Mach-O it
+ships (this tap's `scripts/sign-macos.sh`), notarizes them with Apple
+(`scripts/notarize-macos.sh`), and then verifies the finished tarball **with the
+quarantine attribute set** (`scripts/verify-macos-release.sh`) — the only state
+that actually exercises Gatekeeper. The signing identity lives in the signing
+host's keychain; this repo holds no signing secret, which is why the CI lane that
+used to own this step (`release-cli.yml`, deleted 2026-09-07 — see below) refused
+to publish from CI on every run.
 
 Every release up to and including `cli-v2.4.2` is ad-hoc signed and Gatekeeper
 rejects it. `brew install` users are unaffected (Homebrew's `curl` fetch sets no
@@ -34,35 +36,41 @@ resolved online by CDHash on first launch. Shipping a stapled artifact would mea
 publishing a `.dmg`/`.pkg` instead of a `.tar.gz`, which is a distribution change,
 not a signing one.
 
-## ★STANDING RED — `release-cli` cannot cut a Linux tarball (opened 2026-09-02)
+## RETIRED 2026-09-07 — `release-cli.yml` is deleted; the CLI release lane is the CLI repo's tracked scripts
 
-`release-cli` has run 7 times and succeeded once (2026-08-02). Both dispatches on
-2026-09-02 failed at the same place, and it is **not a CI defect** — it is a
-published-artifact defect that the gate is correctly refusing to ship past.
+`.github/workflows/release-cli.yml` (1,115 lines, `workflow_dispatch` only) ran
+7 times and succeeded once (2026-08-02). It cut none of `cli-v2.5.0` … `2.6.4`;
+every one of those was built by hand and, since `cli-v2.6.3`, by the CLI repo's
+tracked `scripts/release-macos.sh` + `scripts/release-linux.sh` (one `CLI_SHA`
+for both halves, every input pinned by digest, `PROVENANCE.json` in the tarball)
+and packed by `scripts/release_pack.sh`, on alpharetta and lafayette, unattended.
+Its standing red — `linux-tarball` gate 2 refusing the published showcase
+`.imx` (runs 33602563547 / 33603750648) — was a true refusal, and the same gate
+runs inside `release-linux.sh` (via the CLI repo's `build-linux.sh` /
+`check-linux-host-engine.sh`). The lane it guarded no longer exists, so the
+workflow is deleted rather than fixed: one release lane, not two
+(owner rule 2026-09-06: simplify, reduce, unify).
 
-| | |
-|---|---|
-| **What is red** | `release-cli` → `linux-tarball` → *"Build + vendor + gate the linux tarball"*, gate 2 (host↔engine) |
-| **Runs** | 33602563547, 33603750648 (both `workflow_dispatch`, 2026-09-02) |
-| **Verdict** | `host-engine gate: host exited before READY (rc=3)` |
-| **Root cause** | The published showcase avatar **`wise-pup.imx`** carries `identity.tflite` (the two-artifact split's DELTA half), declares no `expr2-shared-enc` base in `dependencies[]`, and carries no `shared-enc.tflite`. Confirmed on the published bytes with `bithuman info --json` (sha256 `d677173de4a4025b…`, 89,354,265 B, 14 members, `dependencies` null). The freshly-built LiteRT host freezes `shared_enc_dep.py` and refuses it at load. |
-| **Why it must stay red** | Pairing the wrong shared encoder renders **a different face with no error** — 181 of 181 frames wrong, silently (measured 2026-09-01). Shipping this host would break `bithuman run`, the out-of-box showcase, for every Linux customer. |
-| **Owner action** | Re-emit `wise-pup.imx` through `tools/imx_from_bundle.py` so it stamps its base content address, then re-dispatch with `build_linux=true`. This is an **expression-2 artifact publish** — it replaces bytes customers already hold — so it is deliberately not automated. |
-| **Owner** | expression-2 artifact publishing (owner action; not a CI lane) |
-| **Expiry** | **2026-09-17.** If it is still red then, either the re-emit has stalled or the CLI's Linux lane should stop claiming a vendored engine. Do not extend it silently. |
+What the deletion had to keep, and where it went:
 
-★ **Do not buy this green.** Widening the gate, skipping gate 2, or pinning the
-old host all ship a CLI whose showcase avatar renders the wrong face. The 2.5.0
-and 2.5.1 Linux tarballs were cut by vendoring the host `cli-v2.4.2` already
-shipped, unchanged — that is the workaround, and it is why those releases exist
-at all.
+* **The platform-coverage floor.** `tools/verify_release_platform_coverage.py`
+  ran ONLY in the deleted lane's `verify-release-coverage` job, so a safeguard on
+  live customer traffic (a macOS-only release is a Linux outage) was running on
+  nothing. It now runs in `.github/workflows/release-coverage.yml` on every
+  `release: published` event, daily, and on dispatch — grading the release
+  AFTER it is published, whichever lane cut it. Measured at the switch:
+  self-test OK; `cli-v2.6.4` vs `cli-v2.6.3` GREEN, 2 targets each; and
+  `--require aarch64-unknown-linux-gnu` REFUSES (rc 1), so the live gate can
+  say no.
+* **Atomicity** (`scripts/check-release-atomic.sh`) and the **one-tree proof**
+  (its C8) are run by the CLI lane's handover before a draft is published —
+  unchanged.
+* The signing helpers (`sign-macos.sh`, `notarize-macos.sh`,
+  `verify-macos-release.sh`) are called by `release-macos.sh sign` — unchanged.
+* `scripts/upload-release-asset.sh` and the `RENDER_TOOL_URL` /
+  `EMBODY_MODEL_URL` secret convention were the deleted lane's alone; the
+  script stays as a tool, the secrets are dead.
 
-### What this red costs, beyond the workflow
-
-`release-cli` is the **only** path that builds both halves from one `cli_ref` in
-one dispatch. While it is unavailable, halves get uploaded by hand — and that is
-how `cli-v2.5.1` came to carry two assets built from two different source trees
-(see below).
 
 ## CLI platform coverage (a partial release must go RED)
 
@@ -90,9 +98,9 @@ pairs than the CLI release before it**. Adding a platform, or adding a missing
 sidecar does, because `install.sh` silently downgrades to "verification skipped"
 rather than failing.
 
-* `verify-release-coverage` in `release-cli.yml` runs it with
-  `needs: [mac-tarball, linux-tarball]` and `if: ${{ !cancelled() }}` — a
-  SKIPPED build job is exactly the condition it exists to catch.
+* `.github/workflows/release-coverage.yml` runs it on every published release,
+  daily, and on dispatch (since 2026-09-07; before that it ran only inside the
+  deleted `release-cli.yml`, i.e. never on a release that actually shipped).
 * Run it by hand any time: `python3 tools/verify_release_platform_coverage.py --tag cli-vX.Y.Z`
   (`rc` 0 green / 1 refusal / 2 index unreadable — unreachable is never green).
 * `--self-test` runs the refusal arms **in-process** (never re-execs itself) and
@@ -166,7 +174,7 @@ That is not hypothetical — it is `cli-v2.5.1`, minus the timing:
 * macOS asset created `12:43:36Z` — newest CLI commit then was `38e75ba`
 * Linux asset created `19:42:49Z` — **44 seconds** after CLI commit `2f210b3`,
   *"expr2 linux engine: re-pin to the clean-room rebuild"*
-* `release-cli` had **zero successful runs** that day (7 total, last success 08-02),
+* `release-cli` (the dispatch lane, deleted 2026-09-07) had **zero successful runs** that day (7 total, last success 08-02),
   and no workflow in `bithuman-product/bithuman` uploads a release asset
   (verified by grep) — so **both halves were uploaded by hand, 7 h apart**
 
@@ -236,10 +244,11 @@ too (12 min apart green, the 6h58m gap red on C7 and only C7).
 
 **What C7 still cannot see**: two builds of the same commit made minutes apart,
 and two builds made in one window from two different trees. A commit stamp in
-the tarball would close those, and it is still worth doing. Until then, one
-dispatch of `release-cli` with both `build_mac` and `build_linux` ON remains the
-only thing that makes the two halves *share* a tree — it takes `cli_ref` once and
-both jobs check out that same ref.
+the tarball would close those, and it is still worth doing. That stamp exists now:
+`check-release-atomic.sh` C8 ONE TREE reads the source commit out of each
+binary's own bytes, and the CLI repo's `release-macos.sh` / `release-linux.sh`
+take `CLI_SHA` once for both halves — which is what the deleted `release-cli`
+dispatch used to be the only way to get.
 
 ## SwiftPM: three artifacts, two vintages, and why no new tag was cut (2026-09-04)
 

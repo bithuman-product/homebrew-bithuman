@@ -1,0 +1,71 @@
+# release-coverage.yml — did the newest CLI release LOSE a platform?
+#
+# `install.sh` resolves the newest `cli-v*` tag and downloads
+# `bithuman-<target>.tar.gz` from it, so a release that carries fewer platforms
+# than the one before it is not a partial success: it is a total outage for the
+# missing platform, and it looks green from wherever the release was cut. That
+# shipped on 2026-09-02 (`cli-v2.5.0`, macOS only; every Linux customer got a
+# 404 from the documented one-liner).
+#
+# `tools/verify_release_platform_coverage.py` is the gate (RELEASE.md, "CLI
+# platform coverage"). Until 2026-09-07 the only place it ran was the
+# `verify-release-coverage` job of `release-cli.yml`, a dispatch-only lane that
+# had cut no shipped release since 2026-08-02 and was deleted that day — so the
+# safeguard ran on nothing. This workflow is where it lives now: it grades the
+# release AFTER it is published, whichever lane cut it (the sanctioned lane is
+# the CLI repo's tracked `scripts/release-macos.sh` + `scripts/release-linux.sh`,
+# run on a signing host — not a workflow here), and it runs daily so a release
+# published from a shell is graded within a day.
+#
+# The refusal arms are proven in-process first (`--self-test`, never a re-exec),
+# so a green here is only trusted after the gate has been shown to fire.
+# `--require` pins a floor independent of the predecessor; it is deliberately
+# NOT set here because the two targets every release has carried since
+# cli-v2.6.0 are exactly the predecessor's set, and a floor that the subject
+# already satisfies is a guaranteed green (see the tool's docstring).
+name: CLI releases — does the newest one still carry every platform its predecessor did?
+
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'CLI release tag to grade (default: the newest cli-v* release)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    name: the release under test carries every platform its predecessor did
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: the gate can refuse (self-test, in-process)
+        run: python3 tools/verify_release_platform_coverage.py --self-test
+
+      - name: grade the release
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          tag="${INPUT_TAG:-}"
+          # a `release: published` event names the release under test only when
+          # it is a CLI release; a Swift SDK tag (bare v*) or a Sparkle feed tag
+          # falls through to the newest CLI release, which is what install.sh
+          # would resolve anyway.
+          if [ -z "$tag" ] && [ -n "${EVENT_TAG:-}" ] && printf '%s' "$EVENT_TAG" | grep -q '^cli-v'; then
+            tag="$EVENT_TAG"
+          fi
+          if [ -n "$tag" ]; then
+            python3 tools/verify_release_platform_coverage.py --tag "$tag"
+          else
+            python3 tools/verify_release_platform_coverage.py
+          fi

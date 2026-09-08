@@ -1,32 +1,6 @@
 {
   "_": "Tier-2 pins for the PUBLIC tap: each entry is a MEASURED count plus a reason the occurrence still stands. Tier 1 has no baseline mechanism at all -- it is a hard zero. An increase, or a hit in an unpinned file, is red; a decrease is green with a tighten hint. REASONS NAME THE V-CODES AND NEVER SPELL THE WORDS: this file is scanned like any other and must itself read zero, so a reason written in plain words would make the baseline the biggest leak in the tree. Counts cover TRACKED REAL FILES ONLY -- 28 tracked symlinks point at the one real copy under shared/Classes, and following them counted that copy three times.",
   "files": {
-    ".github/workflows/release-cli.yml": {
-      "V1": {
-        "n": 7,
-        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
-      },
-      "V10": {
-        "n": 2,
-        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
-      },
-      "V2": {
-        "n": 9,
-        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
-      },
-      "V4": {
-        "n": 1,
-        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
-      },
-      "V5": {
-        "n": 6,
-        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
-      },
-      "V6": {
-        "n": 1,
-        "why": "internal build and measurement notes inside a CI comment block. World-readable and it should go, but .github/workflows is being edited by a concurrent lane tonight, so this is pinned rather than edited to avoid a collision. Next owner of that file: delete the comment block."
-      }
-    },
     "Examples/android/README.md": {
       "V1": {
         "n": 7,
