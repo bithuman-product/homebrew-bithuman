@@ -24,7 +24,7 @@ func log(_ line: String) {
     //   xcrun devicectl device copy from --device <udid> \
     //     --domain-type appDataContainer \
     //     --domain-identifier ai.bithuman.example.ios-expression2 \
-    //     --source Documents/session.log --destination .
+    //     --source Documents/session.log --destination ./session.log
     guard let docs = FileManager.default.urls(for: .documentDirectory,
                                               in: .userDomainMask).first else { return }
     let entry = Data((ISO8601DateFormatter().string(from: Date()) + "  " + line + "\n").utf8)
@@ -422,7 +422,7 @@ final class AvatarSession: ObservableObject {
     ///   xcrun devicectl device copy from --device <udid> \
     ///     --domain-type appDataContainer \
     ///     --domain-identifier ai.bithuman.example.ios-expression2 \
-    ///     --source Documents/first-frame.png --destination .
+    ///     --source Documents/first-frame.png --destination ./first-frame.png
     private func recordFirstFrame(_ cg: CGImage) {
         firstFrameAt = Date()
         guard let png = UIImage(cgImage: cg).pngData(),

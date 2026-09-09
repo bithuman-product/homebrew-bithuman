@@ -91,7 +91,7 @@ Pull that frame off the phone with:
 xcrun devicectl device copy from --device <udid> \
   --domain-type appDataContainer \
   --domain-identifier ai.bithuman.example.ios-expression2 \
-  --source Documents/first-frame.png --destination .
+  --source Documents/first-frame.png --destination ./first-frame.png
 ```
 
 ## Files
