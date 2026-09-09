@@ -22,6 +22,13 @@ struct IOSAvatarApp: App {
                 AvatarRootView()
             case .unsupported(let reason):
                 UnsupportedDeviceView(reason: reason)
+            @unknown default:
+                // `DeviceCapability` is a frozen-in-name-only enum in the
+                // shipped binary: without this case the switch does not
+                // compile against bitHumanKit 2.x ("switch covers known
+                // cases, but 'DeviceCapability' may have additional unknown
+                // values"). Treat anything new as unsupported.
+                UnsupportedDeviceView(reason: "This device is not supported.")
             }
         }
     }
