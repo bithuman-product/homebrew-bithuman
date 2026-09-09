@@ -12,6 +12,11 @@ It is deliberately the *cheap* Apple path:
 | first-launch download | none (the model ships in the app) | ~1.6 GB |
 | what drives it | a bundled WAV, or your microphone | on-device STT + LLM + TTS |
 
+The **Speak** path is what every number below was measured on. The **Talk to
+it** (microphone) path builds and installs with it but was never driven by a
+human voice on a device — it is a fifteen-line starting point, not a measured
+result.
+
 The full tutorial, with every file explained, is at
 <https://docs.bithuman.ai/examples/swift-ios-expression2>.
 
