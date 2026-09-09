@@ -169,6 +169,35 @@
 //   does not. Your app must place those bundles in its own Resources, so
 //   `Essence2` alone is a build-time coordinate, not a running avatar.
 //
+//   ★ AND NO MODEL YOU CAN DOWNLOAD TODAY OPENS IN THIS ENGINE — which is the
+//   limit that decides whether essence-2 on a phone is usable at all, and it
+//   is NOT a repack a consumer can do. MEASURED 2026-09-09, both sides:
+//     · WHAT THE DOWNLOAD ENDPOINT RETURNS. `GET
+//       /v1/agent/{code}/model/download?model=essence-2` (account api-secret)
+//       returned, for one live identity, a single `IMX\0` v2 CONTAINER FILE of
+//       99,536,068 B. Read out of the container's own member index: 27
+//       members, `manifest.json` declares `"format": "le-bundle-v0"`, four
+//       members are `.onnx` graphs (`model_b24_fp32.onnx` among them), and
+//       ZERO are CoreML `.mlpackage`s. That artifact is what the SERVER reads.
+//     · WHAT THIS ENGINE ACCEPTS. `strings -a` on the ios-arm64 slice of the
+//       `libessence2.xcframework.zip` pinned below (essence2-v1.4.0,
+//       158,661,991 B, re-downloaded anonymously and re-hashed to the exact
+//       `binaryTarget` checksum 75b1919b…) carries its opener's refusal
+//       verbatim —
+//           Essence2Bundle: … is not a .elevatedir/.essence2dir bundle (need a
+//           directory with meta.json {"format":"elevatedir-v*" |
+//           "essence2-light-dir-v*"})
+//       — beside the CoreML members it wants: `MotionExtractor.mlpackage`,
+//       `WarpDecode_student.mlpackage`, `DenseMotionConvs_student.mlpackage`.
+//       It opens a DIRECTORY of CoreML packages; the endpoint hands you one
+//       container file of ONNX graphs. Two runtimes, not two spellings of one.
+//   ⟹ `Essence2` resolves, links and starts, and the only package it opens
+//   today is one you produce yourself. Publishing a per-identity on-device
+//   package is an owner decision plus a re-publish, not a client workaround.
+//   The single source for what is and is not true on this rail is
+//   https://docs.bithuman.ai/sdk/swift — this block points at it rather than
+//   growing a second copy that drifts.
+//
 //   ★ NO *MODULE* CLASH, BUT A REAL *SYMBOL* CLASH — AND THIS BLOCK USED TO
 //   SAY "Depend on it alongside either of the others", WHICH IS FALSE ON THE
 //   iOS DEVICE AND ON macOS. The module half is still true: `Essence2` carries
