@@ -93,6 +93,6 @@ The speech encoder runs on the Apple Neural Engine via Metal/MLX. The renderer c
 
 ## Docs
 
-- [Essence on Swift](https://docs.bithuman.ai/sdks/swift)
-- [Swift SDK quickstart](https://docs.bithuman.ai/sdks/swift)
+- [Essence on Swift](https://docs.bithuman.ai/sdk/swift)
+- [Swift SDK quickstart](https://docs.bithuman.ai/sdk/swift)
 - [Models overview](https://docs.bithuman.ai/getting-started/models)

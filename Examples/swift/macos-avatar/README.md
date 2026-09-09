@@ -67,5 +67,5 @@ The avatar circle renders live lip-synced animation as the agent speaks.
 
 ## Docs
 
-- [Swift SDK quickstart](https://docs.bithuman.ai/sdks/swift)
-- [macOS guide](https://docs.bithuman.ai/sdks/swift)
+- [Swift SDK quickstart](https://docs.bithuman.ai/sdk/swift)
+- [macOS guide](https://docs.bithuman.ai/sdk/swift)

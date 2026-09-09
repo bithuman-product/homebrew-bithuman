@@ -58,8 +58,8 @@ M1 and M2 Macs are not supported for Expression (the SDK raises `ExpressionModel
 | Resource | URL |
 |----------|-----|
 | SwiftPM package | [github.com/bithuman-product/homebrew-bithuman](https://github.com/bithuman-product/homebrew-bithuman) |
-| Overview docs | [docs.bithuman.ai/sdks/swift](https://docs.bithuman.ai/sdks/swift) |
-| Quickstart | [docs.bithuman.ai/sdks/swift](https://docs.bithuman.ai/sdks/swift) |
+| Overview docs | [docs.bithuman.ai/sdk/swift](https://docs.bithuman.ai/sdk/swift) |
+| Quickstart | [docs.bithuman.ai/sdk/swift](https://docs.bithuman.ai/sdk/swift) |
 | CLI (no-code) | [docs.bithuman.ai/getting-started/cli](https://docs.bithuman.ai/getting-started/cli) |
 
 ## Integration
@@ -87,7 +87,7 @@ See [docs.bithuman.ai/getting-started/cli](https://docs.bithuman.ai/getting-star
 
 ## Reference apps
 
-Reference apps (Mac, iPad, iPhone) live in the private `bithuman-apps` repo (collaborator-only). They consume the SDK via the published SwiftPM binary package — the same way any external developer would. Prebuilt binaries are linked from the [quickstart docs](https://docs.bithuman.ai/sdks/swift).
+Reference apps (Mac, iPad, iPhone) live in the private `bithuman-apps` repo (collaborator-only). They consume the SDK via the published SwiftPM binary package — the same way any external developer would. Prebuilt binaries are linked from the [quickstart docs](https://docs.bithuman.ai/sdk/swift).
 
 ## Python SDK on Apple Silicon
 
@@ -95,7 +95,7 @@ For developers who prefer Python, the `bithuman` PyPI package includes a macOS a
 
 ## Documentation
 
-- [Swift SDK overview](https://docs.bithuman.ai/sdks/swift)
-- [Quickstart](https://docs.bithuman.ai/sdks/swift)
+- [Swift SDK overview](https://docs.bithuman.ai/sdk/swift)
+- [Quickstart](https://docs.bithuman.ai/sdk/swift)
 - [CLI reference](https://docs.bithuman.ai/getting-started/cli)
 - [Models overview](https://docs.bithuman.ai/getting-started/models)
