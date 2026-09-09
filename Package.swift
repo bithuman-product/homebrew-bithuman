@@ -296,6 +296,37 @@
 //   Expression2 has no such gate and was measured rendering 245 frames on that
 //   same iPhone 15 the same night.
 //
+//   ★ AND IT IS NOT ONLY A PHONE GATE — macOS IS GATED TOO, WHICH THIS BLOCK
+//   DID NOT SAY. "Grades … ON iOS" reads as if a Mac were ungated; it is not.
+//   MEASURED 2026-09-09 with `strings -a` on the three published slices of the
+//   essence2-v1.4.0 archive pinned below (re-downloaded anonymously, re-hashed
+//   to 75b1919b…), one row per refusal sentence, nonsense control 0 in every
+//   pass:
+//
+//       refusal, verbatim                                  ios  macos  sim
+//       "bitHuman requires Apple M3 or later on macOS."       0      2    0
+//       "bitHuman requires Apple Silicon (M3 or later)."      0      2    0
+//       "…an iPad with M-series Apple Silicon (iPad Pro
+//        2021 or later, iPad Air 2022 or later)."            2      0    0
+//       "…requires iPhone 16 Pro or later (A18 Pro+)."       2      0    0
+//       "…requires an A18 Pro chip (iPhone 16 Pro/Pro Max)"  2      0    0
+//       nonsense control                                     0      0    0
+//
+//   Each slice carries only the refusals that can fire on it, the generic
+//   `Bithuman.create: unsupported hardware ` prefix is in ALL THREE, and the
+//   SIMULATOR carries none of the specific sentences — so a Simulator run
+//   never tells you the device is under-spec. Read as a floor for `Essence2`:
+//   macOS needs Apple Silicon M3+; iPad needs M-series (iPad Pro 2021+ /
+//   iPad Air 2022+, which is LOWER than bitHumanKit's iPad Pro M4+); iPhone
+//   needs a 16 Pro / Pro Max, and a standard A18 is refused by name.
+//
+//   ★ AND `Expression2` REALLY HAS NO GATE — measured on its OWN archive
+//   rather than inherited from this paragraph: `unsupported hardware`,
+//   `HardwareCheck`, `A18` and `iPhone 16` all read 0 in all three slices of
+//   Expression2.xcframework.zip (d4ce14b6…), against controls that fire in the
+//   same read (`Expression2` 1106-1108, `CoreML` 24-26) and a nonsense token
+//   at 0.
+//
 // ★ AND THE iOS SIMULATOR CANNOT STAND IN FOR THE PHONE FOR essence-2. The
 //   documented behaviour there is a graceful typed refusal ("the elevate engine
 //   runs idle-only here"). MEASURED 2026-09-08 on the iOS 26.4 simulator with
