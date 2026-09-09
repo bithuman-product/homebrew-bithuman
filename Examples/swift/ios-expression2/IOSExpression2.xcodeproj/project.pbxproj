@@ -62,6 +62,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 6E7349E85C0A99F1C3FA398D /* Build configuration list for PBXNativeTarget "IOSExpression2" */;
 			buildPhases = (
+				F6B3405F0F034E42CEEFB7FA /* Sources/Model must hold a real model, not the placeholder */,
 				D7ACB09FD7D9FC90B89A68CB /* Sources */,
 				B72AAE4A43C733DD58C5064E /* Resources */,
 				1B414BCAA20F12A4EF22FA19 /* Frameworks */,
@@ -125,6 +126,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		F6B3405F0F034E42CEEFB7FA /* Sources/Model must hold a real model, not the placeholder */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Sources/Model must hold a real model, not the placeholder";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# A resource FOLDER copies whatever is there, so without this the app\n# builds, installs and launches with no model at all and says so only\n# in a log line nobody is reading. Measured 2026-09-09: an untouched\n# checkout with just PLACE_YOUR_MODEL_HERE.txt returns ** BUILD\n# SUCCEEDED **. Fail here instead, where the message is unmissable.\nM=\"$SRCROOT/Sources/Model\"\nfail() { echo \"error: $1\"; exit 1; }\n[ -f \"$M/agent.avatar\" ] || fail \"Sources/Model/agent.avatar is missing — run  BITHUMAN_API_SECRET=... ./setup.sh <YOUR_AGENT_CODE>\"\nSZ=$(stat -f%z \"$M/agent.avatar\")\n[ \"$SZ\" -gt 1000000 ] || fail \"Sources/Model/agent.avatar is only ${SZ} B — that is an error page or a truncated download, not an avatar. Re-run ./setup.sh\"\nW=\"$M/shared_engine/w2v_frontend_cpuAndNE.mlpackage\"\n[ -d \"$W\" ] || fail \"Sources/Model/shared_engine/w2v_frontend_cpuAndNE.mlpackage is missing — the .avatar does not carry it. Run  bithuman engine install mac  and re-run ./setup.sh\"\necho \"Sources/Model OK: agent.avatar ${SZ} B, shared_engine has w2v_frontend_cpuAndNE.mlpackage\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		D7ACB09FD7D9FC90B89A68CB /* Sources */ = {
