@@ -35,7 +35,7 @@
 #         tag defaults to the version this checkout's Package.swift is for.
 # Requires: macOS + Xcode. Resolves the tag from GitHub; no credential.
 set -u
-TAG="${1:-2.10.0}"
+TAG="${1:-2.11.0}"
 W="${TMPDIR:-/tmp}/e2x2link.$$"
 mkdir -p "$W/pkg/Sources/Probe"
 trap 'rm -rf "$W"' EXIT

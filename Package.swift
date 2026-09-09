@@ -22,8 +22,10 @@
 //                              `import Expression2`. FOUR binaryTargets ride
 //                              under it now, not three — see UnifiedModelHeader.
 //   - Essence2                 essence-2 engine alone, archives on tag
-//                              essence2-v1.2.0. `import Essence2` works since
-//                              that tag (the archive's module map declares both
+//                              essence2-v1.4.0 — read `essence2Tag` below, never
+//                              this sentence, for where the bytes are; it has
+//                              been wrong before. `import Essence2` works since
+//                              essence2-v1.2.0 (the archive's module map declares both
 //                              `Essence2` and `CLibEssence2` over one header;
 //                              `import CLibEssence2` still works). Two
 //                              binaryTargets ride under it and BOTH are needed.
@@ -94,7 +96,8 @@
 //                  render out of the box; it can now be handed one.
 //   - Essence2     Layer-1 essence-2 engine for Apple platforms (iOS device,
 //                  iOS Simulator, macOS — all arm64). Its archives ship on tag
-//                  essence2-v1.2.0; see `essence2Tag` below.
+//                  essence2-v1.4.0; `essence2Tag` below is the value that
+//                  decides, and this line is a copy of it that has drifted once.
 //                  ★ TWO MODULE NAMES, ONE HEADER. What this product vends is
 //                  the engine's 15-function C interface, not a Swift type. Since
 //                  essence2-v1.2.0 the module map in every slice declares BOTH
@@ -163,7 +166,9 @@
 //   ★ WHAT LINKING DOES NOT BUY YOU. The runtime resources this engine loads at
 //   startup — its Metal library, the idle audio, and the audio encoder — are
 //   attached to the release as `libessence2-resources.zip` (231,597,193 B,
-//   sha256 94ce2120…, byte-identical on essence2-v1.1.0 and essence2-v1.2.0)
+//   sha256 94ce2120…, and MEASURED 2026-09-09 byte-identical on the tag this
+//   manifest points at, essence2-v1.4.0, as on essence2-v1.2.0 — both streamed
+//   anonymously and hashed, same 231,597,193 B and same digest)
 //   but they are NOT a binaryTarget: SwiftPM cannot ship loose resource bundles
 //   through this product. Linking succeeds without them; starting a session
 //   does not. Your app must place those bundles in its own Resources, so
@@ -502,10 +507,14 @@ let package = Package(
         .library(name: "Expression2", targets: ["Expression2", "BithumanEngineProtocolBinary", "UnifiedModelHeader"]),
         // Layer-1 essence-2 engine for Apple platforms: a static C library with
         // ios-arm64, ios-arm64-simulator and macos-arm64 slices, plus the ONNX
-        // Runtime build its audio head needs at link. `import CLibEssence2` —
-        // the module name is NOT the product name; see the essence-2 section in
-        // the header for that, for why the second target is not optional, and
-        // for the runtime resources this does not give you.
+        // Runtime build its audio head needs at link. `import Essence2` — and
+        // `import CLibEssence2` still works, because since essence2-v1.2.0 the
+        // module map declares both names over the one header. (This comment
+        // said the module name is NOT the product name. That was true through
+        // v1.1.0 and is false now, so it is corrected rather than softened.)
+        // See the essence-2 section in the header for the whole shape, for why
+        // the second target is not optional, for the model format this engine
+        // opens, and for the runtime resources this does not give you.
         .library(name: "Essence2", targets: ["libessence2", "onnxruntime"]),
     ],
     targets: [
