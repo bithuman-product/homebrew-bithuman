@@ -1,0 +1,6 @@
+# The three payload files are yours, not ours — setup.sh fetches them.
+Sources/Model/agent.avatar
+Sources/Model/shared_engine/
+Sources/Model/speech16k.wav
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/

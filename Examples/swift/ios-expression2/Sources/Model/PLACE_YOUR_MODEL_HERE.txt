@@ -1,0 +1,11 @@
+setup.sh fills this folder with three things:
+
+  agent.avatar      your expression-2 agent's <CODE>.avatar
+                    GET /v1/agent/{code}/model/download?model=expression-2
+  shared_engine/    a copy of ~/.bithuman/engines/mac-1.0.0, which
+                    `bithuman engine install mac` creates. The .avatar does not
+                    carry w2v_frontend_cpuAndNE.mlpackage; this directory does.
+  speech16k.wav     16 kHz mono 16-bit PCM speech for the "Speak" button.
+
+The whole folder is copied into the app bundle as a folder reference, so the
+app reads it at Bundle.main.url(forResource: "Model", withExtension: nil).
