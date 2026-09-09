@@ -28,6 +28,7 @@ targets:
         CFBundleDisplayName: Expression2
         UILaunchScreen: {}
         NSMicrophoneUsageDescription: Drive the avatar with your own voice, on-device.
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.bithuman.example.ios-expression2
