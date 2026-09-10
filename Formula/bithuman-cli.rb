@@ -51,7 +51,24 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.6.4. A key the metering service
+  # Current published release: cli-v2.6.5 (2026-09-10). What a customer can
+  # SEE change from 2.6.4: an offline essence-2 `render` no longer stops after
+  # five minutes of WORK (the 300 s budget was set once at start-up and spent
+  # on the whole render, so a 15 s clip on a slow machine failed exactly like a
+  # 66 s one; it is now a STALL budget every landed frame resets); a clip that
+  # really is longer than the model's reach is refused in SECONDS, naming the
+  # reach; `bithuman pull <expression-2>` on Linux no longer says the model
+  # needs an Apple render engine, and `runnable_locally` answers "can this
+  # build play this file" instead of "is this essence-1?"; `doctor` grades the
+  # muxer `run`/`render` need; `pull` verifies a cached file's LENGTH instead
+  # of trusting that it exists; `render` on an essence-1 model refuses (exit
+  # 69) naming the packaging cause and the Python package that renders it; and
+  # the engine core moves 2.3.8 -> 3.1.0 (every release 2.4.0..2.6.4 linked one
+  # build made 2026-07-16 that was on no branch). Both halves of cli-v2.6.5
+  # were built from ONE commit (98fa0b4), each tarball's clock is that build's
+  # time and each PROVENANCE.json says dirty:false.
+  #
+  # cli-v2.6.4 (superseded). A key the metering service
   # REJECTS (HTTP 401 / 402 / 403 — revoked, from another environment, out
   # of credits) now gets a grace of 300 s from the first rejection, behind a
   # countdown line once a minute, re-checked every minute; still rejected at
@@ -61,9 +78,9 @@ class BithumanCli < Formula
   # trying, however long. The same rule and number apply to the Python
   # package, the Apple engine and the Android SDK. Billing is unchanged
   # from 2.6.3 (wall-clock for a live session, clip duration for a render,
-  # nothing for a download). Both halves of cli-v2.6.4 were built from ONE
-  # commit (01325a3), each tarball's clock is that commit's time, and each
-  # tarball's PROVENANCE.json says dirty:false.
+  # nothing for a download) and unchanged again in 2.6.5. Both halves of
+  # cli-v2.6.4 were built from ONE commit (01325a3), each tarball's clock is
+  # that commit's time, and each tarball's PROVENANCE.json says dirty:false.
   #
   # cli-v2.6.3 (superseded) billed a self-hosted session on WALL-CLOCK
   # while it is live, idle animation included, at the published self-host
@@ -132,9 +149,9 @@ class BithumanCli < Formula
   # gate correctly REFUSES to publish from CI. Same scripts either way
   # (tap scripts/sign-macos.sh + notarize-macos.sh + verify-macos-release.sh,
   # cli scripts/bundle-macos.sh + check-engine-dedup.sh). The Linux x86_64
-  # tarball on the same release was cut the same way for cli-v2.6.4 — on
-  # lafayette, in the manylinux image, packed by the CLI repo's own
-  # scripts/release_pack.sh so both halves carry one commit. This formula
+  # tarball on the same release was cut the same way for cli-v2.6.4 and again
+  # for cli-v2.6.5 — on lafayette, in the manylinux image, packed by the CLI
+  # repo's own scripts/release_pack.sh so both halves carry one commit. This formula
   # stays mac-only, matching 2.4.0/2.4.2.
   #
   # Apple Silicon (arm64). The macOS tarball is self-contained AND ships the
@@ -265,10 +282,12 @@ class BithumanCli < Formula
     <<~EOS
       Quick start:
         bithuman doctor                    # host + auth + cache sanity check
-                                           # (2.6.4 prints the same report with
-                                           #  or without ffmpeg; grading it landed
-                                           #  on main after 2.6.4 was cut and
-                                           #  reaches you in the next release)
+                                           # (from 2.6.5 the report and the exit
+                                           #  code take ffmpeg into account, so a
+                                           #  green doctor is a promise about the
+                                           #  `bithuman run` it exists to vet;
+                                           #  2.6.4 printed the same page either
+                                           #  way)
         bithuman list                      # browse showcase avatars
         bithuman pull modern-court-jester  # download one
         bithuman run ~/.cache/bithuman/showcase/modern-court-jester.imx
@@ -311,16 +330,17 @@ class BithumanCli < Formula
       ★The paragraph that stood here said the opposite — "does NOT work
       on macOS today … for offline renders use a Linux host" — measured
       2026-09-04 on 2.5.1 and never re-measured. RE-MEASURED 2026-09-08
-      on the bytes this formula pins (cli-v2.6.4, arm64), Apple silicon:
+      on cli-v2.6.4 arm64 (the release this formula pinned then; it now
+      pins cli-v2.6.5), Apple silicon:
         essence-2     rc=0 · 300 frames · 1920x1080 @25 fps
         expression-2  rc=0 · 240 frames · 416x720 @20 fps
       Both audio-driven and both verified frame-by-frame against the
       drive audio. essence-1 is not renderable by this CLI on any
       platform and is unchanged by that.
       Offline renders need ffmpeg on PATH, and this formula installs it
-      for you: `depends_on "ffmpeg"` as of the 2026-09-08 revision, which
-      serves 2.6.4. If you took the tarball instead of `brew install`,
-      run `brew install ffmpeg` yourself.
+      for you: `depends_on "ffmpeg"` since the 2026-09-08 revision, and
+      this one serves 2.6.5. If you took the tarball instead of
+      `brew install`, run `brew install ffmpeg` yourself.
 
       Docs:    https://docs.bithuman.ai
       Source:  https://github.com/bithuman-product/homebrew-bithuman

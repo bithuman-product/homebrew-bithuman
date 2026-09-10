@@ -1,5 +1,5 @@
 {
-  "_": "Tier-2 pins for the PUBLIC tap: each entry is a MEASURED count plus a reason the occurrence still stands. Tier 1 has no baseline mechanism at all -- it is a hard zero. An increase, or a hit in an unpinned file, is red; a decrease is green with a tighten hint. REASONS NAME THE V-CODES AND NEVER SPELL THE WORDS: this file is scanned like any other and must itself read zero, so a reason written in plain words would make the baseline the biggest leak in the tree. Counts cover TRACKED REAL FILES ONLY -- 28 tracked symlinks point at the one real copy under shared/Classes, and following them counted that copy three times.",
+  "_": "Pinned occurrences of internal vocabulary in this PUBLIC repo. Codes are defined by scripts/guard-public-vocabulary.py --legend; they are codes rather than words so that this file needs no self-exclusion from the scan. Every entry carries a measured count and a reason; an entry without a real reason is a defect.",
   "files": {
     "Examples/android/README.md": {
       "V1": {
@@ -47,16 +47,6 @@
       "V10": {
         "n": 1,
         "why": "ordinary English in sample and plugin code: the graphics sense of V10 (putting a crop back onto a frame), an audio-graph loop and buffer named with it, and a third party's own use of the -ing form in a quoted protocol note. V10 deliberately matches the -ite and -ing forms, so it over-matches here. Pinned rather than narrowed: a narrowing wide enough to clear these would also blind the real blend-stage use."
-      }
-    },
-    "Formula/bithuman-cli.rb": {
-      "V1": {
-        "n": 2,
-        "why": "internal implementation vocabulary sitting in customer-facing prose. Plain removable text -- no contract depends on it. Not yet removed."
-      },
-      "V2": {
-        "n": 2,
-        "why": "the literal PyPI extra and module path a customer must TYPE: the V2 extra in pip install, and the V2_offline module. Editing the text here would hand customers a command that does not work. Renaming the extra is a decision in the Python SDK, not in this repo."
       }
     },
     "Package.swift": {
