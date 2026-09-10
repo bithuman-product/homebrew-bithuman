@@ -87,7 +87,10 @@
 #   --manifest takes the JSON `gh api repos/OWNER/REPO/releases/tags/TAG`
 #   returns, so the checks can be exercised against fixtures — including
 #   fixtures that are deliberately broken — with no network and no risk of
-#   touching a published release.
+#   touching a published release. In LIVE mode a DRAFT is read from the
+#   release LIST instead, because a draft has no git tag and the tags
+#   endpoint 404s on it (measured 2026-09-10 on cli-v2.6.5) — which is the
+#   state this gate exists to grade.
 #
 # ── EXIT CODES ───────────────────────────────────────────────────────────────
 #   0  release is complete, consistent and was assembled before it was visible
@@ -905,10 +908,31 @@ if [[ -z "$MANIFEST" ]]; then
   [[ -n "$TAG" ]] || { echo "usage: $0 <cli-vX.Y.Z> | --manifest F | --self-test" >&2; exit 3; }
   command -v gh >/dev/null 2>&1 || { echo "FATAL: no gh — cannot read the release" >&2; exit 3; }
   MANIFEST="$WORK/live.json"
+  # ★A DRAFT HAS NO TAG, AND THIS GATE'S WHOLE JOB IS TO GRADE A DRAFT.
+  # MEASURED 2026-09-10 while cutting cli-v2.6.5: `gh api
+  # repos/OWNER/REPO/releases/tags/cli-v2.6.5` answers **404** for a release
+  # that exists as a DRAFT — GitHub's get-release-by-tag resolves a real git
+  # tag, and a draft has not created one yet. The list endpoint sees it
+  # (`draft:true, tag_name:"cli-v2.6.5"`), and the published cli-v2.6.4
+  # answers the tags endpoint fine, so this is about draftness and nothing
+  # else. The procedure this file documents in its own header is
+  # "create as a DRAFT -> upload every asset -> RUN THIS -> publish", so
+  # every honest use of live mode hit the one lookup that cannot see the
+  # subject: the gate could only ever be run AFTER the irreversible half.
+  # So the tag lookup is tried first (cheapest, and the right answer for a
+  # published release) and the LIST is the fallback that can see a draft.
+  # A miss in both is still FATAL — never a silent pass.
   if ! gh api "repos/${REPO}/releases/tags/${TAG}" > "$MANIFEST" 2>"$WORK/gherr"; then
-    echo "FATAL: could not read ${REPO} release ${TAG}:" >&2
-    sed 's/^/  /' "$WORK/gherr" >&2
-    exit 3
+    if ! gh api --paginate "repos/${REPO}/releases" --jq \
+           "[.[] | select(.tag_name==\"${TAG}\")] | .[0] // empty" \
+           > "$WORK/live_draft.json" 2>>"$WORK/gherr" \
+       || [[ ! -s "$WORK/live_draft.json" ]]; then
+      echo "FATAL: could not read ${REPO} release ${TAG} (neither by tag nor in the release list):" >&2
+      sed 's/^/  /' "$WORK/gherr" >&2
+      exit 3
+    fi
+    cp "$WORK/live_draft.json" "$MANIFEST"
+    echo "note: ${TAG} is not resolvable by tag (a DRAFT has no git tag) — read from the release list"
   fi
   # Sidecars are ~107 bytes — fetch their CONTENT so C3/C4 are real checks
   # rather than "the file exists". Without this they would report "content

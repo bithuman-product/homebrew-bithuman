@@ -23,7 +23,7 @@
 #   brew install bithuman-cli     # CLI (Homebrew)        <-- canonical
 #   brew install bithuman         # CLI (deprecated alias)
 #
-# Engine: libessence 2.3.8 (ABI 7) — the engine core bundled in this
+# Engine: libessence 3.1.0 (ABI 7) — the engine core bundled in this
 # CLI. Note the engine-core version is a SEPARATE axis from the CLI/SDK
 # version (2.3.x); they are not the same number. One command
 # (`bithuman run`) stands up the whole stack: embedded livekit-server,
@@ -44,7 +44,7 @@
 #
 # This formula installs a prebuilt Rust binary built from the standalone
 # bithuman-product/bithuman (repo renamed from bithuman-cli) against the bithuman-product/bithuman-models
-# engine monorepo, models/essence-1 (libessence engine core 2.3.8, ABI 7),
+# engine monorepo, models/essence-1 (libessence engine core 3.1.0, ABI 7),
 # mirrored to the public homebrew-bithuman tap repo's own Releases
 # (both upstream repos are private — anonymous brew downloads fail
 # there with HTTP 404; the mirror is the workaround).
@@ -159,10 +159,12 @@ class BithumanCli < Formula
   # tracks the drive audio. (`libessence2.dylib` is the APPLE/Swift engine — a
   # different artifact on a different axis; it is indeed not in this tarball
   # and the CLI does not use it.)
-  # (Engine core stays libessence 2.3.8 / ABI 7 — a separate axis; the
+  # (Engine core is libessence 3.1.0 / ABI 7 from cli-v2.6.5 — it read 2.3.8
+  # on every release 2.4.0..2.6.4, which linked an engine build that was on no
+  # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.4/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "ed827aaa0b3918100e6c6776ca0527d7b7cabb8e4618f3ce91ef437f205f1bbc"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.5/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "b95594119a12f54a3748b21a4b51efb230da002941ec8954cea5e3e072476a56"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
