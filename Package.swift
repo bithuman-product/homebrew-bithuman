@@ -22,7 +22,7 @@
 //                              `import Expression2`. FOUR binaryTargets ride
 //                              under it now, not three — see UnifiedModelHeader.
 //   - Essence2                 essence-2 engine alone, archives on tag
-//                              essence2-v1.5.0 — read `essence2Tag` below, never
+//                              essence2-v1.5.1 — read `essence2Tag` below, never
 //                              this sentence, for where the bytes are; it has
 //                              been wrong before. `import Essence2` works since
 //                              essence2-v1.2.0 (the archive's module map declares both
@@ -102,7 +102,7 @@
 //                  render out of the box; it can now be handed one.
 //   - Essence2     Layer-1 essence-2 engine for Apple platforms (iOS device,
 //                  iOS Simulator, macOS — all arm64). Its archives ship on tag
-//                  essence2-v1.5.0; `essence2Tag` below is the value that
+//                  essence2-v1.5.1; `essence2Tag` below is the value that
 //                  decides, and this line is a copy of it that has drifted before.
 //                  ★ TWO MODULE NAMES, ONE HEADER. What this product vends is
 //                  the engine's 15-function C interface, not a Swift type. Since
@@ -177,30 +177,48 @@
 //   app must place those bundles in its own Resources, so `Essence2` alone is a
 //   build-time coordinate, not a running avatar.
 //
-//   ★ AND ON THE TAG THIS MANIFEST NOW POINTS AT, THAT ASSET IS NOT THE WHOLE
-//   SET. MEASURED 2026-09-11, both zips streamed anonymously and read entry by
-//   entry:
-//       essence2-v1.4.0  231,597,193 B  4 files   a2x_w2v.fp32.onnx
-//                                                 (377,625,424 B uncompressed),
-//                                                 mlx.metallib, default.metallib,
-//                                                 idle.wav — at the archive root
-//       essence2-v1.5.0    1,644,060 B  4 files   mlx.metallib, default.metallib,
-//                                                 idle.wav — under a new
-//                                                 `libessence2-resources/` folder
-//   The audio-to-expression encoder is GONE from the v1.5.0 asset, and the
-//   engine has not stopped wanting it: `strings -a` on the v1.5.0 ios-arm64
-//   slice still names `a2x_w2v` — 17 occurrences read by macOS `strings -a`
-//   and 7 by GNU `strings -a` on the same bytes (14 and 5 on v1.4.0; the two
-//   tools disagree about how much of a static archive to walk, and neither
-//   reads 0, which is the whole claim). So an app that takes its
-//   resources from essence2-v1.5.0 gets the Metal libraries and the idle audio
-//   and NOT the encoder, and the unpacked tree has one extra directory level
-//   than it had. Until that asset is rebuilt complete, take
-//   `libessence2-resources.zip` from essence2-v1.4.0 — the two metallibs and
-//   idle.wav in it are byte-identical to the v1.5.0 copies — and flatten it to
-//   the layout your app already expects. This is an OPEN DEFECT of the release
-//   asset, not of the pinned binaries: both `.binaryTarget`s below are the
-//   graded v1.5.0 bytes.
+//   ★ THE ASSET IS WHOLE AGAIN ON essence2-v1.5.1, AND THERE IS NO LONGER A
+//   TWO-RELEASE WORKAROUND. It was broken for six hours on essence2-v1.5.0 and
+//   this is what the three archives hold, each read entry by entry:
+//       essence2-v1.4.0  231,597,193 B   a2x_w2v.fp32.onnx (377,625,424 B) +
+//                                        mlx.metallib, default.metallib,
+//                                        idle.wav — at the archive root
+//       essence2-v1.5.0    1,644,060 B   mlx.metallib, default.metallib,
+//                                        idle.wav — and NO audio encoder, all
+//                                        of it under a `libessence2-resources/`
+//                                        folder the consumer then unzips INTO a
+//                                        directory of that same name
+//       essence2-v1.5.1   44,392,223 B   w2v_ess_fp16_v1.onnx (46,185,371 B,
+//                                        sha256 7340a0350c34…) + the same three
+//                                        files, byte-identical, at the archive
+//                                        ROOT again. sha256 of the zip
+//                                        5c2adf2473963be50523e691d6d5aaf5897bd6c6b860216571a7300828418a32
+//   THE ENCODER IS NOT THE ONE v1.4.0 SHIPPED, AND THAT IS DELIBERATE. v1.4.0's
+//   `a2x_w2v.fp32.onnx` is byte-for-byte the 377 MB fp32 8 s artifact
+//   `models/MANIFEST.yaml` records as ROLLBACK ONLY under the owner ruling of
+//   2026-07-06 ("large fp32 encoders forbidden on every plane"); v1.5.1 carries
+//   the BLESSED `essence2-shared-w2v-fp16-v1` instead — the encoder the GPU
+//   workers and the ANE plane already serve with, 8.2x smaller.
+//   MEASURED ON echelon (M-series, macOS 26.6.2), this manifest resolved at tag
+//   v2.12.0 and the resources taken from v1.5.1, `$BH_A2X_W2V` and `$W2V_ONNX`
+//   both unset so only the archive can answer:
+//       no resources at all                    create rc=-2  CREATE_REFUSED
+//       v1.5.0's archive, unpacked the way
+//         the SDK bootstrap unpacks it         create rc=-2  CREATE_REFUSED
+//       v1.5.1's archive, unpacked at the
+//         binary's own resourcePath            create rc=0, `TESSERA borrow
+//                                              ARMED — 1024 donors`, a2x ON
+//                                              (w2v …/w2v_ess_fp16_v1.onnx),
+//                                              151 frames at 1280x720
+//   The first two arms are the control: the engine REFUSES without a frontend
+//   rather than drawing a mouth the avatar never recorded.
+//   YOU STILL HAVE TO PLACE THE FILES. Unzip `libessence2-resources.zip` at
+//   your app's Resources root — the two `.bundle`s and the loose `.onnx` land
+//   where `DirectorRuntime.resolveA2XW2VPath()` and MLX look. Nothing about
+//   that changed; what changed is that the archive now contains all of it.
+//   bithuman-models `apple-xcframework.yml` refuses to publish an archive
+//   missing any resource the built engine names
+//   (`tools/check-libessence2-resources-complete.py`).
 //
 //   ★ AND NO MODEL YOU CAN DOWNLOAD TODAY OPENS IN THIS ENGINE — which is the
 //   limit that decides whether essence-2 on a phone is usable at all, and it
@@ -213,9 +231,10 @@
 //       members are `.onnx` graphs (`model_b24_fp32.onnx` among them), and
 //       ZERO are CoreML `.mlpackage`s. That artifact is what the SERVER reads.
 //     · WHAT THIS ENGINE ACCEPTS. `strings -a` on the ios-arm64 slice of the
-//       `libessence2.xcframework.zip` pinned below (essence2-v1.5.0,
-//       159,302,803 B, re-downloaded anonymously and re-hashed to the exact
-//       `binaryTarget` checksum a418a04c…) carries its opener's refusal
+//       `libessence2.xcframework.zip` of essence2-v1.5.0 (159,302,803 B,
+//       re-downloaded anonymously and re-hashed to that release's
+//       `binaryTarget` checksum a418a04c…; v1.5.1, pinned below, is a rebuild
+//       of the same sources) carries its opener's refusal
 //       verbatim —
 //           Essence2Bundle: … is not a .elevatedir/.essence2dir bundle (need a
 //           directory with meta.json {"format":"elevatedir-v*" |
@@ -327,7 +346,7 @@
 //   ★ AND IT IS NOT ONLY A PHONE GATE — macOS IS GATED TOO, WHICH THIS BLOCK
 //   DID NOT SAY. "Grades … ON iOS" reads as if a Mac were ungated; it is not.
 //   MEASURED 2026-09-11 with `strings -a` on the three published slices of the
-//   essence2-v1.5.0 archive pinned below (re-downloaded anonymously, re-hashed
+//   essence2-v1.5.0 archive (re-downloaded anonymously, re-hashed
 //   to a418a04c…), one row per refusal sentence, nonsense control 0 in every
 //   pass — every count below is unchanged from the same reading of v1.4.0:
 //
@@ -454,7 +473,29 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // sidecars are directly usable and `shasum -c` on them is not: the file names
 // they would need are not in them.
 //
-// ★ ROLLED TO essence2-v1.5.0 ON 2026-09-11 — THE PUBLISHED ARCHIVE NO LONGER
+// ★ ROLLED TO essence2-v1.5.1 ON 2026-09-11 — THE RESOURCES ARCHIVE IS COMPLETE
+// AGAIN. v1.5.0 shipped a `libessence2-resources.zip` of 1,644,060 B against
+// v1.4.0's 231,597,193 B: the shared audio frontend was GONE and the three
+// survivors had moved under a `libessence2-resources/` folder. Neither is a
+// story about the engine — both came from the packaging step that first emitted
+// these zips from CI (bithuman-models c03149384): nothing on that runner ever
+// staged a w2v where `build-xcframework.sh` looks, and `--keepParent`, which the
+// xcframework archive REQUIRES, was copy-pasted onto the resources archive,
+// which must not have it. v1.5.1 (44,392,223 B, sha256 5c2adf24…) carries the
+// BLESSED 46 MB fp16 frontend at the archive root. Read the ★ block far above
+// for the three measured arms.
+// THE ENGINE IS A REBUILD OF THE SAME SOURCES, so its checksum DOES move:
+// 159,302,911 B, checksum d95d0820…, built, tested and graded by
+// bithuman-models `apple-xcframework.yml` at essence2-apple-v1.5.1 — the only
+// `apple/` change between the two tags is `onnx_to_coreml.py`, a conversion
+// tool that does not build the `.a`, and the four release gates (fails-closed,
+// meters, no-internal-name, and now the resources gate) all read 0 on these
+// exact bytes. Rendered on echelon before this release was pinned: create rc=0,
+// `TESSERA borrow ARMED — 1024 donors`, 540 frames at 1280x720 from a 12 s
+// clip, `$BH_A2X_W2V`/`$W2V_ONNX` unset. `onnxruntime` is carried forward
+// BYTE-IDENTICAL, so its checksum below does not move.
+//
+// ★ THE PREVIOUS ROLL, essence2-v1.5.0 ON 2026-09-11 — THE PUBLISHED ARCHIVE NO LONGER
 // NAMES AN ENTERPRISE-ONLY TIER. The engine's own bytes carried an internal
 // tier name that no public artifact may carry, and every `swift package
 // resolve` put it on a developer's disk; a developer-side verify is how it was
@@ -478,8 +519,8 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // re-measure identical, sentence for sentence, on these bytes; and
 // `onnxruntime` is carried forward BYTE-IDENTICAL from essence2-v1.4.0, so
 // its checksum below does not move. The RESOURCES asset is the one thing that
-// did change and it changed WRONG — read the ★ block above before you ship an
-// app against this tag.
+// changed on that tag and it changed WRONG; essence2-v1.5.1, above, is the fix,
+// and it is what `essence2Tag` now points at.
 //
 // ★ THE PREVIOUS ROLL, essence2-v1.4.0 ON 2026-09-07 — A REJECTED KEY GETS 300 s,
 // THEN THE ENGINE STOPS. Owner ruling 2026-09-07: a credential the metering service
@@ -547,7 +588,7 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // byte-identical to v1.1.0 and its checksum below does not move. Re-fetched
 // anonymously after upload and re-hashed; the sidecars are again 65 bytes.
 // ---------------------------------------------------------------------------
-let essence2Tag = "essence2-v1.5.0"
+let essence2Tag = "essence2-v1.5.1"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -677,7 +718,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "a418a04c7c27b639e3373f465cffa2a36d860f17588d5d1f983fd979b349424a"
+            checksum: "d95d08202989345b74bcb17dbc0e3ebc329636c1565a6cb2479da8e0e62339dd"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
