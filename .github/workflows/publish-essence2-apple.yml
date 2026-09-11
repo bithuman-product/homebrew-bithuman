@@ -1,0 +1,147 @@
+# The essence-2 Apple engine's archives are BUILT, tested and graded by
+# bithuman-product/bithuman-models (apple-xcframework.yml, on an
+# essence2-apple-v* tag) and attached to a release there. That repo is private,
+# and this manifest's binaryTarget URLs must be fetchable by any SwiftPM client,
+# so the archives are re-hosted on a release of THIS repo. This workflow is the
+# ONE path that does it: it fetches the exact files the models workflow
+# attached, refuses them unless their sha256 equals the value the caller
+# measured on the M4 and the iPhone, reads every slice for a name that must not
+# be spelled in a published artifact, prints the SwiftPM checksum the manifest
+# will pin, and creates the release. Nothing here is built or re-packed on a
+# developer's Mac — essence2-v1.4.0 was uploaded by hand, and that is the path
+# this workflow retires.
+#
+# Two conditions gate the release, and the second one is the point: the files
+# must be the ones the models workflow wrote (their .sha256 sidecars), AND the
+# xcframework must be the one whose bytes were run on the devices (the caller's
+# sha256 input). A mismatch on either is a refusal, not a warning.
+name: essence-2 Apple engine — the graded archives become a release of this tap
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_tag:
+        description: bithuman-models release tag (essence2-apple-vX.Y.Z)
+        required: true
+      tap_tag:
+        description: tag to create on this repo (essence2-vX.Y.Z)
+        required: true
+      xcframework_sha256:
+        description: sha256 of libessence2.xcframework.zip as measured by the device proof — refused if the fetched bytes differ
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-essence2-apple-${{ inputs.tap_tag }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: the exact archives the models workflow built and graded, re-hosted at the requested tag
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      SOURCE_REPO: bithuman-product/bithuman-models
+      SOURCE_TAG: ${{ inputs.source_tag }}
+      TAP_TAG: ${{ inputs.tap_tag }}
+      ORT_TAG: essence2-ort-vendor-1.26.0
+      EXPECTED_XCF_SHA256: ${{ inputs.xcframework_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tags have the shapes the manifest reads, and the tap tag does not exist yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$TAP_TAG" | grep -Eq '^essence2-v[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "::error::tap tag '$TAP_TAG' is not essence2-vX.Y.Z"; exit 1; }
+          printf '%s' "$SOURCE_TAG" | grep -Eq '^essence2-apple-v[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "::error::source tag '$SOURCE_TAG' is not essence2-apple-vX.Y.Z"; exit 1; }
+          printf '%s' "$EXPECTED_XCF_SHA256" | grep -Eq '^[0-9a-f]{64}$' \
+            || { echo "::error::xcframework_sha256 is not a 64-hex sha256"; exit 1; }
+          if gh release view "$TAP_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::$TAP_TAG already exists on $GITHUB_REPOSITORY — a release here is never rewritten; cut the next version"
+            exit 1
+          fi
+
+      - name: Fetch the archives the models workflow attached (a read token for the private repo)
+        env:
+          GH_TOKEN: ${{ secrets.SDK_RO_PAT }}
+        run: |
+          set -euo pipefail
+          [ -n "${GH_TOKEN:-}" ] \
+            || { echo "::error::secrets.SDK_RO_PAT is empty — this repo holds no token that can read $SOURCE_REPO releases"; exit 1; }
+          mkdir -p src && cd src
+          gh release download "$SOURCE_TAG" --repo "$SOURCE_REPO" \
+            --pattern 'libessence2.xcframework.zip*' --pattern 'libessence2-resources.zip*' --clobber
+          gh release download "$ORT_TAG" --repo "$SOURCE_REPO" \
+            --pattern 'onnxruntime.xcframework.zip*' --clobber
+          ls -la
+
+      - name: The bytes are the ones that were proven — sha256 equals the builder's sidecar AND the caller's measurement
+        run: |
+          set -euo pipefail
+          cd src
+          for z in libessence2.xcframework.zip libessence2-resources.zip onnxruntime.xcframework.zip; do
+            [ -s "$z" ] && [ -s "$z.sha256" ] \
+              || { echo "::error::$z or $z.sha256 is missing from the source release"; exit 1; }
+            got=$(shasum -a 256 "$z" | cut -d' ' -f1)
+            want=$(cut -d' ' -f1 "$z.sha256")
+            [ "$got" = "$want" ] \
+              || { echo "::error::$z sha256 $got != the builder's sidecar $want"; exit 1; }
+            echo "$z $got"
+          done
+          got=$(shasum -a 256 libessence2.xcframework.zip | cut -d' ' -f1)
+          [ "$got" = "$EXPECTED_XCF_SHA256" ] \
+            || { echo "::error::libessence2.xcframework.zip sha256 $got != $EXPECTED_XCF_SHA256 measured on the devices — these are not the bytes that were proven"; exit 1; }
+
+      - name: No enterprise-only tier name in any slice (this repo's own vocabulary rules V12 and V13, read off strings -a)
+        run: |
+          set -euo pipefail
+          rm -rf x && mkdir x && ditto -x -k src/libessence2.xcframework.zip x
+          python3 - <<'PY'
+          import importlib.util, pathlib, re, subprocess, sys
+          spec = importlib.util.spec_from_file_location("g", "scripts/guard-public-vocabulary.py")
+          g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+          rules = {r[0]: re.compile(r[1], re.I) for r in (g.TIER1 + g.TIER2) if r[0] in ("V12", "V13")}
+          assert sorted(rules) == ["V12", "V13"], rules
+          # the grader proves it can fire before it grades: its own subjects, spelled apart
+          assert rules["V12"].search("essence" + "-2-" + "max") and rules["V13"].search("essence" + "2_" + "quality")
+          assert not rules["V12"].search("essence-2 engine, apple") and not rules["V13"].search("libessence2")
+          slices = sorted(pathlib.Path("x").rglob("libessence2.a"))
+          assert len(slices) == 3, f"expected 3 slices, found {slices}"
+          red = 0
+          for a in slices:
+              s = subprocess.run(["strings", "-a", str(a)], capture_output=True, text=True, check=True).stdout
+              for k, rx in rules.items():
+                  n = len(rx.findall(s)); red += n
+                  print(f"{a}: {k} = {n}")
+          if red:
+              print(f"::error::{red} occurrence(s) of an enterprise-only tier name in the shipped slices — not publishable")
+          sys.exit(1 if red else 0)
+          PY
+
+      - name: The SwiftPM checksum the manifest will pin
+        run: |
+          set -euo pipefail
+          cd src
+          swift package compute-checksum libessence2.xcframework.zip | tee libessence2.xcframework.zip.checksum
+          swift package compute-checksum onnxruntime.xcframework.zip | tee onnxruntime.xcframework.zip.checksum
+
+      - name: Create the release with the exact files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd src
+          gh release create "$TAP_TAG" \
+            libessence2.xcframework.zip libessence2.xcframework.zip.sha256 libessence2.xcframework.zip.checksum \
+            libessence2-resources.zip libessence2-resources.zip.sha256 \
+            onnxruntime.xcframework.zip onnxruntime.xcframework.zip.sha256 onnxruntime.xcframework.zip.checksum \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "libessence2 $TAP_TAG" \
+            --notes "3-slice libessence2.xcframework (macos-arm64 + ios-arm64 + ios-arm64-simulator), the runtime resources, and the onnxruntime dependency. Built, tested and graded by bithuman-models apple-xcframework.yml at $SOURCE_TAG and re-hosted here unchanged (sha256 sidecars attached; libessence2.xcframework.zip = $EXPECTED_XCF_SHA256). Run on an M4 and an iPhone 15 before this release was cut."
+          echo "released: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAP_TAG"
