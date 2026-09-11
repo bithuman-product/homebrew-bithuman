@@ -6,9 +6,14 @@ before publication — `publish-cli-wheel.yml` verifies each one's sha256
 against its pin and then `twine upload`s that same file, so what PyPI serves
 is byte-for-byte what was tested, not a re-build that merely ought to match.
 
-Remove a wheel from this directory once the coordinate it stages has been
-verified on PyPI. (Versions on PyPI are immutable; deleting a file there
-permanently reserves its name and cannot be undone — yank, never delete.)
+A wheel stays here after it is uploaded. It is the byte record of what PyPI
+serves for that coordinate, and it is what the workflow's pinned sha256
+refers to — deleting it would leave the pin describing nothing. Drop one only
+when a later coordinate supersedes it and that later one has verified.
+
+(Versions on PyPI are immutable, and deleting a file there permanently
+reserves its filename and cannot be undone — yank, never delete. That rule is
+why this directory exists at all.)
 
 ## 2.3.27 — why it exists
 
