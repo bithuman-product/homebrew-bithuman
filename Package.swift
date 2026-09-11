@@ -535,7 +535,7 @@ let package = Package(
         // ★ HAZARD, and it is measured too: a consumer that depends on BOTH this
         //   product AND the `BithumanEngineProtocol` product gets the module twice
         //   and fails to link (arm C3, exit 1). Depend on `Expression2` alone.
-        .library(name: "Expression2", targets: ["Expression2", "BithumanEngineProtocolBinary", "UnifiedModelHeader"]),
+        .library(name: "Expression2", targets: ["Expression2Binary", "BithumanEngineProtocolBinary", "UnifiedModelHeaderBinary"]),
         // Layer-1 essence-2 engine for Apple platforms: a static C library with
         // ios-arm64, ios-arm64-simulator and macos-arm64 slices, plus the ONNX
         // Runtime build its audio head needs at link. `import Essence2` — and
@@ -569,8 +569,32 @@ let package = Package(
             path: "Tests/BithumanEngineProtocolTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // ★ THE THREE BINARY TARGETS BELOW ARE NAMED `…Binary`, AND THE SUFFIX IS
+        // LOAD-BEARING — IT IS NOT A STYLE. A target name must be unique across
+        // the WHOLE package graph, not just this manifest, and the two packages
+        // that BUILD these modules from source take this package as a dependency
+        // (bithuman-models models/expression-2/sdk declares target `Expression2`,
+        // models/_shared/swift/UnifiedModelHeader declares `UnifiedModelHeader`).
+        // While the binary targets carried the bare module names, resolving that
+        // graph died before a single file compiled:
+        //     multiple packages ('homebrew-bithuman', 'sdk') declare targets with
+        //     a conflicting name: 'Expression2'
+        //     multiple packages ('homebrew-bithuman', 'unifiedmodelheader') …
+        //     'UnifiedModelHeader'
+        // — measured on echelon 2026-09-11, which is how the shipped
+        // BithumanEngineProtocol.xcframework came to be built against a tap
+        // revision four months stale: the only revisions that RESOLVED were the
+        // ones predating these targets. `BithumanEngineProtocolBinary` already
+        // carried the suffix for the same reason (its source twin is in THIS
+        // manifest); the other two now do too.
+        //
+        // A consumer sees none of this: a target name is not a module name and
+        // not a product name. The MODULE a developer imports comes from the
+        // xcframework itself (`import Expression2`, `import UnifiedModelHeader`),
+        // the PRODUCT is still `Expression2`, and the zip file names are
+        // unchanged. Only the graph-local label moves.
         .binaryTarget(
-            name: "Expression2",
+            name: "Expression2Binary",
             url: "\(expression2Base)/Expression2.xcframework.zip",
             checksum: "d4ce14b6b9c463aa7310ca8200f59ded20931cc33f40b6c530eef13b5a40d326"
         ),
@@ -580,7 +604,7 @@ let package = Package(
             checksum: "048a5d271d61fe4689dd9f1a6f209c00e358e4fd77aa249e55dc59dcd7051759"
         ),
         .binaryTarget(
-            name: "UnifiedModelHeader",
+            name: "UnifiedModelHeaderBinary",
             url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
             checksum: "33b7d575ec90055a4894fb1fbbb507b9264694752c6a2a5e35c7bf8c069e180e"
         ),
