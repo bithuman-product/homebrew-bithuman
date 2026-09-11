@@ -68,7 +68,7 @@ Add the package to your Xcode project or `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "0.8.1")
+    .package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "2.12.0")
 ]
 ```
 

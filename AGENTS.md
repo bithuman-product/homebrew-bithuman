@@ -46,7 +46,7 @@ export BITHUMAN_API_SECRET=your_secret
 
 ```swift
 // Package.swift
-.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "0.8.1")
+.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "2.12.0")
 
 // In code:
 import bitHumanKit
