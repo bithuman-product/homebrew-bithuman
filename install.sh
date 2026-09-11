@@ -407,6 +407,16 @@ if [ -z "$version" ]; then
     err "  bytes Homebrew users are not running, and the two populations follow"
     err "  the same instruction."
     err ""
+    err "  If this box shares an egress IP with other machines, the likeliest"
+    err "  cause is GitHub ANONYMOUS API budget exhaustion: 60 requests per"
+    err "  hour per SOURCE ADDRESS, shared by everyone behind that address."
+    err "  Resolving a version costs about three of them. Wait for the window"
+    err "  to roll, or skip resolution entirely by pinning:"
+    err ""
+    err "      BITHUMAN_VERSION=cli-vX.Y.Z curl -sSL install.bithuman.ai | sh"
+    err ""
+    err "  Check the budget with:  curl -s https://api.github.com/rate_limit"
+    err ""
     err "set BITHUMAN_VERSION=cli-vX.Y.Z (or vX.Y.Z) to pin a specific release."
     exit 1
   fi
