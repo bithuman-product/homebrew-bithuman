@@ -51,8 +51,31 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.6.6 (2026-09-11). What a customer can
-  # SEE change from 2.6.5: an offline essence-2 `render` is in sync — the
+  # Current published release: cli-v2.6.7 (2026-09-11). What a customer can
+  # SEE change from 2.6.6: the essence-2 engine core this CLI ships
+  # (lib/lible_core.*) was a hand-pinned digest that carried NO compositor —
+  # measured on the 2.6.6 tarball itself, 885,304 B with ZERO portable-SIMD
+  # targets and none of the six compositor bodies. 2.6.7 builds that core
+  # from bithuman-models at the commit the release pins (1,137,920 B, 8
+  # portable-SIMD targets, all six bodies present). What that is worth on a
+  # customer's clock, same host, same identity, same held-out human voice,
+  # 100 frames at 1920x1080, unpaced: essence-2 offline `render`
+  # moves 1.08 fps on
+  # 2.6.6 to 3.48-3.77 fps on 2.6.7 (Linux x86_64), and reads 8.59-8.71 fps
+  # on an Apple M4. expression-2 on the same M4 renders 300 frames at
+  # 30.5 fps with mouth-to-audio lag 0 frames, and the receipt's `frames`
+  # equals what the MP4 holds. The linux tarball also now carries the
+  # ffmpeg libraries its own core links (libavcodec.so.61, libavformat.so.61
+  # beside libavutil.so.59) — 2.6.6 shipped only libavutil, so the core
+  # could not load at all on a machine without system ffmpeg 7.
+  # essence-2 through this CLI is NOT yet realtime (realtime, owner's
+  # definition 2026-09-11, is >= 25 fps unpaced end to end); 2.6.7 ships
+  # because it is strictly a correctness fix over 2.6.6 for it. The engine
+  # core moves 3.1.2 -> 3.1.3 (ABI 7). Both halves of cli-v2.6.7 were built
+  # from ONE commit (66613942f5f0), each tarball's clock is that build's
+  # time and each PROVENANCE.json says dirty:false.
+  #
+  # cli-v2.6.6 (superseded). An offline essence-2 `render` is in sync — the
   # delivered MP4's mouth used to trail its audio by 400 ms for the whole clip
   # (the recorder wrote the engine's ten warm-up frames as frames 0..9; it now
   # admits nothing before the first spoken frame, and the receipt says so as
@@ -190,12 +213,12 @@ class BithumanCli < Formula
   # tracks the drive audio. (`libessence2.dylib` is the APPLE/Swift engine — a
   # different artifact on a different axis; it is indeed not in this tarball
   # and the CLI does not use it.)
-  # (Engine core is libessence 3.1.2 / ABI 7 from cli-v2.6.6, 3.1.0 on 2.6.5 — it read 2.3.8
+  # (Engine core is libessence 3.1.3 / ABI 7 from cli-v2.6.7, 3.1.2 on 2.6.6, 3.1.0 on 2.6.5 — it read 2.3.8
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.6/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "29e197d7c74753cf37f64d06bf743f3d0ce8cd7b909784d66a30ddabd8f824f6"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.7/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "e6afa120efb9fe5fe11d4cfc3464d1f010c25e40e2ba12123322477fc33fa748"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
@@ -345,18 +368,25 @@ class BithumanCli < Formula
       on macOS today … for offline renders use a Linux host" — measured
       2026-09-04 on 2.5.1 and never re-measured. RE-MEASURED 2026-09-08
       on cli-v2.6.4 arm64 (the release this formula pinned then; it now
-      pins cli-v2.6.6), Apple silicon:
+      pins cli-v2.6.7), Apple silicon:
         essence-2     rc=0 · 300 frames · 1920x1080 @25 fps
         expression-2  rc=0 · 240 frames · 416x720 @20 fps
       RE-MEASURED 2026-09-11 on the cli-v2.6.6 arm64 tarball itself:
         essence-2     rc=0 · 300 frames · 1280x720 @25 fps · mouth-to-audio
                       lag 0 frames (the shipped 2.6.5 read +10 = 400 ms)
+      RE-MEASURED 2026-09-11 on the cli-v2.6.7 arm64 tarball ITSELF
+      (extracted from the exact bytes this formula pins, clean HOME):
+        expression-2  rc=0 · 300 frames · 1280x720 @25 fps · 30.5 fps ·
+                      mouth-to-audio lag 0 frames · receipt frames 300
+                      == frames in the file
+        essence-2     rc=0 · 100 frames · 1920x1080 @25 fps · 8.59 and
+                      8.71 fps over two runs
       Both audio-driven and both verified frame-by-frame against the
       drive audio. essence-1 is not renderable by this CLI on any
       platform and is unchanged by that.
       Offline renders need ffmpeg on PATH, and this formula installs it
       for you: `depends_on "ffmpeg"` since the 2026-09-08 revision, and
-      this one serves 2.6.6. If you took the tarball instead of
+      this one serves 2.6.7. If you took the tarball instead of
       `brew install`, run `brew install ffmpeg` yourself.
 
       Docs:    https://docs.bithuman.ai
