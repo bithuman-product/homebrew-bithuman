@@ -109,6 +109,96 @@ target_availability() {
   fi
 }
 
+# ----- ★ is a tag a REAL release, or a pre-release / draft? -------------------
+#
+# MEASURED 2026-09-11 against the live API. `GET /releases` is NOT ordered by
+# version, and it carries pre-releases inline with no distinction the old
+# `grep '"tag_name"' | head -1` could see. Worse than "wrong order": the order
+# is not STABLE. A scratch repository holding exactly two releases returned them
+# in BOTH orders on successive anonymous fetches minutes apart, so the old line
+# was a coin flip, and two developers running the same documented one-liner at
+# the same minute could get different bytes.
+# The list on that date began:
+#
+#   tag              draft  prerelease  created_at
+#   v2.6.1           false  false       2026-09-11T05:18Z
+#   essence2-v1.5.1  false  false       2026-09-11T06:03Z
+#   cli-v2.6.7       false  false       2026-09-11T07:24Z   <- the real Latest
+#   cli-v2.6.6       false  TRUE        2026-09-11T03:51Z
+#   cli-v2.6.5       false  TRUE        2026-09-09T09:07Z
+#
+# Two defects in one line, and they compound:
+#
+#  1. PRE-RELEASES WERE ELIGIBLE. The press lane marks a SUPERSEDED release as
+#     pre-release as standing practice (the owner's trim ruling), so this repo
+#     will always carry pre-release `cli-v*` tags — and it only takes one whose
+#     tag commit is newer than the current release's for `head -1` to hand every
+#     `curl | sh` developer bytes that Homebrew users, pinned by the formula,
+#     never see. Two populations, one documented instruction, different bytes.
+#  2. "NEWEST" WAS NEVER VERSION ORDER. `cli-v2.6.7` sits BELOW `v2.6.1` in the
+#     response above. Any ordering that depends on when a tag's commit was
+#     authored is not an ordering over versions.
+#
+# So: take every `cli-v*` candidate, sort by SEMVER (POSIX numeric field sort —
+# `sort -V` is not on macOS), and walk down asking each one whether it is a real
+# release. `draft` and `prerelease` appear ONLY at the top level of a release
+# object — an asset carries name/label/state/size/created_at, and the uploader
+# carries login/id/type, but neither carries either of these keys — so a plain
+# grep of a SINGLE release object is exact, where a grep of the whole list is
+# not.
+#
+# ★ AND IT REFUSES RATHER THAN GUESSES. If no candidate can be confirmed a real
+# release, this exits with the BITHUMAN_VERSION escape hatch named. Installing
+# an unverified pre-release because the API was unreadable is the exact defect
+# being fixed; a clear refusal is not.
+
+release_state() {
+  # $1 = tag. Prints RELEASE | PRERELEASE | DRAFT | UNKNOWN.
+  _meta=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/$1" 2>/dev/null || true)
+  [ -z "$_meta" ] && { printf 'UNKNOWN\n'; return 0; }
+  _draft=$(printf '%s\n' "$_meta" | grep -m1 '"draft"' \
+    | sed -e 's/.*"draft"[[:space:]]*:[[:space:]]*\([a-z]*\).*/\1/')
+  _pre=$(printf '%s\n' "$_meta" | grep -m1 '"prerelease"' \
+    | sed -e 's/.*"prerelease"[[:space:]]*:[[:space:]]*\([a-z]*\).*/\1/')
+  if [ "$_draft" != true ] && [ "$_draft" != false ]; then printf 'UNKNOWN\n'; return 0; fi
+  if [ "$_pre"   != true ] && [ "$_pre"   != false ]; then printf 'UNKNOWN\n'; return 0; fi
+  if [ "$_draft" = true ]; then printf 'DRAFT\n'; return 0; fi
+  if [ "$_pre"   = true ]; then printf 'PRERELEASE\n'; return 0; fi
+  printf 'RELEASE\n'
+}
+
+semver_desc() {
+  # stdin: tags sharing one prefix ($1). stdout: same tags, newest semver first.
+  # POSIX numeric field sort; `sort -V` does not exist on macOS.
+  sed -e "s/^$1//" \
+    | sed -e 's/^\([0-9][0-9]*\)$/\1.0.0/' -e 's/^\([0-9][0-9]*\.[0-9][0-9]*\)$/\1.0/' \
+    | sort -t. -k1,1nr -k2,2nr -k3,3nr \
+    | sed -e "s/^/$1/"
+}
+
+pick_latest_real_release() {
+  # $1 = tag prefix ('cli-v' or 'v'). stdin: the full tag list.
+  # Prints the newest tag under that prefix whose release is neither draft nor
+  # pre-release. Prints nothing if there is none.
+  _cands=$(grep "^$1[0-9]" || true)
+  [ -z "$_cands" ] && return 0
+  # `*-mac` is the Sparkle app feed and is never the CLI.
+  _cands=$(printf '%s\n' "$_cands" | grep -v -- '-mac$' || true)
+  [ -z "$_cands" ] && return 0
+  _n=0
+  for _t in $(printf '%s\n' "$_cands" | semver_desc "$1"); do
+    _n=$((_n + 1))
+    # Bound the walk: an anonymous caller gets 60 API requests an hour, and a
+    # repo with a long pre-release tail must not burn them all here.
+    [ "$_n" -gt 8 ] && break
+    case "$(release_state "$_t")" in
+      RELEASE) printf '%s\n' "$_t"; return 0 ;;
+      *)       ;;
+    esac
+  done
+  return 0
+}
+
 # ----- self-test -------------------------------------------------------------
 # `sh install.sh --self-test`. A `curl | sh` never passes an argument, so this
 # is unreachable on the install path. It is a LIVE probe against the real
@@ -139,6 +229,52 @@ if [ "${1:-}" = "--self-test" ]; then
   _t "cli-v2.5.1 HAS arm64 macOS (control)"     cli-v2.5.1  bithuman-aarch64-apple-darwin.tar.gz      OK
   _t "cli-v2.3.27 HAS aarch64 Linux (★control)" cli-v2.3.27 bithuman-aarch64-unknown-linux-gnu.tar.gz OK
   _t "a tag that cannot exist -> SKIP not OK"   cli-v0.0.0-nope bithuman-x86_64-unknown-linux-gnu.tar.gz SKIP
+
+  # ── ★THE RESOLVER MUST NEVER HAND A DEVELOPER A PRE-RELEASE ──────────────
+  # The press lane marks a SUPERSEDED release as pre-release as standing
+  # practice (the owner's trim ruling), so `cli-v*` pre-releases are a permanent
+  # feature of this repo, not an accident. Before 2026-09-11 this script took
+  # `grep '^cli-v' | head -1` of the API's own ordering, which carries
+  # pre-releases inline and is NOT version order: on that date `cli-v2.6.7` sat
+  # BELOW `v2.6.1` in the response, and the same two-release scratch repository
+  # returned the two entries in BOTH orders on successive anonymous fetches.
+  # So `head -1` was a coin flip that could land on a pre-release, and the
+  # curl-installed population would then be running bytes the Homebrew
+  # population — pinned by the formula — never sees.
+  #
+  # PROVEN on 2026-09-11 against a scratch repository whose only `cli-v*`
+  # entries were pre-releases: the OLD script resolved `cli-v9.9.9`, a
+  # PRE-RELEASE; this one refused. With a genuine `cli-v9.9.8` added, this one
+  # selected it and skipped the higher-versioned pre-release above it.
+  #
+  # These arms re-run that against THIS repo's permanent history.
+  _ts() { # <label> <tag> <expected-state>
+    _got=$(release_state "$2" || true)
+    if [ "$_got" = "$3" ]; then
+      printf '  PASS  %-58s %s\n' "$1" "$_got"
+    else
+      printf '  FAIL  %-58s got %s, want %s\n' "$1" "$_got" "$3"; _t_fail=1
+    fi
+  }
+  _ts "cli-v2.6.7 is a REAL release"            cli-v2.6.7      RELEASE
+  _ts "★cli-v2.6.6 is a PRE-RELEASE"            cli-v2.6.6      PRERELEASE
+  _ts "a tag that cannot exist -> UNKNOWN"      cli-v0.0.0-nope UNKNOWN
+
+  # ★AND THE SELECTION ITSELF, not just the classifier. A resolver that reads
+  # the state correctly and then ignores it is the defect wearing a passing
+  # test, so this runs the real picker over the real list.
+  _sel=$(printf '%s\n' "$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100" \
+    | grep '"tag_name"' \
+    | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')" \
+    | pick_latest_real_release 'cli-v' || true)
+  if [ -z "$_sel" ]; then
+    printf '  FAIL  %-58s resolved nothing\n' "the picker selects a cli-v* release"; _t_fail=1
+  elif [ "$(release_state "$_sel")" = RELEASE ]; then
+    printf '  PASS  %-58s %s\n' "★the picker selects a release, never a pre-release" "$_sel"
+  else
+    printf '  FAIL  %-58s picked %s which is %s\n' \
+           "★the picker selects a release, never a pre-release" "$_sel" "$(release_state "$_sel")"; _t_fail=1
+  fi
 
   # ★AND THE GUIDANCE ITSELF, GRADED ON THE RENDERED REFUSAL — not on the
   # source text. DISTRIBUTION-SURFACE.md §5a's finding was that the
@@ -256,14 +392,21 @@ if [ -z "$version" ]; then
   # app uses `*-mac`. Prefer the newest `cli-v*` release; fall back to the newest
   # bare `v<semver>` CLI release (pre-migration tags like v2.3.25), and never the
   # `*-mac` app feed. Grep + sed is POSIX-portable; no jq dep.
-  api_url="https://api.github.com/repos/${GITHUB_REPO}/releases"
+  api_url="https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100"
   tags=$(curl -fsSL "$api_url" \
     | grep '"tag_name"' \
     | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-  version=$(printf '%s\n' "$tags" | grep '^cli-v' | head -1)
-  [ -z "$version" ] && version=$(printf '%s\n' "$tags" | grep -E '^v[0-9]' | grep -v -- '-mac$' | head -1)
+  # ★ A PRE-RELEASE CAN NEVER BE SELECTED HERE. See release_state() above.
+  version=$(printf '%s\n' "$tags" | pick_latest_real_release 'cli-v')
+  [ -z "$version" ] && version=$(printf '%s\n' "$tags" | pick_latest_real_release 'v')
   if [ -z "$version" ]; then
     err "could not determine latest CLI release from $api_url"
+    err ""
+    err "  Every cli-v* candidate was a draft, a pre-release, or unreadable."
+    err "  The installer does NOT fall back to a pre-release: a pre-release is"
+    err "  bytes Homebrew users are not running, and the two populations follow"
+    err "  the same instruction."
+    err ""
     err "set BITHUMAN_VERSION=cli-vX.Y.Z (or vX.Y.Z) to pin a specific release."
     exit 1
   fi

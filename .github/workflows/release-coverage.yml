@@ -30,6 +30,21 @@ on:
     types: [published]
   schedule:
     - cron: '17 6 * * *'
+  # ★A FORMULA BUMP IS EXACTLY WHEN THE PIN CAN BREAK, so it is exactly when the
+  #  anonymous-fetchability job below must run. Without this trigger the gate
+  #  would first speak the morning AFTER a bad pin shipped.
+  push:
+    paths:
+      - 'Formula/**'
+      - 'install.sh'
+      - 'scripts/check-formula-asset-anonymous.py'
+      - '.github/workflows/release-coverage.yml'
+  pull_request:
+    paths:
+      - 'Formula/**'
+      - 'install.sh'
+      - 'scripts/check-formula-asset-anonymous.py'
+      - '.github/workflows/release-coverage.yml'
   workflow_dispatch:
     inputs:
       tag:
@@ -69,3 +84,43 @@ jobs:
           else
             python3 tools/verify_release_platform_coverage.py
           fi
+
+  # ── ★THE FORMULA PIN, READ BACK THE WAY A STRANGER READS IT ──────────────
+  # On 2026-09-11 `Formula/bithuman-cli.rb` was bumped to a release that was
+  # still a DRAFT. A draft is fully visible to whoever cut it and to any token
+  # with push access, and a flat 404 to everyone else — so `brew install
+  # bithuman-product/bithuman/bithuman-cli` was broken for roughly eight hours
+  # while every check the releaser could run said the asset was there. Nothing
+  # in this tap read the release STATE back: `scripts/check-release-atomic.sh`
+  # has a C4 FORMULA-PIN rule, but it grades against a manifest the caller
+  # hands it, and it is wired in no workflow at all.
+  #
+  # ★THE JOB IS ONLY WORTH RUNNING BECAUSE IT RUNS WITHOUT CREDENTIALS. The gate
+  # scrubs GH_TOKEN/GITHUB_TOKEN/netrc out of its own environment and ASSERTS
+  # the scrub before its first request; with a token present a draft answers 200
+  # and the whole thing is decoration. `permissions: {}` takes the job's own
+  # token away as well, so there is nothing to leak into the check by accident.
+  #
+  # ★AND THE ARMS ARE PROVEN RED FIRST, against this tap's own permanent
+  # history: a tag that has never existed, and a real release asked for a file
+  # it does not carry. The draft case is the SAME code path as the first (R3,
+  # "not visible anonymously") and was proven once against a real draft release
+  # on 2026-09-11 — draft=true to an authenticated caller, HTTP 404 to an
+  # anonymous one, gate rc=1.
+  formula-pin-is-anonymously-fetchable:
+    name: the formula's pinned asset downloads for someone with no credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+      - name: the gate can refuse (parser + the anonymity primitive)
+        timeout-minutes: 5
+        run: python3 scripts/check-formula-asset-anonymous.py --self-test
+      - name: ★the gate is proven RED before its green is read
+        timeout-minutes: 5
+        run: python3 scripts/check-formula-asset-anonymous.py --prove-by-mutation
+      - name: grade the live formula pin
+        timeout-minutes: 5
+        run: python3 scripts/check-formula-asset-anonymous.py
