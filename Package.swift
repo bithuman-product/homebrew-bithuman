@@ -18,11 +18,11 @@
 //     product 'Expression' ... not found in package 'homebrew-bithuman'
 //
 //   - bitHumanKit              binary umbrella, tag v2.4.0. `import bitHumanKit`.
-//   - Expression2              expression-2 engine alone, tag v2.6.0.
+//   - Expression2              expression-2 engine alone, tag v2.6.1.
 //                              `import Expression2`. FOUR binaryTargets ride
 //                              under it now, not three — see UnifiedModelHeader.
 //   - Essence2                 essence-2 engine alone, archives on tag
-//                              essence2-v1.4.0 — read `essence2Tag` below, never
+//                              essence2-v1.5.0 — read `essence2Tag` below, never
 //                              this sentence, for where the bytes are; it has
 //                              been wrong before. `import Essence2` works since
 //                              essence2-v1.2.0 (the archive's module map declares both
@@ -70,7 +70,13 @@
 //                  `Bithuman.create(modelPath:)`. The `Bithuman` ACTOR is real;
 //                  "the portable libessence C++ runtime" was not.
 //   - Expression2  Layer-1 expression-2 avatar engine, pure Swift + CoreML.
-//                  Published at tag v2.6.0 (see `expression2Tag` below).
+//                  Published at tag v2.6.1 (see `expression2Tag` below). The
+//                  ENGINE binary on v2.6.1 is the v2.6.0 archive re-hosted
+//                  BYTE-FOR-BYTE (same checksum d4ce14b6…, and its own
+//                  Info.plist still reads 2.6.0, which is the honest record of
+//                  when those bytes were built and proven). What is new on
+//                  v2.6.1 is the pair of modules that ride under it — see the
+//                  ★ …Binary note at the targets.
 //                  `import Expression2`, then `Expression2Engine.create(modelPath:)`.
 //                  ★ CODE ONLY — NO MODEL WEIGHTS, AND THAT PART IS UNCHANGED.
 //                  What DID change at v2.6.0: the engine can now be GIVEN a model.
@@ -96,8 +102,8 @@
 //                  render out of the box; it can now be handed one.
 //   - Essence2     Layer-1 essence-2 engine for Apple platforms (iOS device,
 //                  iOS Simulator, macOS — all arm64). Its archives ship on tag
-//                  essence2-v1.4.0; `essence2Tag` below is the value that
-//                  decides, and this line is a copy of it that has drifted once.
+//                  essence2-v1.5.0; `essence2Tag` below is the value that
+//                  decides, and this line is a copy of it that has drifted before.
 //                  ★ TWO MODULE NAMES, ONE HEADER. What this product vends is
 //                  the engine's 15-function C interface, not a Swift type. Since
 //                  essence2-v1.2.0 the module map in every slice declares BOTH
@@ -165,14 +171,36 @@
 //
 //   ★ WHAT LINKING DOES NOT BUY YOU. The runtime resources this engine loads at
 //   startup — its Metal library, the idle audio, and the audio encoder — are
-//   attached to the release as `libessence2-resources.zip` (231,597,193 B,
-//   sha256 94ce2120…, and MEASURED 2026-09-09 byte-identical on the tag this
-//   manifest points at, essence2-v1.4.0, as on essence2-v1.2.0 — both streamed
-//   anonymously and hashed, same 231,597,193 B and same digest)
-//   but they are NOT a binaryTarget: SwiftPM cannot ship loose resource bundles
-//   through this product. Linking succeeds without them; starting a session
-//   does not. Your app must place those bundles in its own Resources, so
-//   `Essence2` alone is a build-time coordinate, not a running avatar.
+//   attached to the release as `libessence2-resources.zip`, and they are NOT a
+//   binaryTarget: SwiftPM cannot ship loose resource bundles through this
+//   product. Linking succeeds without them; starting a session does not. Your
+//   app must place those bundles in its own Resources, so `Essence2` alone is a
+//   build-time coordinate, not a running avatar.
+//
+//   ★ AND ON THE TAG THIS MANIFEST NOW POINTS AT, THAT ASSET IS NOT THE WHOLE
+//   SET. MEASURED 2026-09-11, both zips streamed anonymously and read entry by
+//   entry:
+//       essence2-v1.4.0  231,597,193 B  4 files   a2x_w2v.fp32.onnx
+//                                                 (377,625,424 B uncompressed),
+//                                                 mlx.metallib, default.metallib,
+//                                                 idle.wav — at the archive root
+//       essence2-v1.5.0    1,644,060 B  4 files   mlx.metallib, default.metallib,
+//                                                 idle.wav — under a new
+//                                                 `libessence2-resources/` folder
+//   The audio-to-expression encoder is GONE from the v1.5.0 asset, and the
+//   engine has not stopped wanting it: `strings -a` on the v1.5.0 ios-arm64
+//   slice still names `a2x_w2v` — 17 occurrences read by macOS `strings -a`
+//   and 7 by GNU `strings -a` on the same bytes (14 and 5 on v1.4.0; the two
+//   tools disagree about how much of a static archive to walk, and neither
+//   reads 0, which is the whole claim). So an app that takes its
+//   resources from essence2-v1.5.0 gets the Metal libraries and the idle audio
+//   and NOT the encoder, and the unpacked tree has one extra directory level
+//   than it had. Until that asset is rebuilt complete, take
+//   `libessence2-resources.zip` from essence2-v1.4.0 — the two metallibs and
+//   idle.wav in it are byte-identical to the v1.5.0 copies — and flatten it to
+//   the layout your app already expects. This is an OPEN DEFECT of the release
+//   asset, not of the pinned binaries: both `.binaryTarget`s below are the
+//   graded v1.5.0 bytes.
 //
 //   ★ AND NO MODEL YOU CAN DOWNLOAD TODAY OPENS IN THIS ENGINE — which is the
 //   limit that decides whether essence-2 on a phone is usable at all, and it
@@ -185,9 +213,9 @@
 //       members are `.onnx` graphs (`model_b24_fp32.onnx` among them), and
 //       ZERO are CoreML `.mlpackage`s. That artifact is what the SERVER reads.
 //     · WHAT THIS ENGINE ACCEPTS. `strings -a` on the ios-arm64 slice of the
-//       `libessence2.xcframework.zip` pinned below (essence2-v1.4.0,
-//       158,661,991 B, re-downloaded anonymously and re-hashed to the exact
-//       `binaryTarget` checksum 75b1919b…) carries its opener's refusal
+//       `libessence2.xcframework.zip` pinned below (essence2-v1.5.0,
+//       159,302,803 B, re-downloaded anonymously and re-hashed to the exact
+//       `binaryTarget` checksum a418a04c…) carries its opener's refusal
 //       verbatim —
 //           Essence2Bundle: … is not a .elevatedir/.essence2dir bundle (need a
 //           directory with meta.json {"format":"elevatedir-v*" |
@@ -298,10 +326,10 @@
 //
 //   ★ AND IT IS NOT ONLY A PHONE GATE — macOS IS GATED TOO, WHICH THIS BLOCK
 //   DID NOT SAY. "Grades … ON iOS" reads as if a Mac were ungated; it is not.
-//   MEASURED 2026-09-09 with `strings -a` on the three published slices of the
-//   essence2-v1.4.0 archive pinned below (re-downloaded anonymously, re-hashed
-//   to 75b1919b…), one row per refusal sentence, nonsense control 0 in every
-//   pass:
+//   MEASURED 2026-09-11 with `strings -a` on the three published slices of the
+//   essence2-v1.5.0 archive pinned below (re-downloaded anonymously, re-hashed
+//   to a418a04c…), one row per refusal sentence, nonsense control 0 in every
+//   pass — every count below is unchanged from the same reading of v1.4.0:
 //
 //       refusal, verbatim                                  ios  macos  sim
 //       "bitHuman requires Apple M3 or later on macOS."       0      2    0
@@ -340,7 +368,14 @@
 //
 // RELEASE NOTE:
 //   `bitHumanKit` (the umbrella, tag v2.4.0) and `Expression2` + its binary
-//   `BithumanEngineProtocol` + `UnifiedModelHeader` (tag v2.6.0) ship today.
+//   `BithumanEngineProtocol` + `UnifiedModelHeader` (tag v2.6.1) ship today.
+//   ★ v2.6.1 EXISTS FOR ONE REASON: the archives on v2.6.0 named an
+//   enterprise-only tier that no public artifact may name. Counted with
+//   `strings -a` reading each file as raw bytes on stdin, V12+V13 over every
+//   file of every slice: BithumanEngineProtocol 12 -> 0, UnifiedModelHeader
+//   12 -> 0, Expression2 0 -> 0 (its archive was already clean, so its bytes
+//   are re-hosted unchanged rather than rebuilt — no engine binary that has
+//   not been run on a device ships in this release).
 //   ★ FOUR binaryTargets below now, not three, and the fourth is not optional:
 //   line 14 of the engine's emitted .swiftinterface is an import OF the module
 //   UnifiedModelHeader (the engine registers itself in the shared
@@ -349,7 +384,7 @@
 //   NOT a product, and that is deliberate: nobody writes that import by hand —
 //   it rides under the `Expression2` library product and must merely be
 //   RESOLVABLE when the compiler reads the engine's interface. Every one of the four was re-fetched
-//   and re-hashed against the checksum it pins — the three v2.6.0 checksums came
+//   and re-hashed against the checksum it pins — the three v2.6.1 checksums came
 //   out of the `.sha256` sidecars the build wrote, never from a human, and
 //   bitHumanKit's is UNCHANGED at 5c536e37… (bumping the shared `releaseTag`
 //   would 404 the shipping product; see the block above `expression2Tag`).
@@ -394,7 +429,7 @@ let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/release
 // tag the consumer's `from:` picks and then reads absolute URLs out of the
 // manifest it finds there — the asset does not have to live on the resolved tag.
 // ---------------------------------------------------------------------------
-let expression2Tag = "v2.6.0"
+let expression2Tag = "v2.6.1"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 
@@ -419,8 +454,35 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // sidecars are directly usable and `shasum -c` on them is not: the file names
 // they would need are not in them.
 //
-// ★ ROLLED TO essence2-v1.4.0 ON 2026-09-07 — A REJECTED KEY GETS 300 s, THEN THE
-// ENGINE STOPS. Owner ruling 2026-09-07: a credential the metering service
+// ★ ROLLED TO essence2-v1.5.0 ON 2026-09-11 — THE PUBLISHED ARCHIVE NO LONGER
+// NAMES AN ENTERPRISE-ONLY TIER. The engine's own bytes carried an internal
+// tier name that no public artifact may carry, and every `swift package
+// resolve` put it on a developer's disk; a developer-side verify is how it was
+// found, not a gate here. v1.5.0 (159,302,803 B, checksum a418a04c…, built,
+// tested and graded by bithuman-models `apple-xcframework.yml` at its tag
+// essence2-apple-v1.5.0 — run on an M4 and an iPhone 15 before it was cut —
+// and re-hosted onto this repo BYTE-FOR-BYTE by .github/workflows/publish-
+// essence2-apple.yml, which refuses any file whose sha256 is not the graded
+// measurement) reads 0. MEASURED with `strings -a`, each slice read as raw
+// bytes on stdin, all three published slices of both archives, nonsense
+// control 0 in every pass:
+//
+//       token                                       v1.4.0    v1.5.0
+//                                                (per slice) (per slice)
+//       the retired tier name, verbatim                  3         0
+//       its alias family — the hyphen, underscore
+//       and UPPERCASE spellings of that same tier       22         0
+//
+// NOTHING ELSE MOVED. The 300 s rejected-key grace described in the next
+// block is still exactly what this engine does; the hardware refusals above
+// re-measure identical, sentence for sentence, on these bytes; and
+// `onnxruntime` is carried forward BYTE-IDENTICAL from essence2-v1.4.0, so
+// its checksum below does not move. The RESOURCES asset is the one thing that
+// did change and it changed WRONG — read the ★ block above before you ship an
+// app against this tag.
+//
+// ★ THE PREVIOUS ROLL, essence2-v1.4.0 ON 2026-09-07 — A REJECTED KEY GETS 300 s,
+// THEN THE ENGINE STOPS. Owner ruling 2026-09-07: a credential the metering service
 // REJECTS (HTTP 401 / 402 / 403) renders for a grace of 300 s from the first
 // rejection behind a countdown line, is re-checked every minute, and at 300 s
 // of continuous rejection the engine stops — `be_essence2_pull_frame` and
@@ -485,7 +547,7 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // byte-identical to v1.1.0 and its checksum below does not move. Re-fetched
 // anonymously after upload and re-hashed; the sidecars are again 65 bytes.
 // ---------------------------------------------------------------------------
-let essence2Tag = "essence2-v1.4.0"
+let essence2Tag = "essence2-v1.5.0"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -601,12 +663,12 @@ let package = Package(
         .binaryTarget(
             name: "BithumanEngineProtocolBinary",
             url: "\(expression2Base)/BithumanEngineProtocol.xcframework.zip",
-            checksum: "048a5d271d61fe4689dd9f1a6f209c00e358e4fd77aa249e55dc59dcd7051759"
+            checksum: "97c81d74e3d583b5dc94d85e11d27c32586af325ab04389bbb1809a5608d8013"
         ),
         .binaryTarget(
             name: "UnifiedModelHeaderBinary",
             url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
-            checksum: "33b7d575ec90055a4894fb1fbbb507b9264694752c6a2a5e35c7bf8c069e180e"
+            checksum: "60a3a1dce241d182e14b3d18607dddc01f129248899097490240b4262f5cae22"
         ),
         // The essence-2 engine itself. The target name matches the xcframework
         // inside the archive; the MODULES it vends are `CLibEssence2` and, since
@@ -615,7 +677,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "75b1919b848a0a8e13bdfe51999739813b610a42dad25d9fc5a3a4e408e29808"
+            checksum: "a418a04c7c27b639e3373f465cffa2a36d860f17588d5d1f983fd979b349424a"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
