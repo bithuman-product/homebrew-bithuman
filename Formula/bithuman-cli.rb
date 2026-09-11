@@ -51,7 +51,35 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.6.7 (2026-09-11). What a customer can
+  # ★2026-09-11, LATE: THIS FORMULA MOVED BACKWARDS, ON PURPOSE AND BY A
+  # RULING. It pinned cli-v2.6.7; it now pins cli-v2.6.6, and cli-v2.6.7 has
+  # been withdrawn to a DRAFT (hidden from anonymous download, nothing
+  # deleted, reversible in one command; its git tag is untouched because
+  # package manifests resolve from tags, not releases).
+  #
+  # WHY: a new release bar was set tonight — a release must MEASURE realtime
+  # (>= 25 fps unpaced, end to end) on the bytes it ships, per model, before
+  # it goes out. 2.6.7 was pressed before that bar existed and does not clear
+  # it for essence-2.
+  #
+  # ★WHAT THIS COSTS, SAID PLAINLY RATHER THAN BURIED. Going back to 2.6.6
+  # reintroduces a defect 2.6.7 fixed: on macOS, expression-2 renders through
+  # a decoder two releases old — MEASURED at 22.5 dB against 34.3, which is
+  # genuinely different frames, not merely slower ones. It also gives up the
+  # Linux essence-2 2.86x that 2.6.7 carried. And it does not reach the new
+  # bar either: 2.6.6 clears 25 fps on essence-2 no more than 2.6.7 did. The
+  # order was chosen so that something resolvable always exists — 2.6.6 was
+  # restored from pre-release FIRST, this pin moved SECOND, and only then was
+  # 2.6.7 hidden — because the installer walks versions descending, skips
+  # pre-releases and REFUSES rather than guessing, so removing 2.6.7 with
+  # 2.6.6 still marked pre-release would have refused both routes outright.
+  #
+  # The sha256 above was taken from the ASSET ITSELF, fetched anonymously
+  # with every credential scrubbed from the environment (5 env vars, 0
+  # matching token/secret/key/auth), not copied from the sidecar — the
+  # sidecar was then read separately and agrees.
+  #
+  # Superseded description, kept for the record: cli-v2.6.7 (2026-09-11). What a customer can
   # SEE change from 2.6.6: the essence-2 engine core this CLI ships
   # (lib/lible_core.*) was a hand-pinned digest that carried NO compositor —
   # measured on the 2.6.6 tarball itself, 885,304 B with ZERO portable-SIMD
@@ -217,8 +245,8 @@ class BithumanCli < Formula
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.7/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "e6afa120efb9fe5fe11d4cfc3464d1f010c25e40e2ba12123322477fc33fa748"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.6/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "29e197d7c74753cf37f64d06bf743f3d0ce8cd7b909784d66a30ddabd8f824f6"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
