@@ -51,8 +51,22 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # Current published release: cli-v2.6.5 (2026-09-10). What a customer can
-  # SEE change from 2.6.4: an offline essence-2 `render` no longer stops after
+  # Current published release: cli-v2.6.6 (2026-09-11). What a customer can
+  # SEE change from 2.6.5: an offline essence-2 `render` is in sync — the
+  # delivered MP4's mouth used to trail its audio by 400 ms for the whole clip
+  # (the recorder wrote the engine's ten warm-up frames as frames 0..9; it now
+  # admits nothing before the first spoken frame, and the receipt says so as
+  # `lead_in_frames_dropped`), and the receipt's `frames` is read back from the
+  # file, so it is never one more than the MP4 holds; `bithuman gallery` is the
+  # default front door (20 pre-baked identities, free, no account), and
+  # `pull <CODE> --model <family>` resolves a gallery identity by code or slug;
+  # the CLI speaks four families (`essence-1`, `essence-2`, `expression-1`
+  # hosted-only, `expression-2`) and no internal tier name in any byte; the
+  # engine core moves 3.1.0 -> 3.1.2 (ABI 7). Both halves of cli-v2.6.6 were
+  # built from ONE commit (34513f3), each tarball's clock is that build's
+  # time and each PROVENANCE.json says dirty:false.
+  #
+  # cli-v2.6.5 (superseded). An offline essence-2 `render` no longer stops after
   # five minutes of WORK (the 300 s budget was set once at start-up and spent
   # on the whole render, so a 15 s clip on a slow machine failed exactly like a
   # 66 s one; it is now a STALL budget every landed frame resets); a clip that
@@ -176,12 +190,12 @@ class BithumanCli < Formula
   # tracks the drive audio. (`libessence2.dylib` is the APPLE/Swift engine — a
   # different artifact on a different axis; it is indeed not in this tarball
   # and the CLI does not use it.)
-  # (Engine core is libessence 3.1.0 / ABI 7 from cli-v2.6.5 — it read 2.3.8
+  # (Engine core is libessence 3.1.2 / ABI 7 from cli-v2.6.6, 3.1.0 on 2.6.5 — it read 2.3.8
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.5/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "b95594119a12f54a3748b21a4b51efb230da002941ec8954cea5e3e072476a56"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.6/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "29e197d7c74753cf37f64d06bf743f3d0ce8cd7b909784d66a30ddabd8f824f6"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
@@ -331,15 +345,18 @@ class BithumanCli < Formula
       on macOS today … for offline renders use a Linux host" — measured
       2026-09-04 on 2.5.1 and never re-measured. RE-MEASURED 2026-09-08
       on cli-v2.6.4 arm64 (the release this formula pinned then; it now
-      pins cli-v2.6.5), Apple silicon:
+      pins cli-v2.6.6), Apple silicon:
         essence-2     rc=0 · 300 frames · 1920x1080 @25 fps
         expression-2  rc=0 · 240 frames · 416x720 @20 fps
+      RE-MEASURED 2026-09-11 on the cli-v2.6.6 arm64 tarball itself:
+        essence-2     rc=0 · 300 frames · 1280x720 @25 fps · mouth-to-audio
+                      lag 0 frames (the shipped 2.6.5 read +10 = 400 ms)
       Both audio-driven and both verified frame-by-frame against the
       drive audio. essence-1 is not renderable by this CLI on any
       platform and is unchanged by that.
       Offline renders need ffmpeg on PATH, and this formula installs it
       for you: `depends_on "ffmpeg"` since the 2026-09-08 revision, and
-      this one serves 2.6.5. If you took the tarball instead of
+      this one serves 2.6.6. If you took the tarball instead of
       `brew install`, run `brew install ffmpeg` yourself.
 
       Docs:    https://docs.bithuman.ai
