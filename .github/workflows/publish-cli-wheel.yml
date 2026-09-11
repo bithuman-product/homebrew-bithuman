@@ -1,0 +1,104 @@
+# Publish a STAGED `bithuman-cli` wheel to PyPI.
+#
+# This workflow deliberately does NOT build. It uploads the exact file
+# committed under `dist/bithuman-cli/`, after checking that file's sha256
+# against the pin in `inputs.sha256`. The reason is that the thing we want to
+# publish is the artifact somebody proved, not an artifact that resembles it:
+# the 2.3.27 wheel was built on an M4 and then installed into an empty venv by
+# the exact bootstrap the Rust binary runs, and a CI re-build — different
+# scikit-build-core, different zip timestamps — would not be those bytes.
+#
+# `bithuman-cli` is the carrier for the conversation agent worker
+# (`bithuman_cli/agent.py` + `_avatar_bridge.py` + `local_plugins/`) that
+# `bithuman serve` pip-installs into ~/.cache/bithuman/brain-venv on first run.
+# It is NOT a way to install the CLI — `Formula/bithuman-cli.rb` and
+# install.sh are — and the CLI's own gate
+# (crates/bithuman-cli/src/local_brain.rs, FORBIDDEN_COORDINATES) forbids
+# printing `pip install bithuman-cli` as an instruction to anybody.
+#
+# Secrets (already on homebrew-bithuman): PYPI_API_TOKEN, PYPI_USERNAME.
+#
+# A plain dispatch with publish=false runs every check and uploads nothing.
+name: Publish bithuman-cli wheel
+
+on:
+  workflow_dispatch:
+    inputs:
+      wheel:
+        description: 'File under dist/bithuman-cli/ to upload.'
+        type: string
+        required: true
+        default: bithuman_cli-2.3.27-py3-none-macosx_11_0_arm64.whl
+      sha256:
+        description: 'sha256 of that file, as proved on the build host. Refuses to upload on a mismatch.'
+        type: string
+        required: true
+        default: 906866812eca30be68cf74f240d15a7e5f504bbcf76cda6b0af01bc43853fcd9
+      publish:
+        description: 'Upload to PyPI. Off = run every check and upload nothing.'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: The staged file is the file that was proved
+        id: pin
+        run: |
+          set -euo pipefail
+          W="dist/bithuman-cli/${{ inputs.wheel }}"
+          [ -f "$W" ] || { echo "::error::no staged wheel at $W"; ls -la dist/bithuman-cli/ || true; exit 1; }
+          GOT=$(sha256sum "$W" | cut -d' ' -f1)
+          echo "  staged : $GOT"
+          echo "  pinned : ${{ inputs.sha256 }}"
+          [ "$GOT" = "${{ inputs.sha256 }}" ] || {
+            echo "::error::sha256 mismatch — the staged wheel is not the wheel that was proved"; exit 1; }
+          # name-version out of the wheel filename, for the immutability check
+          BASE=$(basename "$W" .whl)
+          echo "dist=$(echo "$BASE" | cut -d- -f1 | tr '_' '-')" >> "$GITHUB_OUTPUT"
+          echo "version=$(echo "$BASE" | cut -d- -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Versions are immutable — say what the coordinate already holds
+        run: |
+          set -euo pipefail
+          DIST='${{ steps.pin.outputs.dist }}'
+          VER='${{ steps.pin.outputs.version }}'
+          WHEEL='${{ inputs.wheel }}'
+          echo "== $DIST $VER =="
+          CODE=$(curl -s -o /tmp/simple.html -w '%{http_code}' "https://pypi.org/simple/$DIST/")
+          echo "  simple index: HTTP $CODE"
+          if [ "$CODE" = "200" ]; then
+            LINKS=$(grep -c '<a ' /tmp/simple.html || true)
+            echo "  files currently listed: $LINKS"
+            if grep -q "$WHEEL" /tmp/simple.html; then
+              echo "::error::$WHEEL is ALREADY on PyPI. A version is immutable and a"
+              echo "::error::deleted filename stays reserved — cut a new version instead."
+              exit 1
+            fi
+            echo "  $WHEEL is not among them — the coordinate is free."
+          fi
+
+      - name: twine check
+        run: |
+          python -m pip install --upgrade --quiet twine
+          python -m twine check "dist/bithuman-cli/${{ inputs.wheel }}"
+
+      - name: Publish to PyPI
+        if: ${{ inputs.publish }}
+        env:
+          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: python -m twine upload --skip-existing --verbose "dist/bithuman-cli/${{ inputs.wheel }}"
+
+      - name: Not published (publish=false)
+        if: ${{ !inputs.publish }}
+        run: echo "Every check passed. Nothing was uploaded — re-dispatch with publish=true."
