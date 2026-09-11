@@ -12,7 +12,7 @@ package has never vended. None of that is reachable by `swift build`: SwiftPM
 compiles the manifest, it does not read the comments, so a manifest can resolve
 perfectly while lying to every developer who opens it in Xcode.
 
-FIVE RULES, and every one of them has a mutation arm below. Run
+SIX RULES, and every one of them has a mutation arm below. Run
 `--prove-by-mutation` and each arm must turn this guard RED; an arm whose edit
 does not change the file's bytes is itself an ERROR (a mutation that mutates
 nothing is how a guard passes by testing air).
@@ -40,6 +40,18 @@ nothing is how a guard passes by testing air).
                   itself vends (a binaryTarget name, or a module measured in its
                   archive). A bare `libessence` is still a claim about the
                   umbrella, and still red.
+  R6 VOCABULARY   no file of any binaryTarget archive carries internal-only
+                  vocabulary. This rule exists because on 2026-09-11 a DEVELOPER
+                  found what CI could not: three of the archives a `swift package
+                  resolve` fetches named an enterprise-only tier 33 times between
+                  them, and every guard in this repo was blind to it --
+                  guard-public-vocabulary.py grades TRACKED FILES and RELEASE
+                  TEXT, and a binaryTarget is neither. R1 already downloads every
+                  archive to check its checksum, so grading those same bytes
+                  costs one pass of `strings -a` and nothing else. The matcher is
+                  not a second copy: it is imported from
+                  scripts/guard-public-vocabulary.py, so the three surfaces
+                  cannot drift apart about what a word is.
 
 Exit 0 = all rules pass. Exit 1 = a rule failed. Exit 2 = harness error.
 """
@@ -61,7 +73,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 MANIFEST = REPO / "Package.swift"
 
-RULES = ["R1-CHECKSUM", "R2-TOKENS", "R3-IMPORTS", "R4-DOCUMENTED", "R5-NO-CLAIM"]
+RULES = ["R1-CHECKSUM", "R2-TOKENS", "R3-IMPORTS", "R4-DOCUMENTED", "R5-NO-CLAIM",
+         "R6-VOCABULARY"]
 
 # Tokens that name a LIBRARY and are measured absent from the umbrella. Bare
 # "essence" is deliberately NOT here: essence-2 is a real product family the
@@ -412,12 +425,75 @@ def rule_R5_noclaim(src, cache, workdir, state) -> list[str]:
     return errs
 
 
+def _vocabulary_rules():
+    """This repo's ONE matching primitive, imported -- never re-spelled here."""
+    import importlib.util
+
+    src = Path(__file__).resolve().parent / "guard-public-vocabulary.py"
+    if not src.exists():
+        raise Failure(f"the vocabulary primitive is missing: {src}")
+    spec = importlib.util.spec_from_file_location("_gpv", str(src))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rules = {r[0]: re.compile(r[1], re.I) for r in (mod.TIER1 + mod.TIER2)
+             if r[0] in ("V12", "V13")}
+    if sorted(rules) != ["V12", "V13"]:
+        raise Failure(f"guard-public-vocabulary.py no longer defines V12 and V13: {sorted(rules)}")
+    return rules
+
+
+def rule_R6_vocabulary(src, cache, workdir, state) -> list[str]:
+    """Grade every FILE of every binaryTarget archive, not just a slice."""
+    errs = []
+    rules = _vocabulary_rules()
+
+    # Positive control on the READING PATH, not on the regex: a binary blob whose
+    # first bytes are not UTF-8 (0xd7 is what made an earlier reader throw and
+    # report a clean 0). If this does not fire, every absence below is the
+    # probe's blindness and not a measurement.
+    probe = (b"\xd7\xff\xfe" * 8 + b"\x00"
+             + ("essence" + "-2-" + "max").encode() + b"\x00")
+    if not rules["V12"].search(strings_a(probe, workdir)):
+        raise Failure("the reading path is BLIND -- the control string was not seen")
+    if rules["V12"].search(strings_a(b"\x00" * 64 + b"a-perfectly-ordinary-string\x00", workdir)):
+        raise Failure("the matcher fires on a clean blob -- it cannot say ABSENT")
+
+    for t in parse_binary_targets(src):
+        try:
+            data = fetch(t["url"], cache)
+        except Failure as e:
+            errs.append(f"R6 {t['name']}: {e}")
+            continue
+        zf = zipfile.ZipFile(io.BytesIO(data))
+        members = [i for i in zf.infolist() if not i.is_dir()]
+        if not members:
+            errs.append(f"R6 {t['name']}: the archive holds no files -- nothing was graded")
+            continue
+        hits = 0
+        worst = ""
+        for info in members:
+            text = strings_a(zf.read(info), workdir)
+            n = sum(len(rx.findall(text)) for rx in rules.values())
+            if n:
+                hits += n
+                worst = worst or info.filename
+        if hits:
+            errs.append(
+                f"R6 {t['name']}: {hits} internal-vocabulary occurrence(s) in the "
+                f"PUBLISHED archive (first in {worst}) -- {t['url']}"
+            )
+        else:
+            log(f"    R6 ok  {t['name']:28} {len(members):>3} files, 0 banned-name occurrence(s)")
+    return errs
+
+
 RULE_FUNCS = {
     "R1-CHECKSUM": rule_R1_checksum,
     "R2-TOKENS": rule_R2_tokens,
     "R3-IMPORTS": rule_R3_imports,
     "R4-DOCUMENTED": rule_R4_documented,
     "R5-NO-CLAIM": rule_R5_noclaim,
+    "R6-VOCABULARY": rule_R6_vocabulary,
 }
 
 
@@ -488,6 +564,24 @@ def _mut_reexports_claim(src: str) -> str:
     )
 
 
+def _mut_dirty_archive(src: str) -> str:
+    """Point one pin back at the REAL archive this release replaced.
+
+    v2.6.0's UnifiedModelHeader is the published zip whose bytes named the
+    retired tier 12 times, and the checksum swapped in with it is that
+    archive's own -- so R1 stays GREEN and only R6 can turn red. An arm that
+    broke the checksum too would prove nothing about R6.
+    """
+    return src.replace(
+        '            url: "\\(expression2Base)/UnifiedModelHeader.xcframework.zip",\n'
+        '            checksum: "60a3a1dce241d182e14b3d18607dddc01f129248899097490240b4262f5cae22"',
+        '            url: "https://github.com/bithuman-product/homebrew-bithuman/releases/'
+        'download/v2.6.0/UnifiedModelHeader.xcframework.zip",\n'
+        '            checksum: "33b7d575ec90055a4894fb1fbbb507b9264694752c6a2a5e35c7bf8c069e180e"',
+        1,
+    )
+
+
 ARMS = [
     ("R1-CHECKSUM", "flip one hex digit of the pinned bitHumanKit checksum", _mut_checksum),
     ("R1-CHECKSUM", "point the bitHumanKit asset at a URL that 404s", _mut_url_404),
@@ -498,6 +592,8 @@ ARMS = [
      _mut_import_ghost_module),
     ("R4-DOCUMENTED", "declare a product the VENDS block does not list", _mut_undocumented_product),
     ("R5-NO-CLAIM", "re-add the 're-exports the libessence runtime' claim", _mut_reexports_claim),
+    ("R6-VOCABULARY", "pin the archive this release replaced (v2.6.0 UnifiedModelHeader, "
+     "its own checksum, so ONLY R6 can fail)", _mut_dirty_archive),
 ]
 
 

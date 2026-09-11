@@ -10,9 +10,16 @@ name: manifest-truth
 #
 # This job holds the prose to the shipped binaries. It fetches every
 # binaryTarget, checks each sha256 against the pinned checksum, and re-measures
-# the `strings -a` token counts the manifest claims. Five rules, each with a
+# the `strings -a` token counts the manifest claims. Six rules, each with a
 # mutation arm; `--prove-by-mutation` requires all of them to turn RED, and an
 # arm whose edit changes no bytes is itself an error.
+#
+# ★2026-09-11 — AND IT NOW GRADES THE BYTES, NOT ONLY THE PROSE ABOUT THEM.
+# Three of the archives a `swift package resolve` fetches named an enterprise-
+# only tier 33 times between them, and no guard in this repo could see it: the
+# vocabulary guard reads tracked files and release text, and a binaryTarget is
+# neither. R6 grades every file of every fetched archive with the SAME matching
+# primitive that guard uses, on bytes R1 has already downloaded.
 on:
   workflow_dispatch:
   pull_request:
