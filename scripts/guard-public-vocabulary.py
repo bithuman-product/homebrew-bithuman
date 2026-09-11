@@ -149,6 +149,15 @@ TIER2 = [
      "internal blend stage"),
     # V11: not the mathematical constant, which is always dot-prefixed here.
     ("V11", r"(?<![.\w])" + "p" + r"i\b", "internal deriver symbol"),
+    # V12 / V13: the enterprise-only tier, under its current and its legacy
+    # name. Owner ruling 2026-09-11: enterprise-only, ad hoc; no public surface
+    # names it. Tier 2 rather than tier 1 ONLY because five published release
+    # notes (dated records) already carry the name and are pinned as history;
+    # the tree baseline carries NO V12 entry, so on the tree it is a hard zero
+    # in effect. Substring match on purpose: a suffixed spelling is still the
+    # name; the hyphen / underscore / space between the parts is optional.
+    ("V12", "essence" + r"[-_ ]?2[-_ ]?" + "max", "enterprise-only tier, current name"),
+    ("V13", "essence" + r"[-_ ]?2[-_ ]?" + "quality", "enterprise-only tier, legacy name"),
 ]
 
 TIER1_RE = [(c, re.compile(p, re.I), d) for c, p, d in TIER1]
@@ -474,6 +483,14 @@ def selftest() -> int:
                    "V1 must match inside a longer token"))
     checks.append(("tier2 plural form", "V2" in scan_text("the " + "tess" + "era ban" + "k"), "V2"))
     checks.append(("tier2 boundary word", "V8" in scan_text("the " + "direct" + "or graph"), "V8"))
+    checks.append(("tier2 enterprise tier, hyphenated",
+                   "V12" in scan_text("model essence-2-" + "max here"), "V12"))
+    checks.append(("tier2 enterprise tier, hyphenless",
+                   "V12" in scan_text("slug essence2" + "max"), "V12 must match the joined spelling"))
+    checks.append(("tier2 enterprise tier, underscored + upper",
+                   "V12" in scan_text("ESSENCE_2_" + "MAX_WORKER"), "V12 must match case-blind and as a substring"))
+    checks.append(("tier2 enterprise tier, legacy name",
+                   "V13" in scan_text("tier essence-2-" + "quality"), "V13"))
 
     # must NOT fire (the narrowings)
     checks.append(("no false hit on directory", "V8" not in scan_text("a directory of files"),
@@ -485,6 +502,9 @@ def selftest() -> int:
                    "V11 must not match the math constant"))
     checks.append(("no false hit on arch", "V6" not in scan_text("built for arm64 darwin"),
                    "V6 must not match arm64"))
+    checks.append(("no false hit on the served tiers",
+                   not ({"V12", "V13"} & set(scan_text("essence-2, essence-2-light, essence-2-mobile"))),
+                   "V12/V13 must not match the tiers this surface serves"))
     checks.append(("clean text is clean", scan_text("a perfectly ordinary sentence") == {},
                    "clean input must score zero"))
 

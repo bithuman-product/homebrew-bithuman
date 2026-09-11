@@ -115,6 +115,12 @@
         "why": "names an engine component in this package's own architecture notes and doc comments. Internal vocabulary in a public tree; plain removable text, not yet removed."
       }
     },
+    "packages/flutter-plugin/CHANGELOG.md": {
+      "V13": {
+        "n": 1,
+        "why": "a DATED changelog entry (history, 2026-07) that recorded the enterprise-only tier under its legacy name as cloud-only at the time. Owner ruling 2026-09-11: enterprise-only, ad hoc, no public surface names it -- every forward-looking line is gone (protocol, registry, Dart mirror, examples, design doc); a changelog is a contemporaneous record and rewriting it falsifies the record, so this ONE historical mention stays pinned at 1."
+      }
+    },
     "packages/flutter-plugin/docs/TRANSPORT.md": {
       "V6": {
         "n": 1,

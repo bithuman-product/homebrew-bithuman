@@ -58,13 +58,12 @@ CoreML, no native static lib. Frozen on-device formats: `.model` (shared engine:
 w2v + taehv + warm) + `.avatar` (per-identity: student + atok + canon + idle.mp4
 + persona), ABI-versioned (`requires_engine_abi: 1`).
 
-### Essence 2 (Essence2 / a2x) — bithuman-models `models/essence-2/` · 2-level taxonomy
+### Essence 2 (Essence2 / a2x) — bithuman-models `models/essence-2/`
 
-`quality` = GPU only (premium DiT); `light` = `gpu` + `ane` + `cpu` (distilled).
+`light` = `gpu` + `ane` + `cpu` (distilled).
 
 | tier | backend | dispatch | runs on | role in this stack |
 |---|---|---|---|---|
-| **quality (GPU)** | `engine/quality/gpu/` FP8 DiT + LivePortrait TRT (sm_89) | `?model=elevate` | orinda 4070 Ti (primary) · Cerebrium `essence2-quality-gpu-worker` ADA_L40 (overflow) | cloud serving (platform) |
 | **light · GPU** | `engine/light/gpu/` le_a2x + m4b director, ORT-CUDA | `?model=elevate-gpu-light` | Cerebrium `essence2-light-gpu-worker` (lafayette pool decommissioned 06-25) | cloud serving (platform) |
 | **light · CPU** | `engine/light/cpu/` C++ `lible_core.so` | `?model=elevate-cpu` | Cerebrium `essence2-light-cpu-worker` | cloud serving (deprioritized) |
 | **light · ANE (cloud)** | `engine/light/ane/ane/moraga_serve` native Mac-ANE | `?model=elevate-ane` | moraga `:8091` | cloud serving (owned HW overflow) |
@@ -99,9 +98,9 @@ the frozen on-device slug, its public/cloud REST name so a slug from the cloud
 taxonomy resolves to the same on-device engine: `expression2`/`embody` also
 matches `expression-2`; `essence2`/`elevate` also matches `essence-2-light` and
 `essence-2-mobile` (the on-device essence2 = on-device leg of the cloud **light**
-tier). The GPU-only cloud tier `essence-2-quality` has **no on-device engine**, so
-it is NOT an alias — it lives in `cloudOnlyEngineSlugs` / `kCloudOnlyEngineSlugs`
-(recognised as a known cloud-only tier, never loaded locally).
+tier). `cloudOnlyEngineSlugs` / `kCloudOnlyEngineSlugs` are EMPTY: no cloud-only
+tier is named on this surface, so a slug none of those aliases matches takes the
+unknown-slug path.
 
 This umbrella keeps an **in-tree copy** of the Swift file at
 `shared/Classes/Protocol/BithumanEngine.swift` (so the load-bearing protocol

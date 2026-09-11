@@ -26,25 +26,34 @@ final class BithumanEngineProtocolTests: XCTestCase {
         XCTAssertTrue(ess.matches("essence-2"))       // COMBINED creation name (2026-07-02)
         XCTAssertTrue(ess.matches("essence-2-light")) // cloud light tier (on-device leg)
         XCTAssertTrue(ess.matches("essence-2-mobile"))// cloud App-Store name
-        // The GPU-only premium tier is NOT served on-device by essence2 —
-        // under its legacy `essence-2-quality` name OR its canonical
-        // `essence-2-max` name (2026-07-10 rename; both accepted).
-        XCTAssertFalse(ess.matches("essence-2-quality"))
-        XCTAssertFalse(ess.matches("essence-2-max"))
+        // A slug outside the alias list is simply not this engine — there is
+        // no third, "recognised but unservable" state on this surface.
+        XCTAssertFalse(ess.matches("essence-2-nope"))
+        XCTAssertFalse(ess.matches("expression-2"))
     }
 
-    // The GPU-only premium tier is a recognised cloud tier with NO on-device
-    // engine — under BOTH its canonical `essence-2-max` name and its accepted
-    // legacy `essence-2-quality` alias.
-    func testCloudOnlyEngineSlugs() {
-        XCTAssertTrue(isCloudOnlyEngineSlug("essence-2-quality"))
-        XCTAssertTrue(isCloudOnlyEngineSlug("essence-2-max"))
-        XCTAssertFalse(isCloudOnlyEngineSlug("essence-2-light"))
-        XCTAssertFalse(isCloudOnlyEngineSlug("essence-2"))
-        XCTAssertFalse(isCloudOnlyEngineSlug("expression-2"))
-        XCTAssertFalse(isCloudOnlyEngineSlug("essence2"))
-        XCTAssertTrue(cloudOnlyEngineSlugs.contains("essence-2-quality"))
-        XCTAssertTrue(cloudOnlyEngineSlugs.contains("essence-2-max"))
+    // No cloud-only tier is named on this surface: the set is EMPTY, so every
+    // slug — served, unknown or a typo — answers false, and an unservable slug
+    // takes the ordinary unknown-slug path. The symbol stays because it is a
+    // frozen carrier that consumers resolve by name.
+    func testCloudOnlyEngineSlugsIsEmpty() {
+        XCTAssertTrue(cloudOnlyEngineSlugs.isEmpty)
+        for slug in ["essence-2-light", "essence-2", "expression-2", "essence2",
+                     "essence-2-nope", "no-such-tier"] {
+            XCTAssertFalse(isCloudOnlyEngineSlug(slug), slug)
+        }
+    }
+
+    // Bhci names exactly four models, every engine slug routes to one of them,
+    // and anything else — a model or an engine slug it does not name — is
+    // refused on the generic path rather than recognised as something special.
+    func testBhciNamesFourModelsAndNoOthers() {
+        XCTAssertEqual(Bhci.models, ["essence-1", "essence-2", "expression-1", "expression-2"])
+        XCTAssertEqual(Set(Bhci.scopeTable.keys), Set(Bhci.models))
+        XCTAssertEqual(Set(Bhci.engineToModel.values), Set(Bhci.models))
+        XCTAssertEqual(Bhci.cloudOnlyModels, ["expression-1"])
+        XCTAssertThrowsError(try Bhci.capability(model: "no-such-model", target: "gpu"))
+        XCTAssertThrowsError(try Bhci.open(source: "x.imx", declaredEngine: "no-such-engine"))
     }
 
     func testCapabilityPresets() {

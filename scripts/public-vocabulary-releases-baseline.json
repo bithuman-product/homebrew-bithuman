@@ -1,10 +1,20 @@
 {
   "_": "Pinned occurrences of internal vocabulary in the PUBLISHED release titles and notes of this PUBLIC repo -- the surface the tree scan cannot see, because a release note is not a file. Codes are defined by scripts/guard-public-vocabulary.py --legend; they are codes rather than words so that this file needs no self-exclusion from the tree scan that also reads it. Every entry carries a measured count and a reason; an entry without a real reason is a defect. Keys are release TAGS.",
   "releases": {
+    "cli-v2.4.2": {
+      "V12": {
+        "n": 1,
+        "why": "published release notes are a DATED record; this note named the enterprise-only tier before the owner ruling of 2026-09-11 (enterprise-only, ad hoc, no public surface names it). Rewriting a published note falsifies the record, so the measured count is pinned as history. No later tag carries an entry, so any NEW release naming it is refused."
+      }
+    },
     "cli-v2.5.0": {
       "V1": {
         "n": 1,
         "why": "a SCRIPT PATH named in a dated packaging note. A release note is a contemporaneous record; rewriting a path inside one falsifies the record. Measured 2026-09-06: that path is not tracked in this repo, in bithuman-models or in bithuman-cli today, which makes it history rather than a live instruction and reinforces that it must not be re-spelled."
+      },
+      "V12": {
+        "n": 4,
+        "why": "published release notes are a DATED record; this note named the enterprise-only tier before the owner ruling of 2026-09-11 (enterprise-only, ad hoc, no public surface names it). Rewriting a published note falsifies the record, so the measured count is pinned as history. No later tag carries an entry, so any NEW release naming it is refused."
       },
       "V2": {
         "n": 2,
@@ -19,6 +29,24 @@
       "V3": {
         "n": 1,
         "why": "the fourth of those JSON keys, same measurement (8 occurrences in the shipped CLI source, control 0). An exact-match key a caller greps for."
+      }
+    },
+    "cli-v2.6.1": {
+      "V12": {
+        "n": 1,
+        "why": "published release notes are a DATED record; this note named the enterprise-only tier before the owner ruling of 2026-09-11 (enterprise-only, ad hoc, no public surface names it). Rewriting a published note falsifies the record, so the measured count is pinned as history. No later tag carries an entry, so any NEW release naming it is refused."
+      }
+    },
+    "cli-v2.6.2": {
+      "V12": {
+        "n": 1,
+        "why": "published release notes are a DATED record; this note named the enterprise-only tier before the owner ruling of 2026-09-11 (enterprise-only, ad hoc, no public surface names it). Rewriting a published note falsifies the record, so the measured count is pinned as history. No later tag carries an entry, so any NEW release naming it is refused."
+      }
+    },
+    "cli-v2.6.3": {
+      "V12": {
+        "n": 1,
+        "why": "published release notes are a DATED record; this note named the enterprise-only tier before the owner ruling of 2026-09-11 (enterprise-only, ad hoc, no public surface names it). Rewriting a published note falsifies the record, so the measured count is pinned as history. No later tag carries an entry, so any NEW release naming it is refused."
       }
     },
     "v2.5.0": {

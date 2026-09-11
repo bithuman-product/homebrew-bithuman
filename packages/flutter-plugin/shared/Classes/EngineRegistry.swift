@@ -45,8 +45,7 @@ enum EngineRegistry {
       // COMBINED creation name `essence-2` (2026-07-02: agents.model stores it
       // verbatim; the platform folds it onto the light family, whose on-device
       // leg is this engine). Lockstep with Essence2Engine.id + the Dart
-      // kEssence2. essence-2-max (formerly essence-2-quality; both accepted)
-      // stays cloud-only (deliberately absent).
+      // kEssence2.
       id: EngineId(canonical: "essence2",
                    aliases: ["elevate", "essence-2", "essence-2-light", "essence-2-mobile"]),
       capabilities: .essence2),
@@ -54,7 +53,7 @@ enum EngineRegistry {
 
   /// Resolve a (possibly aliased) slug → its descriptor, falling back to the
   /// REQUIRED default engine (expression2) for unknown/missing slugs. A
-  /// cloud-only slug (e.g. `essence-2-quality`, no on-device engine) also has no
+  /// cloud-only slug (no on-device engine) also has no
   /// descriptor; it falls back to the default like any unservable slug — callers
   /// that must NOT degrade should pre-check `isCloudOnlyEngineSlug` (the app does
   /// this before ever requesting a local load).

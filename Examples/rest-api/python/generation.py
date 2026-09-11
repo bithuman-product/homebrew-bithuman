@@ -259,7 +259,7 @@ if __name__ == "__main__":
         print("  Provide a portrait --image; bitHuman generates a 10-second")
         print("  idle/driver video internally so it loops seamlessly")
         print("  (first frame == last frame). Applies to all models")
-        print("  (essence-1, expression-1, essence-2, essence-2-max, expression-2).")
+        print("  (essence-1, expression-1, essence-2, expression-2).")
         sys.exit(2)
 
     if args.agent_id and args.download:

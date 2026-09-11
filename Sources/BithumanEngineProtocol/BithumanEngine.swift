@@ -41,8 +41,8 @@ import Foundation
 /// engine's conformer ALSO carries its CLOUD-API name (`expression-2` for
 /// expression2; `essence-2-light` + `essence-2-mobile` for essence2) as an
 /// additional alias, so a slug arriving in the public/cloud taxonomy routes to
-/// the same on-device engine. (The GPU-only cloud tier `essence-2-quality` has
-/// no on-device engine — see `cloudOnlyEngineSlugs` — so it is NOT an alias.)
+/// the same on-device engine. A slug none of them matches is simply unknown —
+/// there is no third, "recognised but unservable" state on this surface.
 public struct EngineId: Hashable {
     public let canonical: String          // "expression2" | "essence2" | …
     public let aliases: [String]          // ["embody", "expression-2"] | …
@@ -55,13 +55,12 @@ public struct EngineId: Hashable {
 }
 
 /// Cloud-API tier names the app RECOGNISES but cannot serve on-device (no engine
-/// conforms to them). Today: the GPU-only premium tier, under BOTH its names —
-/// `essence-2-max` (the canonical premium name) and `essence-2-quality` (its
-/// accepted legacy alias). The registry returns no descriptor for these, so a
-/// caller can tell "known cloud-only tier" apart from "unknown slug" without
-/// pretending the on-device essence2 (light / a2x) engine can serve them.
-/// Mirrors the Dart `kCloudOnlyEngineSlugs`.
-public let cloudOnlyEngineSlugs: Set<String> = ["essence-2-quality", "essence-2-max"]
+/// conforms to them). EMPTY: this surface names no such tier, so a slug that no
+/// registered engine matches takes the ordinary unknown-slug path — the
+/// registry returns no descriptor and nothing pretends an on-device engine can
+/// serve it. The symbol is a FROZEN CARRIER (see Bhci.swift) and stays; only
+/// its members are gone. Mirrors the Dart `kCloudOnlyEngineSlugs`.
+public let cloudOnlyEngineSlugs: Set<String> = []
 
 /// True for a slug the cloud API serves but the device cannot (no on-device
 /// engine). Such a slug must NOT be loaded locally — surface it as cloud-only.

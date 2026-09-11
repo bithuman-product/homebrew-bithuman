@@ -60,13 +60,14 @@ public enum Bhci {
     public static let targets = ["gpu", "apple", "web", "android", "macOS/iOS"]
 
     public static let models = [
-        "essence-1", "essence-2", "essence-2-max",
+        "essence-1", "essence-2",
         "expression-1", "expression-2",
     ]
 
-    /// Kept in step with `cloudOnlyEngineSlugs` above — same fact, model names
-    /// rather than engine slugs.
-    public static let cloudOnlyModels = ["essence-2-max", "expression-1"]
+    /// Model-level locality: expression-1 serves on the gpu target only (owner
+    /// ruling 2026-09-08) and has no on-device engine on this surface, so a
+    /// handle to it is `.cloud`. Every other model this surface names is local.
+    public static let cloudOnlyModels = ["expression-1"]
 
     public enum Scope: String { case inScope = "in-scope", notApplicable = "n/a", unruled }
     public enum Locality: String { case local, cloud }
@@ -77,7 +78,6 @@ public enum Bhci {
     static let scopeTable: [String: [String: Scope]] = [
         "essence-1":     ["gpu": .inScope, "apple": .inScope, "web": .inScope, "android": .inScope, "macOS/iOS": .inScope],
         "essence-2":     ["gpu": .inScope, "apple": .inScope, "web": .inScope, "android": .inScope, "macOS/iOS": .inScope],
-        "essence-2-max": ["gpu": .inScope, "apple": .notApplicable, "web": .notApplicable, "android": .notApplicable, "macOS/iOS": .notApplicable],
         "expression-1":  ["gpu": .inScope, "apple": .notApplicable, "web": .notApplicable, "android": .notApplicable, "macOS/iOS": .notApplicable],
         "expression-2":  ["gpu": .inScope, "apple": .inScope, "web": .inScope, "android": .inScope, "macOS/iOS": .inScope],
     ]
@@ -89,7 +89,6 @@ public enum Bhci {
         "essence1": "essence-1",
         "essence2-light": "essence-2", "essence2-golden": "essence-2",
         "essence2": "essence-2", "elevate": "essence-2",
-        "essence2-quality": "essence-2-max", "essence2-max": "essence-2-max",
         "expression1": "expression-1",
         "expression2": "expression-2", "embody": "expression-2",
     ]
@@ -335,7 +334,7 @@ public enum Bhci {
     public static func capability(model: String, target: String) throws -> Capability {
         guard let row = scopeTable[model] else {
             throw BhciError(.modelNotOnTarget, subject: model,
-                            message: "\(model) is not one of the five models")
+                            message: "\(model) is not a model this surface names (see Bhci.models)")
         }
         guard let sc = row[target] else {
             throw BhciError(.planeUnavailable, subject: target,

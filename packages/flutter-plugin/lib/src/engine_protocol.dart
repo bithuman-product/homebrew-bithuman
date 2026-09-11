@@ -13,15 +13,12 @@
 //
 // CLOUD-API NAMES (added without disturbing the frozen on-device slugs): the
 // public REST/cloud taxonomy uses HYPHENATED names — `expression-2`,
-// `essence-2-light`, `essence-2-mobile`, `essence-2-quality`. The first three
-// map onto an on-device engine and are carried here as ADDITIONAL frozen aliases
-// (dual-accept widens to multi-accept; the canonical + the legacy `embody` /
-// `elevate` slugs keep matching byte-for-byte). `essence-2-quality` is GPU-ONLY
-// — it has NO on-device engine — so it is intentionally NOT an alias of the
-// on-device essence2 (light / a2x) engine; it is listed in
-// `kCloudOnlyEngineSlugs` so the app RECOGNISES it as a known cloud tier rather
-// than a typo, while `engineDescriptorFor` still returns null (there is no
-// on-device engine to load for it). See README "EngineId — routing identity".
+// `essence-2-light`, `essence-2-mobile`. Each maps onto an on-device engine
+// and is carried here as an ADDITIONAL frozen alias (dual-accept widens to
+// multi-accept; the canonical + the legacy `embody` / `elevate` slugs keep
+// matching byte-for-byte). A slug none of them matches is unknown, and
+// `engineDescriptorFor` returns null for it. See README "EngineId — routing
+// identity".
 //
 // Apache-2.0; (c) bitHuman.
 
@@ -75,8 +72,6 @@ const EngineDescriptor kExpression2 = EngineDescriptor(
 /// light family everywhere — the family this engine serves on-device).
 /// Aliases: `elevate` (legacy on-device slug, FROZEN) + the cloud light names +
 /// the combined name.
-/// NOTE: the cloud `essence-2-quality` tier is GPU-only and has NO on-device
-/// engine — it is deliberately absent here (see [kCloudOnlyEngineSlugs]).
 const EngineDescriptor kEssence2 = EngineDescriptor(
   canonical: 'essence2',
   aliases: <String>['elevate', 'essence-2', 'essence-2-light', 'essence-2-mobile'],
@@ -92,16 +87,11 @@ const List<EngineDescriptor> kEngineRegistry = <EngineDescriptor>[
 ];
 
 /// Cloud-API tier names that the app RECOGNISES but that have NO on-device
-/// engine (so [engineDescriptorFor] returns null for them by design). Today
-/// this is just the GPU-only premium tier, under BOTH its names:
-/// `essence-2-max` (the canonical premium name) and `essence-2-quality` (its
-/// accepted legacy alias). Keeping them here lets the app distinguish "known
-/// cloud-only tier" from "unknown slug / typo" without pretending the
-/// on-device essence2 (light/a2x) engine can serve it.
-const Set<String> kCloudOnlyEngineSlugs = <String>{
-  'essence-2-quality',
-  'essence-2-max',
-};
+/// engine (so [engineDescriptorFor] returns null for them by design). EMPTY:
+/// this surface names no such tier, so a slug no registered engine matches
+/// takes the ordinary unknown-slug path. The symbol stays (it mirrors the
+/// Swift `cloudOnlyEngineSlugs`, a frozen carrier); only its members are gone.
+const Set<String> kCloudOnlyEngineSlugs = <String>{};
 
 /// True for a slug the cloud API serves but the device cannot (no on-device
 /// engine). Such a slug must NOT be loaded locally — surface it as cloud-only.
