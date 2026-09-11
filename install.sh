@@ -11,6 +11,18 @@
 #
 # Environment overrides:
 #   BITHUMAN_VERSION         Pin a specific version (default: latest GitHub release tag).
+#                            ★WITH THE PIPED USAGE ABOVE, THE ASSIGNMENT GOES ON THE
+#                            `sh` SIDE OF THE PIPE, not at the front of the line:
+#                              curl -sSL <this script> | BITHUMAN_VERSION=cli-vX.Y.Z sh
+#                            (the printed hints name the raw URL, not install.bithuman.ai:
+#                             that vanity host STILL DOES NOT RESOLVE -- measured NXDOMAIN
+#                             2026-09-11 -- so a hint naming it strands the reader twice.
+#                             See INSTALL_BITHUMAN_AI_DNS.md; swap the hints back when the
+#                             DNS lands and the self-test arm below will keep them honest.)
+#                            `BITHUMAN_VERSION=... curl ... | sh` sets the variable for CURL;
+#                            the installer never sees it and silently resolves "latest"
+#                            instead -- which is exactly what has already failed whenever
+#                            this hint gets printed.
 #   BITHUMAN_INSTALL_DIR     Install location (default: ~/.local/bin, or
 #                            /usr/local/bin if running as root).
 #   BITHUMAN_NO_MODIFY_PATH  Set to 1 to suppress the PATH hint at the end.
@@ -345,6 +357,56 @@ SHIM
       printf '  FAIL  %-58s the control arm did not refuse at all\n' \
              "★control: an unserved arch is NOT sent to that channel"; _t_fail=1 ;;
   esac
+  # ── ★EVERY PRINTED `BITHUMAN_VERSION` HINT MUST ACTUALLY PIN ─────────────
+  # MEASURED 2026-09-11 on the published script: the escape hatch this file
+  # printed was `BITHUMAN_VERSION=cli-vX.Y.Z curl -sSL install.bithuman.ai | sh`.
+  # In that form the assignment binds to CURL, not to the `sh` that runs the
+  # installer, so the pin never arrived and the script silently resolved
+  # "latest" -- the one thing that had just failed, since this hint is printed
+  # only when resolution failed. Proved in a clean container: the printed form
+  # installed cli-v2.6.7 while asking for cli-v2.3.27; `| BITHUMAN_VERSION=... sh`
+  # installed cli-v2.3.27.
+  #
+  # ★GRADED BY EXECUTION, NOT BY READING. Every hint line is pulled out of this
+  # file and RUN with `sh` replaced by a shim that reports what reached it, so a
+  # rewrite into some other broken form fails here too. The count arm means
+  # deleting the hints cannot pass either.
+  cat > "$_st_tmp/bin/shpin" <<'SHPIN'
+#!/bin/sh
+printf '%s\n' "${BITHUMAN_VERSION:-<UNSET>}"
+SHPIN
+  chmod +x "$_st_tmp/bin/shpin"
+  # Assemble the pattern from halves so it cannot match its own call site.
+  _st_self="$0"
+  _hint_pat="BITHUMAN_"$(printf 'VERSION')"=cli-v"
+  _hints=$(grep -n "err \"" "$_st_self" 2>/dev/null | grep -- "$_hint_pat" \
+           | sed -e 's/^[0-9]*: *err "//' -e 's/"$//' -e 's/^ *//' -e 's/\\`/`/g')
+  _hint_n=$(printf '%s\n' "$_hints" | grep -c . || true)
+  if [ "${_hint_n:-0}" -lt 2 ]; then
+    printf '  FAIL  %-58s found %s, want >= 2\n' \
+           "★the pin hints are still printed at all" "${_hint_n:-0}"; _t_fail=1
+  else
+    printf '  PASS  %-58s %s\n' "★the pin hints are still printed at all" "$_hint_n"
+  fi
+  printf '%s\n' "$_hints" | while IFS= read -r _hint; do
+    [ -n "$_hint" ] || continue
+    case "$_hint" in *"|"*" sh") ;; *) continue ;; esac
+    # Run the hint verbatim with the real fetch replaced by a local cat and the
+    # trailing `sh` replaced by the reporting shim.
+    _cmd=$(printf '%s' "$_hint" \
+           | sed -e "s#curl -sSL [^ |]*#cat '$_st_self'#" -e 's# sh$# shpin#')
+    _got=$(PATH="$_st_tmp/bin:$PATH" sh -c "$_cmd" 2>/dev/null | head -1)
+    _want=$(printf '%s' "$_hint" | sed -n "s/.*$_hint_pat\([^ ]*\).*/cli-v\1/p")
+    if [ -n "$_got" ] && [ "$_got" = "$_want" ]; then
+      printf '  PASS  %-58s %s\n' "★a printed pin hint really pins" "$_got"
+    else
+      printf '  FAIL  %-58s the hint `%s` delivered %s, want %s\n' \
+             "★a printed pin hint really pins" "$_hint" "${_got:-<nothing>}" "$_want"
+      echo fail > "$_st_tmp/hintfail"
+    fi
+  done
+  [ -f "$_st_tmp/hintfail" ] && _t_fail=1
+
   rm -rf "$_st_tmp"
 
   if [ "$_t_fail" = 0 ]; then
@@ -413,11 +475,11 @@ if [ -z "$version" ]; then
     err "  Resolving a version costs about three of them. Wait for the window"
     err "  to roll, or skip resolution entirely by pinning:"
     err ""
-    err "      BITHUMAN_VERSION=cli-vX.Y.Z curl -sSL install.bithuman.ai | sh"
+    err "      curl -sSL https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/install.sh | BITHUMAN_VERSION=cli-vX.Y.Z sh"
     err ""
     err "  Check the budget with:  curl -s https://api.github.com/rate_limit"
     err ""
-    err "set BITHUMAN_VERSION=cli-vX.Y.Z (or vX.Y.Z) to pin a specific release."
+    err "set BITHUMAN_VERSION on the \`sh\` side of the pipe (form above) to pin a release."
     exit 1
   fi
 fi
@@ -475,7 +537,7 @@ case "$(target_availability "$version" "$tarball_name")" in
         err "    * use an x86_64 Linux host (or run the x86_64 build under emulation);"
         err "    * pin the last aarch64 release — note it predates engine vendoring, so"
         err "      \`bithuman run\` cannot render locally on it:"
-        err "          BITHUMAN_VERSION=cli-v2.3.27 sh install.sh"
+        err "          curl -sSL https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/install.sh | BITHUMAN_VERSION=cli-v2.3.27 sh"
         err "    * tell us you need it: hello@bithuman.ai"
         ;;
       x86_64-apple-darwin)
