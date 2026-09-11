@@ -196,9 +196,10 @@
 //   THE ENCODER IS NOT THE ONE v1.4.0 SHIPPED, AND THAT IS DELIBERATE. v1.4.0's
 //   `a2x_w2v.fp32.onnx` is byte-for-byte the 377 MB fp32 8 s artifact
 //   `models/MANIFEST.yaml` records as ROLLBACK ONLY under the owner ruling of
-//   2026-07-06 ("large fp32 encoders forbidden on every plane"); v1.5.1 carries
-//   the BLESSED `essence2-shared-w2v-fp16-v1` instead — the encoder the GPU
-//   workers and the ANE plane already serve with, 8.2x smaller.
+//   2026-07-06 ("large fp32 encoders forbidden on every surface"); v1.5.1
+//   carries the BLESSED `essence2-shared-w2v-fp16-v1` instead — the encoder the
+//   GPU workers and the Apple Neural Engine build already serve with, 8.2x
+//   smaller.
 //   MEASURED ON echelon (M-series, macOS 26.6.2), this manifest resolved at tag
 //   v2.12.0 and the resources taken from v1.5.1, `$BH_A2X_W2V` and `$W2V_ONNX`
 //   both unset so only the archive can answer:
@@ -206,8 +207,9 @@
 //       v1.5.0's archive, unpacked the way
 //         the SDK bootstrap unpacks it         create rc=-2  CREATE_REFUSED
 //       v1.5.1's archive, unpacked at the
-//         binary's own resourcePath            create rc=0, `TESSERA borrow
-//                                              ARMED — 1024 donors`, a2x ON
+//         binary's own resourcePath            create rc=0, the engine's
+//                                              detail store live with 1024
+//                                              sources, a2x ON
 //                                              (w2v …/w2v_ess_fp16_v1.onnx),
 //                                              151 frames at 1280x720
 //   The first two arms are the control: the engine REFUSES without a frontend
@@ -491,8 +493,8 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // tool that does not build the `.a`, and the four release gates (fails-closed,
 // meters, no-internal-name, and now the resources gate) all read 0 on these
 // exact bytes. Rendered on echelon before this release was pinned: create rc=0,
-// `TESSERA borrow ARMED — 1024 donors`, 540 frames at 1280x720 from a 12 s
-// clip, `$BH_A2X_W2V`/`$W2V_ONNX` unset. `onnxruntime` is carried forward
+// the engine's detail store live with 1024 sources, 540 frames at 1280x720 from
+// a 12 s clip, `$BH_A2X_W2V`/`$W2V_ONNX` unset. `onnxruntime` is carried forward
 // BYTE-IDENTICAL, so its checksum below does not move.
 //
 // ★ THE PREVIOUS ROLL, essence2-v1.5.0 ON 2026-09-11 — THE PUBLISHED ARCHIVE NO LONGER
