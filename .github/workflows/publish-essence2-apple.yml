@@ -103,7 +103,7 @@ jobs:
           set -euo pipefail
           rm -rf x && mkdir x && ditto -x -k src/libessence2.xcframework.zip x
           python3 - <<'PY'
-          import importlib.util, pathlib, re, subprocess, sys
+          import importlib.util, pathlib, re, subprocess, sys, tempfile
           spec = importlib.util.spec_from_file_location("g", "scripts/guard-public-vocabulary.py")
           g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
           rules = {r[0]: re.compile(r[1], re.I) for r in (g.TIER1 + g.TIER2) if r[0] in ("V12", "V13")}
@@ -111,11 +111,35 @@ jobs:
           # the grader proves it can fire before it grades: its own subjects, spelled apart
           assert rules["V12"].search("essence" + "-2-" + "max") and rules["V13"].search("essence" + "2_" + "quality")
           assert not rules["V12"].search("essence-2 engine, apple") and not rules["V13"].search("libessence2")
+
+          def read(path):
+              # ★RAW BYTES ON STDIN, never `strings -a <path>`. Handed a path, Apple's
+              # strings(1) recognises a static library as an ar archive and walks its
+              # MEMBERS: it skips the symbol index and stops at the first malformed
+              # header, so it reads almost none of the slice. On stdin both Apple's and
+              # GNU's strings scan the file as data, end to end.
+              # And that output is NOT utf-8: capture_output with text=True died on byte
+              # 0xd7 (run 34563397965, 04:45Z) — a crash the step then reported as a
+              # failed grade. Bytes in, lossy decode out, so a grade is a grade.
+              with open(path, "rb") as fh:
+                  out = subprocess.run(["strings", "-a"], stdin=fh, capture_output=True, check=True).stdout
+              return out.decode("utf-8", "replace")
+
+          # ...and the READING PATH proves it can fire before it grades, on bytes that
+          # look like the subject: an ar header, non-utf-8 filler, the banned name.
+          banned = ("essence" + "-2-" + "max").encode()
+          d = pathlib.Path(tempfile.mkdtemp())
+          (d / "red.a").write_bytes(b"!<arch>\n" + b"\xd7\xff\xfe" * 64 + b"\x00" + banned + b"\x00")
+          (d / "green.a").write_bytes(b"!<arch>\n" + b"\xd7\xff\xfe" * 64 + b"\x00" + b"essence-2 engine, apple" + b"\x00")
+          assert len(rules["V12"].findall(read(d / "red.a"))) >= 1, "the reading path is BLIND — it cannot see the name it grades"
+          assert len(rules["V12"].findall(read(d / "green.a"))) == 0, "the reading path is INDISCRIMINATE"
+
           slices = sorted(pathlib.Path("x").rglob("libessence2.a"))
           assert len(slices) == 3, f"expected 3 slices, found {slices}"
           red = 0
           for a in slices:
-              s = subprocess.run(["strings", "-a", str(a)], capture_output=True, text=True, check=True).stdout
+              s = read(a)
+              print(f"{a}: {len(s)} chars of strings")
               for k, rx in rules.items():
                   n = len(rx.findall(s)); red += n
                   print(f"{a}: {k} = {n}")
