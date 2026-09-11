@@ -1,0 +1,7 @@
+# Compiled Python is not source. CPython constant-folds the fragmented
+# patterns in scripts/guard-public-vocabulary.py, so a tracked .pyc of it
+# would spell every word that guard keeps out of this PUBLIC repo (it did,
+# once, on 2026-09-11). The guard refuses a tracked one; this stops the stage.
+__pycache__/
+*.pyc
+*.pyo

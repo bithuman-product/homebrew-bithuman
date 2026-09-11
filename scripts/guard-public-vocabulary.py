@@ -202,6 +202,19 @@ def tracked_files(root: str) -> list[str]:
     return out
 
 
+def compiled_artifacts(files: list[str]) -> list[str]:
+    """Tracked files that are COMPILED Python. Not source, and not harmless:
+    CPython constant-folds the fragmented patterns of this very guard when it
+    compiles it, so a tracked .pyc of this file spells every word the
+    fragments exist to keep out -- and read_text() skips it as binary, so the
+    tree scan is blind to exactly that file. Measured 2026-09-11: one such
+    file reached main (an in-process import of this guard wrote it, and a
+    blanket `git add -A` staged it; there was no root .gitignore). A tracked
+    .pyc is refused outright; the root .gitignore keeps it from being staged."""
+    return [f for f in files
+            if f.endswith((".pyc", ".pyo")) or "__pycache__/" in f]
+
+
 def read_text(path: str) -> str | None:
     """Return decoded text, or None for a binary file. Binaries are skipped
     because a hex digest reliably contains short tokens by chance -- but they
@@ -507,6 +520,11 @@ def selftest() -> int:
                    "V12/V13 must not match the tiers this surface serves"))
     checks.append(("clean text is clean", scan_text("a perfectly ordinary sentence") == {},
                    "clean input must score zero"))
+    checks.append(("a tracked .pyc is refused, source is not",
+                   compiled_artifacts(["scripts/__pycache__/g.cpython-314.pyc", "x.pyo",
+                                       "scripts/g.py", "docs/pycache.md"])
+                   == ["scripts/__pycache__/g.cpython-314.pyc", "x.pyo"],
+                   "compiled Python must be caught and plain source must not"))
 
     # ---- SURFACE 2: release notes. The corpus is INJECTED, so this arm
     #      needs no network and cannot be a fork bomb: it calls grade_releases
@@ -618,6 +636,15 @@ def main() -> int:
     if args.releases or args.update_releases:
         return run_releases(root, args.repo, args.limit, args.update_releases)
 
+    tracked = tracked_files(root)
+    compiled = compiled_artifacts(tracked)
+    if compiled:
+        print(f"REFUSED: {len(compiled)} tracked compiled-Python file(s). Not source, "
+              f"binary to the scan, and a .pyc of this guard spells its own patterns:")
+        for c in compiled:
+            print(f"  * {c}")
+        return 1
+
     found = scan_tree(root)
     base = load_baseline().get("files", {})
 
@@ -639,7 +666,7 @@ def main() -> int:
 
     errors, notices = ratchet(found, base, "--update")
 
-    scanned = len(tracked_files(root))
+    scanned = len(tracked)
     print(f"scanned {scanned} tracked files under {root}")
     for n in notices:
         print(f"  note: {n}")
