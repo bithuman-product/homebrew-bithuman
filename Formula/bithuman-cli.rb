@@ -75,7 +75,13 @@ class BithumanCli < Formula
   #   Apple M5, 10 core, QUIET (host load 2.2-8.3, foreign CPU 14-120%, no
   #   thermal or performance warning recorded at either end of any session):
   #     essence-2, 2.6.8 pre-fix build   16.4 / 16.6 / 16.8 fps end to end
-  #     essence-2, THESE BYTES           24.4 - 27.9 fps, median 25.2 (n=7)
+  #     essence-2, THESE BYTES           24.4 - 27.9 fps, median 25.5 (n=9),
+  #       two of the nine taken through a CLEAN-ROOM ANONYMOUS install.sh into
+  #       an empty HOME (25.7, 26.3) on a byte-identical binary
+  #     ★the FIRST render in a fresh HOME is 13.6 fps end to end — it fetches
+  #       the shared audio model and builds the accelerator's compiled-model
+  #       cache; the render loop is 36.9 fps on that same first run, so none
+  #       of that cost is per frame
   #     paired and interleaved, adjacent in time: 1.49x
   #     the render loop alone: 21.5 -> 36.5-40.1 fps (1.70x)
   #
@@ -450,7 +456,7 @@ class BithumanCli < Formula
       excluded; the `fps` field in the command's own --json is the output
       VIDEO rate (25), not throughput:
         essence-2     rc=0 · 408 frames · 1920x1080 · 24.4-27.9 fps end
-                      to end over 7 runs, median 25.2 — against 16.4-16.8
+                      to end over 9 runs, median 25.5 — against 16.4-16.8
                       for the same command in the 2.6.8 pre-fix build.
                       The render loop alone: 36.5-40.1 fps.
         ★No Apple M4 figure is quoted: no quiet M4 could be had, and the
