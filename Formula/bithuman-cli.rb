@@ -51,33 +51,65 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # ★2026-09-11, LATE: THIS FORMULA MOVED BACKWARDS, ON PURPOSE AND BY A
-  # RULING. It pinned cli-v2.6.7; it now pins cli-v2.6.6, and cli-v2.6.7 has
-  # been withdrawn to a DRAFT (hidden from anonymous download, nothing
-  # deleted, reversible in one command; its git tag is untouched because
-  # package manifests resolve from tags, not releases).
+  # ★2026-09-12: THE PIN MOVES FORWARD AGAIN, to cli-v2.6.8. It went
+  # BACKWARDS to 2.6.6 late on 2026-09-11 because a new bar was set that
+  # night — a release must MEASURE realtime (>= 25 fps unpaced, end to end)
+  # on the bytes it ships, per model, before it goes out — and neither 2.6.6
+  # nor the withdrawn 2.6.7 cleared it for essence-2.
   #
-  # WHY: a new release bar was set tonight — a release must MEASURE realtime
-  # (>= 25 fps unpaced, end to end) on the bytes it ships, per model, before
-  # it goes out. 2.6.7 was pressed before that bar existed and does not clear
-  # it for essence-2.
+  # WHAT CHANGED, and it is one defect. `bithuman render` and `bithuman run`
+  # are the same engine on the same avatar and they asked it for DIFFERENT
+  # render models: `run` for the one-frame model, `render` for the
+  # multi-frame one, which `render` then drove one frame at a time. On Apple
+  # silicon that one wrong name also switched off both accelerations the
+  # engine keeps for the one-frame model. 2.6.8 resolves the name once, in
+  # one place, for both commands, and a check living outside both files
+  # refuses a tree that reintroduces the split.
   #
-  # ★WHAT THIS COSTS, SAID PLAINLY RATHER THAN BURIED. Going back to 2.6.6
-  # reintroduces a defect 2.6.7 fixed: on macOS, expression-2 renders through
-  # a decoder two releases old — MEASURED at 22.5 dB against 34.3, which is
-  # genuinely different frames, not merely slower ones. It also gives up the
-  # Linux essence-2 2.86x that 2.6.7 carried. And it does not reach the new
-  # bar either: 2.6.6 clears 25 fps on essence-2 no more than 2.6.7 did. The
-  # order was chosen so that something resolvable always exists — 2.6.6 was
-  # restored from pre-release FIRST, this pin moved SECOND, and only then was
-  # 2.6.7 hidden — because the installer walks versions descending, skips
-  # pre-releases and REFUSES rather than guessing, so removing 2.6.7 with
-  # 2.6.6 still marked pre-release would have refused both routes outright.
+  # MEASURED ON THESE BYTES, span = the whole `bithuman render` process at
+  # the customer's wall (start to exit), unpaced, warm, 408 frames of a
+  # 16.3 s clip of real recorded speech at the avatar's native 1920x1080.
+  # The `fps` field in the command's own --json is the OUTPUT VIDEO RATE
+  # (25), not throughput, and is not what is quoted here.
+  #
+  #   Apple M5, 10 core, QUIET (host load 2.2-8.3, foreign CPU 14-120%, no
+  #   thermal or performance warning recorded at either end of any session):
+  #     essence-2, 2.6.8 pre-fix build   16.4 / 16.6 / 16.8 fps end to end
+  #     essence-2, THESE BYTES           24.4 - 27.9 fps, median 25.2 (n=7)
+  #     paired and interleaved, adjacent in time: 1.49x
+  #     the render loop alone: 21.5 -> 36.5-40.1 fps (1.70x)
+  #
+  #   ★NO Apple M4 FIGURE IS PUBLISHED. No quiet M4 could be had: the same
+  #   bytes read 11.3 to 21.9 fps end to end on a contended one, a 1.94x
+  #   swing on byte-identical output. A number we cannot stand behind is
+  #   worse than no number.
+  #
+  #   Linux x86_64, 32 core, FULLY LOADED (host load 23-35 throughout):
+  #     essence-2, pre-fix  4.4-5.1 fps ; THESE BYTES 5.7-6.2 fps ; 1.29x
+  #     paired. No realtime claim is made on that host in that state.
+  #
+  # THE PICTURE DOES NOT MOVE. The same avatar and audio through the pre-fix
+  # build and through these bytes produced a BIT-IDENTICAL mp4 — all 408
+  # frames, 9,470,609 B, one sha256 — delivered max|difference| = 0, PSNR
+  # infinite. Graded beside an identity control that reads clean and a
+  # negative control that reddens on one pixel changed by 64 placed outside
+  # the region the avatar occupies. ★That negative control read 79.9 dB on
+  # the whole-window PSNR limb — it would have PASSED a PSNR-only gate at
+  # max u8 64 — which is why both limbs are required and why the moved set
+  # is graded apart from the window.
+  #
+  # STILL OPEN, recorded rather than implied away: the expression-2 half of
+  # the per-model bar was NOT measured on these bytes. Every expression-2
+  # avatar on hand refuses on the Apple path for a provisioning reason the
+  # engine names itself (its re-provisioned Apple members are missing), and
+  # it refuses identically on 2.6.6, so it is not a 2.6.8 regression — but
+  # it is also not a measurement.
   #
   # The sha256 above was taken from the ASSET ITSELF, fetched anonymously
-  # with every credential scrubbed from the environment (5 env vars, 0
-  # matching token/secret/key/auth), not copied from the sidecar — the
-  # sidecar was then read separately and agrees.
+  # with every credential scrubbed from the environment (6 env vars, 0
+  # matching token/secret/key/auth/password/gh_/github, no ~/.netrc), not
+  # copied from the sidecar — the sidecar was then read separately and
+  # agrees.
   #
   # Superseded description, kept for the record: cli-v2.6.7 (2026-09-11). What a customer can
   # SEE change from 2.6.6: the essence-2 engine core this CLI ships
@@ -232,8 +264,10 @@ class BithumanCli < Formula
   # re-measured and survived three formula bumps, because nothing in the tap
   # reads the tarball back.
   #
-  # MEASURED 2026-09-08 on the very bytes this formula pins (sha256
-  # ed827aaa…), extracted from a quarantined anonymous download on echelon:
+  # MEASURED 2026-09-08 on the bytes this formula pinned THEN (sha256
+  # ed827aaa…), extracted from a quarantined anonymous download; the same
+  # reading was retaken on the bytes pinned NOW (ce0c24c5…, cli-v2.6.8) and
+  # is recorded under `caveats` below:
   # the tarball ships the essence-2 runtime as `lib/lible_core.dylib`, and
   # `bithuman render <essence-2>.imx -a speech.wav -o out.mp4 --json` returns
   # rc=0 — 300 frames, 1920x1080 @25 fps, on the CLI's own local render path.
@@ -241,12 +275,12 @@ class BithumanCli < Formula
   # tracks the drive audio. (`libessence2.dylib` is the APPLE/Swift engine — a
   # different artifact on a different axis; it is indeed not in this tarball
   # and the CLI does not use it.)
-  # (Engine core is libessence 3.1.3 / ABI 7 from cli-v2.6.7, 3.1.2 on 2.6.6, 3.1.0 on 2.6.5 — it read 2.3.8
+  # (Engine core is libessence 3.1.3 / ABI 7 on cli-v2.6.8 and cli-v2.6.7, 3.1.2 on 2.6.6, 3.1.0 on 2.6.5 — it read 2.3.8
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.6/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "29e197d7c74753cf37f64d06bf743f3d0ce8cd7b909784d66a30ddabd8f824f6"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.8/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "ce0c24c52850b73c074579fae37efc8270749fa377e0466d059b39761a87b7db"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
@@ -396,25 +430,40 @@ class BithumanCli < Formula
       on macOS today … for offline renders use a Linux host" — measured
       2026-09-04 on 2.5.1 and never re-measured. RE-MEASURED 2026-09-08
       on cli-v2.6.4 arm64 (the release this formula pinned then; it now
-      pins cli-v2.6.7), Apple silicon:
+      pins cli-v2.6.8), Apple silicon:
         essence-2     rc=0 · 300 frames · 1920x1080 @25 fps
         expression-2  rc=0 · 240 frames · 416x720 @20 fps
       RE-MEASURED 2026-09-11 on the cli-v2.6.6 arm64 tarball itself:
         essence-2     rc=0 · 300 frames · 1280x720 @25 fps · mouth-to-audio
                       lag 0 frames (the shipped 2.6.5 read +10 = 400 ms)
-      RE-MEASURED 2026-09-11 on the cli-v2.6.7 arm64 tarball ITSELF
-      (extracted from the exact bytes this formula pins, clean HOME):
+      RE-MEASURED 2026-09-11 on the cli-v2.6.7 arm64 tarball (built,
+      never published):
         expression-2  rc=0 · 300 frames · 1280x720 @25 fps · 30.5 fps ·
                       mouth-to-audio lag 0 frames · receipt frames 300
                       == frames in the file
         essence-2     rc=0 · 100 frames · 1920x1080 @25 fps · 8.59 and
                       8.71 fps over two runs
+      RE-MEASURED 2026-09-12 on the cli-v2.6.8 arm64 tarball ITSELF —
+      the exact bytes this formula now pins (sha256 ce0c24c5…), extracted
+      on a quiet 10-core Apple M5, warm, unpaced. The span is the WHOLE
+      `bithuman render` process at your wall, start to exit, nothing
+      excluded; the `fps` field in the command's own --json is the output
+      VIDEO rate (25), not throughput:
+        essence-2     rc=0 · 408 frames · 1920x1080 · 24.4-27.9 fps end
+                      to end over 7 runs, median 25.2 — against 16.4-16.8
+                      for the same command in the 2.6.8 pre-fix build.
+                      The render loop alone: 36.5-40.1 fps.
+        ★No Apple M4 figure is quoted: no quiet M4 could be had, and the
+         same bytes read 11.3-21.9 fps on a contended one.
+        ★expression-2 was NOT re-measured on these bytes — every avatar
+         on hand refuses on the Apple path for a provisioning reason the
+         engine names itself, on 2.6.6 and on 2.6.8 alike.
       Both audio-driven and both verified frame-by-frame against the
       drive audio. essence-1 is not renderable by this CLI on any
       platform and is unchanged by that.
       Offline renders need ffmpeg on PATH, and this formula installs it
       for you: `depends_on "ffmpeg"` since the 2026-09-08 revision, and
-      this one serves 2.6.7. If you took the tarball instead of
+      this one serves 2.6.8. If you took the tarball instead of
       `brew install`, run `brew install ffmpeg` yourself.
 
       Docs:    https://docs.bithuman.ai
