@@ -268,8 +268,44 @@ if [ "${1:-}" = "--self-test" ]; then
       printf '  FAIL  %-58s got %s, want %s\n' "$1" "$_got" "$3"; _t_fail=1
     fi
   }
-  _ts "cli-v2.6.7 is a REAL release"            cli-v2.6.7      RELEASE
-  _ts "★cli-v2.6.6 is a PRE-RELEASE"            cli-v2.6.6      PRERELEASE
+  # ★DERIVED FROM THE LIVE LISTING, NOT HARDCODED — and this is not a style
+  # preference, it is the defect these three lines carried. Until 2026-09-13 the
+  # first arm read `cli-v2.6.7 is a REAL release` and the second
+  # `cli-v2.6.6 is a PRE-RELEASE`. BOTH were true the day they were written and
+  # BOTH were false 48 hours later: 2.6.7 was rolled back to a DRAFT and never
+  # published (so the tag endpoint 404s anonymously and its state reads UNKNOWN),
+  # and 2.6.6 was un-pre-released to stand as the fallback. A self-test bound to
+  # mutable remote state rots into a red — and NOTHING IN CI RAN THIS FILE, so it
+  # rotted in silence. It is wired into release-coverage.yml in the same commit.
+  #
+  # The arms now ASK the API which tag is in which class and grade the CLASSIFIER
+  # on whatever it names. One listing call; no per-tag call, because the anonymous
+  # budget is 60/hour per source address and this whole self-test must fit in it.
+  #
+  # (No DRAFT arm is possible here: a draft is invisible to the anonymous API by
+  # design, which is exactly why the picker cannot select one.)
+  _rel_list=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100" || true)
+  _triples=$(printf '%s\n' "$_rel_list" \
+    | grep -E '"(tag_name|draft|prerelease)"[[:space:]]*:' \
+    | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/T \1/' \
+          -e 's/.*"draft"[[:space:]]*:[[:space:]]*\([a-z]*\).*/D \1/' \
+          -e 's/.*"prerelease"[[:space:]]*:[[:space:]]*\([a-z]*\).*/P \1/' \
+    | awk '$1=="T"{t=$2} $1=="D"{d=$2} $1=="P"&&t!=""{print t, d, $2}')
+  _one_real=$(printf '%s\n' "$_triples" | awk '$2=="false" && $3=="false" {print $1; exit}')
+  _one_pre=$(printf  '%s\n' "$_triples" | awk '$2=="false" && $3=="true"  {print $1; exit}')
+  # ★AND A CLASS THAT IS NOT THERE IS A FAILED READ, NOT A SKIP. This repo
+  # permanently carries both classes (the press marks every superseded release
+  # pre-release), so "I found none to grade" means the listing did not come back.
+  if [ -z "$_one_real" ]; then
+    printf '  FAIL  %-58s %s\n' "the listing offers a REAL release to grade" "none — could not look"; _t_fail=1
+  else
+    _ts "a tag the API calls a real release -> RELEASE"       "$_one_real" RELEASE
+  fi
+  if [ -z "$_one_pre" ]; then
+    printf '  FAIL  %-58s %s\n' "★the listing offers a PRE-RELEASE to grade" "none — could not look"; _t_fail=1
+  else
+    _ts "★a tag the API calls a pre-release -> PRERELEASE"     "$_one_pre" PRERELEASE
+  fi
   _ts "a tag that cannot exist -> UNKNOWN"      cli-v0.0.0-nope UNKNOWN
 
   # ★AND THE SELECTION ITSELF, not just the classifier. A resolver that reads
@@ -286,6 +322,24 @@ if [ "${1:-}" = "--self-test" ]; then
   else
     printf '  FAIL  %-58s picked %s which is %s\n' \
            "★the picker selects a release, never a pre-release" "$_sel" "$(release_state "$_sel")"; _t_fail=1
+  fi
+
+  # ★★AND THE TWO POPULATIONS MUST BE HANDED THE SAME BYTES. A Homebrew user
+  # gets the tag `Formula/bithuman-cli.rb` pins; a `curl | sh` user gets whatever
+  # the picker above selects. NOTHING GRADED THAT THEY AGREE — and they are two
+  # writers of one fact, edited by different steps of the press. If the formula
+  # pin moves and a release is not published (or is published and the formula is
+  # not bumped), the two populations silently diverge and every bug report after
+  # that is read against the wrong bytes.
+  _formula_tag=$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPO}/main/Formula/bithuman-cli.rb" 2>/dev/null \
+    | sed -n 's|.*releases/download/\([^/]*\)/bithuman-aarch64-apple-darwin\.tar\.gz.*|\1|p' | head -1)
+  if [ -z "$_formula_tag" ]; then
+    printf '  FAIL  %-58s %s\n' "the formula names a tag to compare against" "none — could not look"; _t_fail=1
+  elif [ "$_formula_tag" = "$_sel" ]; then
+    printf '  PASS  %-58s %s\n' "★curl|sh and brew install resolve the SAME tag" "$_sel"
+  else
+    printf '  FAIL  %-58s installer=%s formula=%s\n' \
+           "★curl|sh and brew install resolve the SAME tag" "$_sel" "$_formula_tag"; _t_fail=1
   fi
 
   # ★AND THE GUIDANCE ITSELF, GRADED ON THE RENDERED REFUSAL — not on the

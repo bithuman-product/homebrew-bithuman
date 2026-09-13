@@ -124,3 +124,37 @@ jobs:
       - name: grade the live formula pin
         timeout-minutes: 5
         run: python3 scripts/check-formula-asset-anonymous.py
+
+  # ── ★install.sh's OWN SELF-TEST, WHICH RAN NOWHERE ───────────────────────
+  # MEASURED 2026-09-13: `install.sh --self-test` is 120 lines of live arms —
+  # the asset-availability discriminator, the pre-release picker, the uname
+  # shim, the refusal text, the pin hints — and grep across every workflow in
+  # this tap found NOT ONE caller. It was written on 2026-09-11 to hold the
+  # resolver honest and has been executed by nothing since.
+  #
+  # ★AND IT HAD ALREADY ROTTED, which is how it was found: two arms named
+  # `cli-v2.6.7` a REAL release and `cli-v2.6.6` a PRE-RELEASE. Both were true
+  # when written; 48 hours later 2.6.7 had been rolled back to a DRAFT (the tag
+  # 404s anonymously, so its state reads UNKNOWN) and 2.6.6 had been
+  # un-pre-released to stand as the fallback. The file would have reported
+  # SELF-TEST FAILED to anyone who ran it, and nobody did. Those arms now derive
+  # their subjects from the live listing; this job is what keeps them honest.
+  #
+  # ★IT IS A LIVE PROBE AND THE ANONYMOUS BUDGET IS 60/HOUR PER SOURCE ADDRESS,
+  # so it runs on the same narrow triggers as the jobs above (a push or PR that
+  # touches install.sh, a publish, and once a day) — never on every push to
+  # every path.
+  installer-self-test:
+    name: install.sh proves its own resolver against the live releases
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+      # ★No token, deliberately: the picker's whole job is to see what a stranger
+      #   sees. A draft answers 200 to a credentialled caller, and the arm that
+      #   proves a draft can never be selected would then be decoration.
+      - name: the live arms
+        timeout-minutes: 8
+        run: sh install.sh --self-test
