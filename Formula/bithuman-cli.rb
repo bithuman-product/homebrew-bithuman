@@ -51,7 +51,16 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # ★2026-09-13: THE PIN MOVES FORWARD to cli-v2.6.11 (bithuman 7ce8ac226, both halves
+  # ★2026-09-13: THE PIN MOVES FORWARD to cli-v2.6.12 (bithuman f110526bd, both halves
+  # from that ONE commit; engine pin essence1-v3.1.3-e2.13 = bithuman-models main
+  # 527623fb4). ONE CHANGE against 2.6.11: essence-2's short-window audio frontend
+  # does less than half the work — its encoder now runs only over the part of each
+  # window the engine reads — and the picture is unchanged. It arrives by the same
+  # fetch as before and replaces the previous frontend files on the first render.
+  # Same engine core, same picture, same install.
+  #
+  # Superseded description, kept for the record: cli-v2.6.11 (2026-09-13).
+  # ★2026-09-13: THE PIN MOVED FORWARD to cli-v2.6.11 (bithuman 7ce8ac226, both halves
   # from that ONE commit; engine pin essence1-v3.1.3-e2.12 = bithuman-models main
   # 8e8b2ca17). ONE CHANGE against 2.6.10: the essence-2 short-window audio frontend
   # now reaches machines that ALREADY had the shared encoder. 2.6.10 fetched the two
@@ -321,8 +330,8 @@ class BithumanCli < Formula
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.11/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "c0f8c939a7098cf1123e4dfe4770b8ddb696973b7050cced2dde8163d7c4dbde"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.12/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "2edbd49b3b5f3d75e655e41ac6c9d826042d79bc859a4fe656684121939bf407"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
