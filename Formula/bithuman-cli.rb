@@ -51,6 +51,17 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
+  # ★2026-09-13: THE PIN MOVES FORWARD to cli-v2.6.9 (bithuman 8bb4d51cf,
+  # both halves from that ONE commit; engine pin essence1-v3.1.3-e2.7 =
+  # bithuman-models main 20145d56a). ONE CHANGE against 2.6.8: `bithuman
+  # render --json` now reports `render_fps` — steady-state frames per
+  # second after model load and warm-up (the number the performance page
+  # uses) — beside `render_seconds`, both `null` when they cannot be
+  # measured, never 0. `fps` is still the OUTPUT VIDEO RATE. Same engine
+  # core (libessence 3.1.3 / ABI 7), same picture, same install; the 2.6.8
+  # readings below are unchanged and still describe the render path.
+  #
+  # Superseded description, kept for the record: cli-v2.6.8 (2026-09-12).
   # ★2026-09-12: THE PIN MOVES FORWARD AGAIN, to cli-v2.6.8. It went
   # BACKWARDS to 2.6.6 late on 2026-09-11 because a new bar was set that
   # night — a release must MEASURE realtime (>= 25 fps unpaced, end to end)
@@ -272,7 +283,8 @@ class BithumanCli < Formula
   #
   # MEASURED 2026-09-08 on the bytes this formula pinned THEN (sha256
   # ed827aaa…), extracted from a quarantined anonymous download; the same
-  # reading was retaken on the bytes pinned NOW (ce0c24c5…, cli-v2.6.8) and
+  # reading was retaken on the bytes pinned then (ce0c24c5…, cli-v2.6.8; the
+  # pin is now ffd348f2…, cli-v2.6.9, the same render path) and
   # is recorded under `caveats` below:
   # the tarball ships the essence-2 runtime as `lib/lible_core.dylib`, and
   # `bithuman render <essence-2>.imx -a speech.wav -o out.mp4 --json` returns
@@ -281,12 +293,12 @@ class BithumanCli < Formula
   # tracks the drive audio. (`libessence2.dylib` is the APPLE/Swift engine — a
   # different artifact on a different axis; it is indeed not in this tarball
   # and the CLI does not use it.)
-  # (Engine core is libessence 3.1.3 / ABI 7 on cli-v2.6.8 and cli-v2.6.7, 3.1.2 on 2.6.6, 3.1.0 on 2.6.5 — it read 2.3.8
+  # (Engine core is libessence 3.1.3 / ABI 7 on cli-v2.6.9, cli-v2.6.8 and cli-v2.6.7, 3.1.2 on 2.6.6, 3.1.0 on 2.6.5 — it read 2.3.8
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.8/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "ce0c24c52850b73c074579fae37efc8270749fa377e0466d059b39761a87b7db"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.9/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "ffd348f2853cf012c7df7e967b107aa7c226d31117fb8a53885440d60aa931ae"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
@@ -436,7 +448,7 @@ class BithumanCli < Formula
       on macOS today … for offline renders use a Linux host" — measured
       2026-09-04 on 2.5.1 and never re-measured. RE-MEASURED 2026-09-08
       on cli-v2.6.4 arm64 (the release this formula pinned then; it now
-      pins cli-v2.6.8), Apple silicon:
+      pins cli-v2.6.9), Apple silicon:
         essence-2     rc=0 · 300 frames · 1920x1080 @25 fps
         expression-2  rc=0 · 240 frames · 416x720 @20 fps
       RE-MEASURED 2026-09-11 on the cli-v2.6.6 arm64 tarball itself:
