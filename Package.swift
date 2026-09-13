@@ -590,7 +590,7 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // byte-identical to v1.1.0 and its checksum below does not move. Re-fetched
 // anonymously after upload and re-hashed; the sidecars are again 65 bytes.
 // ---------------------------------------------------------------------------
-let essence2Tag = "essence2-v1.5.1"
+let essence2Tag = "essence2-v1.6.0"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -720,7 +720,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "d95d08202989345b74bcb17dbc0e3ebc329636c1565a6cb2479da8e0e62339dd"
+            checksum: "dd6e7c31c9eef04a86a455e3d3a00299ab54fcfabc19078328c52a94df8639b5"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
