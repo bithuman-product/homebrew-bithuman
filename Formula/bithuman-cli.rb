@@ -51,7 +51,18 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # ★2026-09-13: THE PIN MOVES FORWARD to cli-v2.6.10 (bithuman 494b18efe,
+  # ★2026-09-13: THE PIN MOVES FORWARD to cli-v2.6.11 (bithuman 7ce8ac226, both halves
+  # from that ONE commit; engine pin essence1-v3.1.3-e2.12 = bithuman-models main
+  # 8e8b2ca17). ONE CHANGE against 2.6.10: the essence-2 short-window audio frontend
+  # now reaches machines that ALREADY had the shared encoder. 2.6.10 fetched the two
+  # window files only when it had to fetch the encoder too, so a machine that had
+  # rendered essence-2 before kept the encoder it had and never received the pair —
+  # it rendered correctly and more slowly and said so in one line. The pair is now
+  # looked for beside whichever encoder the CLI actually resolves. Nothing to
+  # configure; same engine core, same picture, same install.
+  #
+  # Superseded description, kept for the record: cli-v2.6.10 (2026-09-13).
+  # ★2026-09-13: THE PIN MOVED FORWARD to cli-v2.6.10 (bithuman 494b18efe,
   # both halves from that ONE commit; engine pin essence1-v3.1.3-e2.11 =
   # bithuman-models main 5eccacce6). ONE CHANGE against 2.6.9: the
   # essence-2 short-window audio frontend now reaches the machine by the
@@ -310,8 +321,8 @@ class BithumanCli < Formula
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.10/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "f586a62e66cb955d0843b9511ba8f3655e97d83040435bbd29a887fa0dab093c"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.11/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "c0f8c939a7098cf1123e4dfe4770b8ddb696973b7050cced2dde8163d7c4dbde"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
