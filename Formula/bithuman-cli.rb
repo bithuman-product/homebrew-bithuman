@@ -51,7 +51,15 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # ★2026-09-13: THE PIN MOVES FORWARD to cli-v2.6.12 (bithuman f110526bd, both halves
+  # ★2026-09-13: THE PIN MOVES FORWARD to cli-v2.6.13 (bithuman 285a154cc, both halves
+  # from that ONE commit; engine pin essence1-v3.1.3-e2.13, unchanged). ONE CHANGE against
+  # 2.6.12: the audio frontend files already on a machine are now checked against the ones
+  # this release expects, and replaced when they differ. 2.6.12 kept whatever was already
+  # there, so only fresh installs got its faster frontend; the picture was identical either
+  # way. Same engine core, same picture, same install.
+  #
+  # Superseded description, kept for the record: cli-v2.6.12 (2026-09-13).
+  # ★2026-09-13: THE PIN MOVED FORWARD to cli-v2.6.12 (bithuman f110526bd, both halves
   # from that ONE commit; engine pin essence1-v3.1.3-e2.13 = bithuman-models main
   # 527623fb4). ONE CHANGE against 2.6.11: essence-2's short-window audio frontend
   # does less than half the work — its encoder now runs only over the part of each
@@ -330,8 +338,8 @@ class BithumanCli < Formula
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.12/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "2edbd49b3b5f3d75e655e41ac6c9d826042d79bc859a4fe656684121939bf407"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.13/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "de88a115c45cae28509a1b57c7309b6a46781276a0a1f31bf73eb0871fa4a96f"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
