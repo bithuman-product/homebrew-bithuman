@@ -51,7 +51,21 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
-  # ★2026-09-13: THE PIN MOVES FORWARD to cli-v2.6.13 (bithuman 285a154cc, both halves
+  # ★2026-09-13: THE PIN MOVES FORWARD to cli-v2.6.14 (bithuman 3482ffdf4, both halves
+  # from that ONE commit; engine pin essence1-v3.1.3-e2.16 = bithuman-models 30ff5ea49).
+  # ONE CHANGE against 2.6.13, and it is a macOS one: `bithuman render` now compresses the
+  # video on the Mac's HARDWARE video encoder instead of on the CPU. It was spending more
+  # processor time compressing than rendering — libx264 at 519% of a core against the
+  # engine's 141% on the same ten — so the rest of the machine stays responsive while a
+  # render runs, and the run-to-run variation largely goes away. THE PICTURE IS THE SAME:
+  # the quality setting was chosen to match what 2.6.13 produced, measured frame by frame
+  # against an uncompressed reference (48.956 dB against 48.743), not to make files smaller.
+  # If an ffmpeg has no Apple hardware encoder — on Linux, or a custom build — nothing
+  # changes and nothing fails; every render prints which encoder it used. Linux and Windows
+  # are byte-for-byte unchanged. Same engine core, same picture, same install.
+  #
+  # Superseded description, kept for the record: cli-v2.6.13 (2026-09-13).
+  # ★2026-09-13: THE PIN MOVED FORWARD to cli-v2.6.13 (bithuman 285a154cc, both halves
   # from that ONE commit; engine pin essence1-v3.1.3-e2.13, unchanged). ONE CHANGE against
   # 2.6.12: the audio frontend files already on a machine are now checked against the ones
   # this release expects, and replaced when they differ. 2.6.12 kept whatever was already
@@ -338,8 +352,8 @@ class BithumanCli < Formula
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.13/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "de88a115c45cae28509a1b57c7309b6a46781276a0a1f31bf73eb0871fa4a96f"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.14/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "58db02ce11f017058391cd7d5fcb673ef899cd2f3fa19584b962c6e87d524484"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball

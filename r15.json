@@ -1,0 +1,1 @@
+{"error":{"code":"MISSING_AUTH","message":"Missing api-secret header","httpStatus":401},"status":"error","status_code":401}

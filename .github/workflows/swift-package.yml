@@ -1,0 +1,88 @@
+# swift-package.yml — the public Swift package must actually resolve.
+#
+# ★ THIS REPO HAD NO SWIFT CI AT ALL. Measured 2026-08-26: six workflows
+# (no-large-files, preflight, publish-mcp, publish-pubdev, release-cli,
+# release-pypi) and `grep -rl swift .github/workflows/` matched NONE of them.
+# `Package.swift` is the manifest every outside Swift developer resolves — it
+# carries a `binaryTarget` URL and a checksum for a 55 MB asset on a GitHub
+# release — and nothing in this org had ever built it.
+#
+# The two ways it breaks are both invisible until a customer hits them:
+#   • an asset re-uploaded after its checksum was pasted. Not hypothetical here —
+#     commit 2a7cd37 is "formula(bithuman-cli): re-pin mac sha256 after linux-lane
+#     rebuild re-uploaded the asset", the same accident on the Homebrew formula.
+#     On a binaryTarget it reads:
+#       checksum of downloaded artifact of binary target 'bitHumanKit' (…e9db)
+#       does not match checksum specified by the manifest (…e9d0)
+#   • a `releaseTag` bump that moves an asset URL onto a tag that does not carry
+#     it: `failed downloading … badResponseStatusCode(404)`.
+#
+# `swift build` is deliberately the check rather than a re-implementation: it IS
+# the consumer path — it downloads every binary artifact and verifies every
+# checksum with SwiftPM's own code, not with ours.
+name: swift-package
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Package.swift"
+      - "Package.resolved"
+      - "Sources/**"
+      - "Tests/**"
+      - ".github/workflows/swift-package.yml"
+  pull_request:
+    paths:
+      - "Package.swift"
+      - "Package.resolved"
+      - "Sources/**"
+      - "Tests/**"
+      - ".github/workflows/swift-package.yml"
+  # The assets can change without a commit here, so this also runs on a clock.
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: swift-package-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: resolve + build the public package (Apple Silicon)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      # ★ A COLD RESOLVE EXITS 1 ON A HEADLESS MAC EVEN WHEN THE DOWNLOAD SUCCEEDED
+      # — measured on alpharetta 2026-08-25: `error: Failed to find credentials for
+      # 'https://github.com' in keychain: status -25308`, no build attempted, and
+      # the very next invocation exits 0. `--disable-keychain` is one flag apart on
+      # the same cold state and is cold-clean, so it is used here deliberately, not
+      # as a workaround for something this repo could fix.
+      - name: swift build (this downloads and CHECKSUM-VERIFIES every binaryTarget)
+        run: swift build --disable-keychain -v 2>&1 | tail -40
+
+      # "Build complete!" on a package whose products were all silently omitted
+      # would be a vacuous pass, so assert the manifest actually declares binary
+      # artifacts before believing the green.
+      - name: assert the manifest is not vacuously green
+        run: |
+          set -euo pipefail
+          n=$(grep -c '\.binaryTarget(' Package.swift || true)
+          echo "binaryTargets declared: $n"
+          if [ "$n" -lt 1 ]; then
+            echo "::error::Package.swift declares ZERO binaryTargets — either this package publishes nothing, or the manifest lost its products. A green 'swift build' here would be measuring nothing."
+            exit 1
+          fi
+
+      - name: swift test (the source Layer-0 protocol)
+        run: swift test --disable-keychain 2>&1 | tail -30
