@@ -1,5 +1,11 @@
 # bitHuman Examples
 
+> **These examples have a new home:** [github.com/bithuman-product/bithuman-examples](https://github.com/bithuman-product/bithuman-examples).
+> That repository is now the canonical copy and where the examples are maintained.
+>
+> This copy stays in place so existing links keep working. Please make changes in the new
+> repository — edits here will not be carried over.
+
 Working code you can run. Each example is self-contained — pick one, follow its README, and you'll have a talking avatar running.
 
 ## Where to start
