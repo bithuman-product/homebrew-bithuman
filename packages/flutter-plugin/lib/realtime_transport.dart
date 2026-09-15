@@ -246,7 +246,6 @@ class WebRTCTransport implements RealtimeTransport {
   final OpenAIWebRTCSession _session;
   StreamSubscription<dynamic>? _remoteAudioSub;
   StreamSubscription<dynamic>? _interruptForwardSub;
-  StreamSubscription<bool>? _speakingSub;
   // WebRTC transport doesn't surface mic/bot levels yet — getStats()
   // audio levels are wireable but TBD. Empty broadcast controllers
   // satisfy the contract (no emissions ≠ "level is zero").
@@ -296,18 +295,6 @@ class WebRTCTransport implements RealtimeTransport {
         await avatar.interrupt();
       } catch (_) {/* swallowed */}
     });
-    // Android frames path: the avatar plays the canned drive protocol, so
-    // forward the "agent voice is audibly playing" window and the plugin
-    // keeps the mouth in its IDLE ranges between responses (setSpeaking +
-    // motion_ranges.json sidecar). iOS drives the mouth from the real
-    // lipsync PCM (attachWebrtcRemoteAudio above) and has no such method.
-    if (Platform.isAndroid) {
-      _speakingSub = _session.agentSpeakingStream.listen((sp) async {
-        try {
-          await avatar.setSpeaking(sp);
-        } catch (_) {/* swallowed; mouth just keeps the legacy loop */}
-      });
-    }
     await _session.start();
     // The local audio track only exists after getUserMedia (inside start), so a
     // mute requested before start() (e.g. restart-while-muted) would otherwise
@@ -327,7 +314,6 @@ class WebRTCTransport implements RealtimeTransport {
   Future<void> dispose() async {
     await _remoteAudioSub?.cancel();
     await _interruptForwardSub?.cancel();
-    await _speakingSub?.cancel();
     await _micLevel.close();
     await _botLevel.close();
     await _session.dispose();
@@ -571,9 +557,13 @@ RealtimeTransport pickTransport({
       systemPrompt: systemPrompt,
     );
   }
+  // Every platform takes the WebSocket transport by default: the plugin's native
+  // audio surface (speaker + echo-cancelled mic) exists on macOS, iOS AND Android,
+  // and the WebSocket path is the one whose bot PCM the avatar lipsyncs from
+  // sample-accurately. WebRTC stays an explicit opt-in A/B.
   final wantWebrtc =
       (transportOverride ?? _kTransportDefine).toLowerCase() == 'webrtc';
-  if (Platform.isAndroid || wantWebrtc) {
+  if (wantWebrtc) {
     return WebRTCTransport(
       apiKey: apiKey,
       avatar: avatar,

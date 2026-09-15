@@ -1,5 +1,25 @@
 ## Unreleased
 
+* **Android half of the plugin.** `android/` implements the SAME `ai.bithuman.avatar`
+  MethodChannel and `ai.bithuman.avatar.mic/<textureId>/<gen>` EventChannel the Apple
+  halves serve, so ONE Flutter app runs on a Galaxy with byte-for-byte the widgets it
+  runs on an iPhone. Engine: expression-2 through the published
+  `ai.bithuman:expression2-android` AAR (pinned 0.4.6 — Maven Central carries 0.4.1 at
+  the time of writing, so until 0.4.6 is published there this half resolves from
+  mavenLocal only; that is the press gate, stated here on purpose). On Android
+  `load(path)` takes the agent CODE and `apiSecret`: the identity is fetched through
+  the metered door into the SDK's own store. Presentation is `AvatarPlayer.kt` — the
+  audited one-unit A/V player from the Android chat example (a frame and its 50 ms of
+  sound are one object, presented against the device's own sample counter; idle is the
+  same machinery, from the SDK's `idleLoop` member with the example's download as the
+  fallback) — adopted as a file behind a SurfaceTexture sink, not re-implemented.
+  `MicCapture.kt` carries the echo-cancelled, HALF-DUPLEX microphone (silence is sent
+  while the agent is audible, never a hole). The Dart transport's Android→WebRTC detour
+  and its canned-mouth `setSpeaking` branch are deleted: every platform takes the
+  WebSocket transport, whose bot PCM the avatar lipsyncs from. The consuming app must
+  set `packaging { jniLibs { useLegacyPackaging = true } }` or the Hexagon delegate
+  cannot open its libraries and the SDK falls back to the CPU silently.
+
 * **Essence 2 (on-device Elevate) `.elevatedir` download flow.** Added
   `fetchEssence2Catalog` + `downloadEssence2Bundle` (+ `Essence2CatalogEntry`)
   — the Elevate twin of the Essence `.imx` model_url flow. The client fetches
