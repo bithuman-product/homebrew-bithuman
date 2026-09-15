@@ -431,11 +431,12 @@ class AvatarPlayer(
             sessionSamples += SAMPLES_PER_FRAME
             idleAt = (idleAt + 1) % idleClip.size     // forward-only wrap, never ping-pong
         }
-        // PLUGIN: the engine outlives the player. The plugin creates the Expression2Avatar
-        // and closes it in dispose(); a player is stopped and replaced when the app leaves
-        // and returns to the screen (setIdleHold). The example's player closed the engine
-        // here — measured 2026-09-16: the next player crashed the process on its first
-        // pull ("this Expression2Avatar is closed"). The creator closes; the player does not.
+        // ★ THE PLAYER DOES NOT CLOSE THE ENGINE IT DID NOT CREATE. It used to, here,
+        // and it cost the demos lane a crash on the first re-adoption: in an app that
+        // HOLDS one avatar across several players (hide/show, idle hold), stopping a
+        // player closed the engine and the next player's first pull() threw
+        // `this Expression2Avatar is closed`. Whoever calls Expression2Avatar.create
+        // calls close — BithumanPlugin, in dispose(), here.
     }
 
     private fun admitSpeech(frame: Bitmap, slot: Int, body: ByteArray) {
