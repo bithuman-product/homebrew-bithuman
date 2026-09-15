@@ -13,6 +13,18 @@ One repo, **one tag prefix per artifact**. Cut a tag, CI does the rest. Don't mi
 
 **Why the prefixes:** SwiftPM resolves packages by **bare semver tags**, so the bare `v*` namespace is the **Swift SDK's alone**. The CLI moved to `cli-v*` to stop colliding (old bare CLI tags ≤ `v2.3.25` are frozen history). `install.sh` and the formula follow `cli-v*` (with a fallback to the old bare tags until the next CLI release).
 
+**The Latest badge is a separate, sticky flag — only `cli-v*` may claim it.** `gh release create` sets `make_latest=true` unless told otherwise, so **every** non-CLI publish in this repo takes `/releases/latest` from the newest CLI, whatever the dates say. Measured twice: 2026-09-15 `essence2-v1.6.3` held it over the newer `cli-v2.6.20` (fixed for that lane by `--latest=false` in `publish-essence2-apple.yml`, commit `626d828`), and hours later the hand-cut `flutter-plugin-vendor-v1` took it again. So pass **`--latest=false`** on every `gh release create` here that is not a `cli-v*` release — from a workflow **or by hand**.
+
+Clearing the flag on the thief is **not enough**: with `make_latest=false` alone GitHub falls back to the newest non-draft, non-prerelease release by `created_at` and hands the badge straight back (measured 2026-09-15 on `flutter-plugin-vendor-v1` — `/releases/latest` still returned it). Re-pin the CLI explicitly, which touches metadata only and leaves assets and download URLs byte-for-byte intact:
+
+```sh
+R=bithuman-product/homebrew-bithuman
+gh api -X PATCH repos/$R/releases/$(gh api repos/$R/releases/tags/<thief-tag>  --jq .id) -f make_latest=false &&
+gh api -X PATCH repos/$R/releases/$(gh api repos/$R/releases/tags/cli-v<x.y.z> --jq .id) -f make_latest=true
+```
+
+Never fix this by deleting, retagging or moving a release — `flutter-plugin-vendor-v1` is fetched by `packages/flutter-plugin/scripts/bootstrap.sh` against **digests pinned in that script**, so its bytes and URLs must not move. `install.sh` is unaffected by the badge either way: it resolves `cli-v*` through its own `pick_latest_real_release()` and never reads `/releases/latest`.
+
 ## macOS code signing (CLI)
 
 The CLI repo's `scripts/release-macos.sh sign` Developer ID signs every Mach-O it
@@ -301,6 +313,7 @@ would change the tag, not the vintage. Refusing is the correct outcome here;
 - **MCP** — bump `packages/python-mcp/pyproject.toml`, `git tag mcp-v<x.y.z>`.
 - **Flutter plugin** — enable *Automated Publishing* on `pub.dev/packages/bithuman/admin` once, bump `packages/flutter-plugin/pubspec.yaml`, `git tag flutter-v<x.y.z>`.
 - **CLI** — build in `bithuman-cli`, publish the tarballs as a **`cli-v<x.y.z>`** Release here, bump `Formula/bithuman-cli.rb` (`url`/`version`/`sha256`).
+- **Flutter plugin vendor bundle** — `flutter-plugin-vendor-v<n>`, hand-cut and **immutable**: the public build outputs `packages/flutter-plugin/scripts/bootstrap.sh` fetches anonymously against digests **pinned in that script** (`embody-models.tar.gz`, `onnxruntime.xcframework.zip`, and `manifest.json` for a human to verify against). Publish it with **`--latest=false`**. Never re-upload an asset under an existing vendor tag — cut `-v<n+1>` and bump the pins.
 - **Swift SDK** — cut a bare `v<x.y.z>` **above** the highest existing bare tag (`v2.3.25`), **tag-only** (no Release object so `install.sh` ignores it), with `Package.swift`'s `binaryTarget` URL+checksum pointing at a hosted xcframework. Consumers pin `.package(url: …/homebrew-bithuman, from: "<x.y.z>")`.
 
 > PyPI is **yank-only**, pub.dev is **retract-only** — publishes are permanent. Tag deliberately; dry-run first.
