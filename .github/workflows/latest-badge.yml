@@ -1,0 +1,82 @@
+# latest-badge.yml — does /releases/latest still resolve to the CLI?
+#
+# `https://github.com/bithuman-product/homebrew-bithuman/releases/latest` and a
+# bare `gh release view` answer with whichever release holds GitHub's Latest
+# flag. Only a `cli-v*` release may hold it (RELEASE.md, "The Latest badge is a
+# separate, sticky flag"): that URL is what a tool or a human reads to learn the
+# CLI version, and a non-CLI release holding it hands the reader the wrong tag,
+# the wrong assets and the wrong notes — with a 200, so nothing looks broken.
+#
+# ★WHY A DETECTOR AND NOT ANOTHER FLAG. `gh release create` sets
+# `make_latest=true` unless told otherwise, so every non-CLI publish here takes
+# the badge. It was taken twice in fourteen hours on 2026-09-15 — `essence2-v1.6.3`,
+# then the hand-cut `flutter-plugin-vendor-v1`. Two measured facts close the
+# flag-only route off:
+#   1. `--latest=false` does not undo a theft that already happened. With the
+#      flag merely cleared GitHub falls back to the newest non-draft,
+#      non-prerelease release by `created_at` — which was still the thief. Only
+#      an explicit `make_latest=true` re-pin on the CLI release moved it back.
+#   2. No workflow publishes `flutter-plugin-vendor-v*` or the tap's bare `v2.x`
+#      releases; they are cut BY HAND, so there is no workflow to add a flag to.
+#      Commit 626d828 added `--latest=false` to `publish-essence2-apple.yml` and
+#      closed exactly one of the ways in. Detection is the cheap control for the
+#      rest.
+#
+# `release: [published, edited]` is the trigger that matters: the badge moves on
+# a publish, and `edited` is how it moves with no commit behind it — a release
+# re-published or flipped in the web UI touches nothing a `push` could see. The
+# `push`/`pull_request` arms are path-filtered to this gate's own two files, so
+# a change to the gate is graded by the gate.
+#
+# ★THE SELF-TEST RUNS FIRST AND IT NEEDS NO NETWORK, which is the point: the
+# instrument is proven on exactly the runs where the network is what broke. Its
+# arm count is fixed, so an arm that stops running is a failure and not a
+# quieter green.
+name: Latest badge — /releases/latest must resolve to a cli-v* release
+
+on:
+  release:
+    types: [published, edited]
+  push:
+    paths:
+      - 'tools/verify_latest_badge.py'
+      - '.github/workflows/latest-badge.yml'
+  pull_request:
+    paths:
+      - 'tools/verify_latest_badge.py'
+      - '.github/workflows/latest-badge.yml'
+  workflow_dispatch:
+  # ★A THEFT BY HAND ANSWERS TO NO TRIGGER ABOVE except `release`, and a badge
+  #  re-pinned by hand hours later leaves no event at all — so this gate is only
+  #  finished once it also runs on a clock. The schedule is left commented out
+  #  deliberately: the coordinator enables it, not this change.
+  # schedule:
+  #   - cron: '23 6 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  latest-badge:
+    name: the Latest badge is held by the CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      # Each command is its own step: a single `run:` block reports its FIRST
+      # failure and hides the rest.
+      - name: the detector can refuse (self-test, in-process, no network)
+        timeout-minutes: 5
+        run: python3 tools/verify_latest_badge.py --selftest
+
+      # The job's own token only lifts the rate limit — the badge is the same
+      # for every caller, and `/releases/latest` never returns a draft, so a
+      # credentialled read sees exactly what a stranger sees. Without it a
+      # shared-runner 403 would read as CANNOT CHECK (exit 2) and cry wolf.
+      - name: grade the live badge
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/verify_latest_badge.py
