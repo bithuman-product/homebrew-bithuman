@@ -15,6 +15,18 @@ dependencies:
     sdk: flutter
   plugin_platform_interface: ^2.0.2
   web_socket_channel: ^3.0.3
+
+  # Shared realtime layer, moved down from the product app so the product and
+  # the public demo use ONE implementation. `http` mints the ephemeral OpenAI
+  # Realtime token from api.bithuman.ai; flutter_webrtc is the iOS/Android cloud
+  # transport (libwebrtc owns mic/speaker/AEC + the RTCAudioRenderer lipsync
+  # tap), while macOS keeps the WebSocket path through the native VP-IO
+  # RealtimeAudioIO.
+  # Pinned to 1.4.0 exactly: it locks WebRTC-SDK 144.7559.01, whose macOS
+  # deployment target matches this pod's. 1.4.1+ pulls a newer WebRTC-SDK that
+  # needs a higher macOS min than the podspec declares, and pod install fails.
+  http: ^1.2.0
+  flutter_webrtc: 1.4.0
   # The Layer-0 engine contract (EngineDescriptor + kEngineRegistry) is now
   # inlined at lib/src/engine_protocol.dart and re-exported by
   # lib/engine_registry.dart — no separate pub.dev package, so the plugin is
