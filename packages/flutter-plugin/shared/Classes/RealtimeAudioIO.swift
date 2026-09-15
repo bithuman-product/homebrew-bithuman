@@ -444,6 +444,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   // resetting between words. Only a silence longer than this ends the run —
   // this is what stops the longer sustain window from MISSING real speech.
   private let voiceGapToleranceSecs: TimeInterval = 0.12
+  // macOS-only: the macOS cloud sustained-energy barge gate; iOS barges on the server VAD alone
   #if os(macOS)
   // [barge] macOS CLOUD sustained-energy gate state: the mic the OpenAI server
   // VAD hears is soft-limited to ambient WHILE THE BOT IS AUDIBLE until the
@@ -698,6 +699,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   // input tap + the mixer→output connection + engine start/stop. It NEVER touches
   // embodyPaced / speakerGen / the Elevate gate / micMuted, and uses player.pause()/play()
   // (never reset()) so in-flight scheduled buffers — and the FIFO/frame pairing — survive.
+  // macOS-only: CoreAudio HAL device-swap state; iOS hot-swaps through AVAudioSession instead
   #if os(macOS)
   private var startedWithMic = false
   private let swapQueue = DispatchQueue(label: "ai.bithuman.audio.swap")
@@ -1082,6 +1084,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     playoutActiveUntil = Date()
     #endif
     if started {
+      // macOS-only: the HAL device-swap graph rebuild does not exist on iOS
       #if os(macOS)
       // If a device swap owns the graph right now, DON'T touch the player node —
       // the swap's player.pause() already silenced it and embodyPaced.removeAll()
@@ -1273,6 +1276,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     }
     #endif
 
+    // macOS-only: the macOS cloud sustained-energy barge gate; iOS barges on the server VAD alone
     #if os(macOS)
     // [barge] macOS CLOUD (voicePeakThreshold == 0): require ~0.3 s of sustained,
     // conversational-volume speech before the OpenAI server VAD hears a barge.
@@ -1457,6 +1461,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     // far better than an uncatchable NSException. The embody branch below only
     // appends to the embodyPaced array (no player touch) and is gated separately
     // at release time, so it is allowed to fall through.
+    // macOS-only: guards the HAL device-swap graph rebuild, which cannot happen on iOS
     #if os(macOS)
     if graphIsMutating(), (avatarTextureForLipsync?.usesStartGate ?? false) || avatarTextureForLipsync == nil {
       return
@@ -1475,6 +1480,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       case .open:
         speakerGenLock.unlock()
         notePlayoutScheduled(Double(frameCount) / serverTtsFormat.sampleRate)
+        // macOS-only: device-swap-safe scheduling; iOS has no HAL swap so it schedules directly
         #if os(macOS)
         // Atomic vs a device swap: the entry gate at the top of this function is
         // NOT atomic with this play (a swap can begin between them and abort on a
@@ -1496,6 +1502,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
           speakerGenLock.unlock()
           NSLog("[av-gate] utterance start: engine warming — speaker plays ungated")
           notePlayoutScheduled(Double(frameCount) / serverTtsFormat.sampleRate)
+          // macOS-only: device-swap-safe scheduling; iOS has no HAL swap so it schedules directly
           #if os(macOS)
           _ = scheduleAndPlayGuarded(inBuf)   // atomic vs device swap (see .open case)
           #else
@@ -1529,6 +1536,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       }
     } else {
       notePlayoutScheduled(Double(frameCount) / serverTtsFormat.sampleRate)
+      // macOS-only: device-swap-safe scheduling; iOS has no HAL swap so it schedules directly
       #if os(macOS)
       _ = scheduleAndPlayGuarded(inBuf)   // atomic vs device swap (cloud/no-avatar path)
       #else
@@ -1552,6 +1560,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     // frame's 50 ms slice stays at the FIFO head and is released on the next call
     // once the graph is whole. (No-op, NOT a drop — the count-based A/V lock is
     // untouched.)
+    // macOS-only: guards the HAL device-swap graph rebuild, which cannot happen on iOS
     #if os(macOS)
     if graphIsMutating() { return }
     #endif
@@ -1570,6 +1579,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       chunk.withUnsafeBufferPointer { dst.update(from: $0.baseAddress!, count: need) }
     }
     notePlayoutScheduled(secs)   // match the actual released quantum (0.04 essence2 / 0.05 embody)
+    // macOS-only: device-swap-safe scheduling; iOS has no HAL swap so it schedules directly
     #if os(macOS)
     // Atomic w.r.t. the swap (see scheduleAndPlayGuarded). If a swap began in the
     // tiny window since the top-of-function gate check, the schedule is refused —
@@ -1619,6 +1629,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       // macOS device swap rebuilding the graph: don't flush into a half-wired
       // graph. Keep holding (state + gen unchanged) and re-poll; the held
       // buffers flush once the graph is whole.
+      // macOS-only: guards the HAL device-swap graph rebuild, which cannot happen on iOS
       #if os(macOS)
       if self.graphIsMutating() {
         self.speakerGenLock.unlock()
@@ -1634,6 +1645,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
         let heldSecs = held.reduce(0.0) {
           $0 + Double($1.frameLength) / self.serverTtsFormat.sampleRate
         }
+        // macOS-only: device-swap-safe flush; iOS has no HAL swap
         #if os(macOS)
         // Atomic flush vs a device swap: the graphIsMutating() pre-check above is
         // NOT atomic with the schedule below. scheduleManyAndPlayGuarded takes the

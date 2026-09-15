@@ -118,6 +118,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
     // destructor against still-live Metal state and ggml_abort()s (the SIGABRT
     // the user saw on close). Stopping the session first frees the model +
     // joins the worker while Metal is still healthy.
+    // macOS-only: NSApplication.willTerminate has no iOS equivalent on this path
     #if os(macOS)
     NotificationCenter.default.addObserver(
       instance, selector: #selector(bithumanWillTerminate(_:)),
@@ -288,6 +289,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
           DispatchQueue.main.async { result(granted ? "authorized" : "denied") }
         }
       default:
+        // macOS-only: deep-links macOS System Settings; iOS uses its own Settings URL elsewhere
         #if os(macOS)
         if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
           NSWorkspace.shared.open(u)
@@ -413,6 +415,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
         result(FlutterError(code: "BAD_ARGS", message: "fitWindowToCanvas requires width+height", details: nil))
         return
       }
+      // macOS-only: resizes the AppKit window; iOS has no resizable window
       #if os(macOS)
       DispatchQueue.main.async {
         guard let win = NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible }) else {
@@ -522,6 +525,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
         }
       default:   // .denied / .restricted — can't re-prompt; send the user to Settings
         NSLog("[BithumanAvatar] mic permission denied → speaker-only + opening System Settings (Microphone)")
+        // macOS-only: deep-links macOS System Settings; iOS uses its own Settings URL elsewhere
         #if os(macOS)
         if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
           NSWorkspace.shared.open(u)
@@ -570,7 +574,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
                             details: nil))
         return
       }
-      #if os(macOS)
+      #if os(macOS) || os(iOS)
       textures[textureId]?.onTurnEnd()
       #endif
       result(nil)
@@ -808,7 +812,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
     audioQueue.removeAll(keepingCapacity: true)
     pendingUtteranceReset = true
     audioLock.unlock()
-    #if os(macOS)
+    #if os(macOS) || os(iOS)
     // embody: drop the buffered speech frames + reset the stream NOW (not on the
     // next compose tick) so a hang-up / barge stops the avatar INSTANTLY — with
     // the deep feed-ahead queue, deferring even one tick lets it keep talking.
@@ -833,7 +837,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// silence pad lands AFTER the real tail rather than ahead of un-fed audio;
   /// feed() and flushTail() serialize on Expression2Runtime.procQ, so ordering holds.
   func onTurnEnd() {
-    #if os(macOS)
+    #if os(macOS) || os(iOS)
     audioLock.lock()
     let remaining = audioQueue
     audioQueue.removeAll(keepingCapacity: true)
@@ -1157,8 +1161,14 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// at it so the shared graphs load from the versioned `.model`. Idempotent
   /// (skips if already extracted). No-op (leaves engineDir nil → the loose
   /// app-bundle copies are used) when no `.model` is bundled or extraction fails —
-  /// so this can never break loading. macOS-only (embody runtime is macOS).
+  /// so this can never break loading.
+  /// macOS-only: it extracts the `embody.model` bundled inside the macOS app; on iOS
+  /// the engine members come from the downloaded agent dir, so there is nothing to
+  /// extract. (The old reason here — "the embody runtime is macOS" — stopped being
+  /// true when expression-2 shipped on iPhone.)
   private func ensureEngineExtracted() {
+    // macOS-only: see the note above — the bundled embody.model exists only in the
+    // macOS app; on iOS the engine members come from the downloaded agent dir.
     #if os(macOS)
     let fm = FileManager.default
     guard let model = Bundle(for: Expression2Engine.self).url(forResource: "embody", withExtension: "model", subdirectory: "embody")

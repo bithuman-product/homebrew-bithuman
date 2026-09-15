@@ -1,0 +1,41 @@
+# A bare `#if os(macOS)` in the umbrella plugin's SHARED sources compiles the block
+# OUT on iPhone, silently. Three shipping defects came from exactly that — an agent
+# dir that could not load, a turn-end flush that never ran (last word clipped, picture
+# frozen 3 s), and a barge that did not reset the engine — and all three were found by
+# accident, not by a gate. This is the gate.
+name: plugin platform guards
+
+on:
+  pull_request:
+    paths:
+      - 'packages/flutter-plugin/shared/Classes/**'
+      - 'scripts/check_platform_guards.sh'
+      - '.github/workflows/plugin-platform-guards.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/flutter-plugin/shared/Classes/**'
+      - 'scripts/check_platform_guards.sh'
+      - '.github/workflows/plugin-platform-guards.yml'
+  workflow_dispatch:
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every bare '#if os(macOS)' in shared sources states its reason
+        run: ./scripts/check_platform_guards.sh
+      - name: Negative control — the check must FAIL when a reason is removed
+        run: |
+          # A check that cannot fail is not a check. Strip one reason, require rc=1,
+          # then put it back and require rc=0.
+          F=packages/flutter-plugin/shared/Classes/DeviceIdentity.swift
+          cp "$F" /tmp/guard.bak
+          sed -i '/macOS-only/d' "$F"
+          if ./scripts/check_platform_guards.sh > /dev/null 2>&1; then
+            echo "::error::the guard check PASSED with a reason removed — it is not looking"
+            cp /tmp/guard.bak "$F"; exit 1
+          fi
+          cp /tmp/guard.bak "$F"
+          ./scripts/check_platform_guards.sh
