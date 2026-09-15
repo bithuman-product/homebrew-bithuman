@@ -576,9 +576,9 @@ class AvatarPlayer(
             // device buffer is genuinely full — which is the lead we could never build.
             while (running && u != null) {
                 if (u.epoch == epoch) {
-                    val w0 = System.nanoTime()
+                    val writeT0 = System.nanoTime()
                     runCatching { track.write(u.audio, 0, u.audio.size) }
-                    val wus = (System.nanoTime() - w0) / 1000L
+                    val wus = (System.nanoTime() - writeT0) / 1000L
                     writeUs += wus; if (wus > writeMaxUs) writeMaxUs = wus
                     nWritten++
                     if (u.speech) { nWriteSpeech++; lastSpeechWriteMs = System.currentTimeMillis() }

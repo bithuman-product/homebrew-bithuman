@@ -11,7 +11,7 @@ import java.io.File
 
 /**
  * The identity's idle clip — the generated loop the agent plays when it is not
- * speaking, the same `idle.mp4` the serve plane and the web viewer play.
+ * speaking, the same `idle.mp4` the cloud service and the web viewer play.
  *
  * ★ This fetch exists because the Android SDK cannot give it to us. `idle.mp4` is a
  * REQUIRED member of the published `.avatar` container, but it is not in the Android
@@ -22,7 +22,7 @@ import java.io.File
  *
  * The clip is authored seamless and forward-loopable by the trainer, so it is played
  * forward with a wrap and never ping-ponged — reversed playback reads as uncanny, and
- * every serve plane rejects it for that reason.
+ * every player of it rejects that for the same reason.
  */
 object IdleClip {
 
