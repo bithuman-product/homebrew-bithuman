@@ -131,6 +131,9 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
     NotificationCenter.default.addObserver(
       instance, selector: #selector(bithumanWillTerminate(_:)),
       name: Notification.Name("ai.bithuman.appWillTerminate"), object: nil)
+    // macOS-only: the borderless window chrome + the floating-circle companion
+    // (macos/Classes/WindowChrome.swift); iOS has no window to shape.
+    WindowChrome.register(with: registrar)
     #elseif os(iOS)
     NotificationCenter.default.addObserver(
       instance, selector: #selector(bithumanWillTerminate(_:)),
