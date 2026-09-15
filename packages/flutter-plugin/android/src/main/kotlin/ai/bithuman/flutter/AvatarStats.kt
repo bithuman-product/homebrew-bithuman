@@ -15,7 +15,7 @@ import android.os.Debug
  */
 class AvatarStats {
     @Volatile var deliveredFps = 0.0      // presented frames per second, not the engine's rate
-    @Volatile var offsetMs = 0.0          // frame vs the audio the device has consumed
+    @Volatile var offsetMs = 0.0          // the shown frame past its own audio at the vsync it was shown (>= 0; backlog is inFlight)
     @Volatile var engineQueue = 0         // frames the engine is holding
     @Volatile var inFlight = 0            // admitted units not yet presented
     @Volatile var dropped = 0             // speech units discarded whole by a barge-in
@@ -142,7 +142,7 @@ class AvatarStats {
     }
 
     fun line(): String = String.format(
-        "fps %.1f  off %+.0fms  gap p50 %.0f p95 %.0f p99 %.0f max %.0f\n" +
+        "fps %.1f  late %+.0fms  gap p50 %.0f p95 %.0f p99 %.0f max %.0f\n" +
             "engineQ %d  inFlight %d  dropped %d  idle %d  speech %d\n" +
             "ttfb %s  ttff %s  ttfa %s  pss %d MB\n" +
             "UNDERRUNS %d  writeGap p50 %.0f p95 %.0f max %.0f",

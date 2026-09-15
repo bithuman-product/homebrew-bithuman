@@ -74,6 +74,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val ready = AtomicBoolean(false)
         val stopped = AtomicBoolean(false)
         var player: AvatarPlayer? = null
+        /** The identity's idle loop, kept so a held session can start a fresh player. */
+        var idle: List<Bitmap> = emptyList()
         var mic: MicCapture? = null
         var micSink: EventChannel.EventSink? = null
         var micChannel: EventChannel? = null
@@ -149,9 +151,29 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             "micPermissionStatus" -> result.success(if (micGranted()) "authorized" else "notDetermined")
             "requestMicPermission" -> requestMic { granted -> result.success(if (granted) "authorized" else "denied") }
 
+            // --- the app is not on screen: no picture, no sound, no CPU ---
+            // ★Measured on the shared Galaxy (mobile-SDK lane, 2026-09-15): the player kept
+            // rendering idle frames for 74 minutes in the BACKGROUND — battery, heat, and a
+            // confound for every measurement on the handset. Hold = the player is stopped
+            // (its threads exit, the track is released); release = a fresh player on the same
+            // engine and idle loop. The engine itself stays warm.
+            "setIdleHold" -> {
+                val s = session(call) ?: return result.error("no_session", "unknown textureId", null)
+                val hold = call.argument<Boolean>("hold") ?: false
+                if (hold) {
+                    s.player?.stop(); s.player = null
+                    Log.i(TAG, "held: player stopped (app off screen)")
+                } else if (s.player == null && !s.stopped.get()) {
+                    val p = AvatarPlayer(s.avatar, s.idle, capturable = false) { bmp -> s.draw(bmp) }
+                    s.player = p; p.start()
+                    Log.i(TAG, "released: fresh player started")
+                }
+                result.success(null)
+            }
+
             // --- Apple-only surface, answered honestly ---
             "pipAvailable", "isLocalModeSupported", "setDisplayMode" -> result.success(false)
-            "pipStart", "pipStop", "fitWindowToCanvas", "setIdleHold", "setExpression2AgentDir",
+            "pipStart", "pipStop", "fitWindowToCanvas", "setExpression2AgentDir",
             "attachWebrtcRemoteAudio", "detachWebrtcRemoteAudio" -> result.success(null)
 
             "dispose" -> { call.argument<Number>("textureId")?.let { destroy(it.toLong()) }; result.success(null) }
@@ -198,6 +220,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     "overlap=${avatar.overlapActive}, idle ${idle.size}f) +${(System.nanoTime() - t0) / 1_000_000} ms")
                 entry.surfaceTexture().setDefaultBufferSize(avatar.width, avatar.height)
                 val s = AvatarSession(code, avatar, entry, Surface(entry.surfaceTexture()))
+                s.idle = idle
                 val p = AvatarPlayer(avatar, idle, capturable = false) { bmp -> s.draw(bmp) }
                 s.player = p
                 main.post {
