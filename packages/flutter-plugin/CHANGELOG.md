@@ -19,6 +19,23 @@
   WebSocket transport, whose bot PCM the avatar lipsyncs from. The consuming app must
   set `packaging { jniLibs { useLegacyPackaging = true } }` or the Hexagon delegate
   cannot open its libraries and the SDK falls back to the CPU silently.
+* **ONE UI kit for every surface — `package:bithuman/ui_kit.dart`.** The avatar is
+  the interface; the chrome is translucent glass over it and hides itself. Components:
+  `Motion` (one easing, four durations), `Frosted`, `GlassIconButton`, `RoundButton`,
+  `LoadingRing`/`LoadingState`, `SessionState`/`StatusPill`, `PromptCapsule`,
+  `AutoHidingChrome`, `BubbleView`, and `WindowChrome` (Dart side of the macOS window).
+  `glass_tokens.dart` moved down from bithuman-jarvis-app; `avatar_fit.dart` now carries
+  the ruled fit policy (`AvatarSurface.phone|desktop`: phones crop a landscape canvas's
+  sides with the character centred and show a portrait canvas at full width; desktop
+  never crops). Surfaces import the kit and draw nothing of their own.
+* **macOS window chrome in the plugin (`macos/Classes/WindowChrome.swift`).** Borderless
+  glass window (edge-to-edge canvas, `Glass.rWindow` corners, traffic lights on hover,
+  drag-anywhere) and the floating-circle companion (`enterBubble`/`exitBubble`: an
+  always-on-top `Glass.bubbleSize` circle at the lower-right, frame + aspect lock + level
+  saved and restored), registered on the `ai.bithuman.window` channel by the plugin.
+  Moved down from jarvis's Runner so the demo and jarvis share one implementation; a
+  Runner that still creates its own `WindowChrome` on the same channel keeps winning
+  until it deletes it.
 
 * **Essence 2 (on-device Elevate) `.elevatedir` download flow.** Added
   `fetchEssence2Catalog` + `downloadEssence2Bundle` (+ `Essence2CatalogEntry`)
