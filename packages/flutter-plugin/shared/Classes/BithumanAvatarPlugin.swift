@@ -28,6 +28,7 @@ import AVFoundation   // AVCaptureDevice — mic-permission gate (authorizationS
 import Accelerate
 import CoreVideo
 import Expression2
+import BithumanEngineProtocol
 import Foundation
 
 /// OFFLINE SELF-TEST: dump published embody frames so a headless run can be

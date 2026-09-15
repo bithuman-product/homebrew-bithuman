@@ -22,6 +22,7 @@
 // Apache-2.0; (c) bitHuman.
 
 import Expression2
+import BithumanEngineProtocol
 import Foundation
 
 /// One registered engine's static description (identity + behaviour). The
