@@ -1,7 +1,8 @@
 # ios-expression2 — a talking bitHuman avatar on the iPhone you already have
 
 A complete SwiftUI app that renders a lip-synced **expression-2** avatar
-**on the device**, at 416x720, 25 FPS, with no server in the loop.
+**on the device**, at 416x720, 20 FPS (expression-2's native rate: one frame per
+50 ms of audio), paced on the audio clock, with no server in the loop.
 
 It is deliberately the *cheap* Apple path:
 

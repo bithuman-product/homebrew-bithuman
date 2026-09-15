@@ -4,7 +4,7 @@ A collection of runnable examples that wire the [bithuman](https://pypi.org/proj
 
 ## What is bitHuman?
 
-Real-time avatar animation. Audio in, lip-synced video out at 25 FPS. Two models: Essence (CPU, `.imx`) and Expression (GPU/M3+, any face image).
+Real-time avatar animation. Audio in, lip-synced video out — essence-2 at 25 FPS, expression-2 at 20 FPS (one frame per 50 ms of audio). Two models: Essence (CPU, `.imx`) and Expression (GPU/M3+, any face image).
 
 ## Layout
 

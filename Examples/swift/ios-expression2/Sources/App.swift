@@ -5,7 +5,8 @@
 // Inputs:  Sources/Model/agent.avatar        your agent's <CODE>.avatar
 //          Sources/Model/shared_engine/      from `bithuman engine install mac`
 //          Sources/Model/speech16k.wav       16 kHz mono PCM speech
-// Output:  25 FPS lip-synced frames, drawn in SwiftUI, in sync with the audio.
+// Output:  20 FPS lip-synced frames (one per 50 ms of audio, expression-2's
+//          native rate), drawn in SwiftUI, paced on the audio clock.
 //
 // Nothing here is bitHuman-internal: every call is public API of the shipped
 // binary. See https://docs.bithuman.ai/examples/swift-ios-expression2
@@ -134,7 +135,7 @@ actor Renderer {
 }
 
 // MARK: - 4. BGR888 → CGImage. Two vImage passes and no intermediate copy, so
-// this keeps up with 25 FPS even in a Debug build.
+// this keeps up with the 20 FPS frame stream even in a Debug build.
 
 func makeCGImage(_ bgr: [UInt8], _ w: Int, _ h: Int) -> CGImage? {
     let n = w * h
@@ -166,10 +167,11 @@ func makeCGImage(_ bgr: [UInt8], _ w: Int, _ h: Int) -> CGImage? {
 
 // MARK: - 4b. The view we draw into
 //
-// ★ Do NOT push 25 FPS through an `@Published` property. Every assignment
-// re-evaluates the SwiftUI body around it, and measured on an iPhone 15 that
-// alone dropped playback from 25 FPS to 19.3. Hand the frame to a CALayer
-// instead; SwiftUI never sees it change.
+// ★ Do NOT push every frame through an `@Published` property. Every assignment
+// re-evaluates the SwiftUI body around it, and measured on an iPhone 15 (when
+// this file still ticked on a 25 FPS grid) that alone dropped the draw rate
+// from 25 to 19.3. Hand the frame to a CALayer instead; SwiftUI never sees it
+// change.
 
 @MainActor
 final class FrameSink {
@@ -247,12 +249,18 @@ final class AvatarSession: ObservableObject {
 
     // 5b. Speak: generate the whole utterance, then play it in sync.
     //
-    // ★ Why generate first rather than stream. Measured on an iPhone 15, this
-    // engine delivers about 20 FPS of a 25 FPS stream — a little slower than
-    // real time. Stream it and the mouth falls steadily further behind the
-    // sound; generate it and the two are locked together. On faster silicon you
-    // can stream (the microphone button below does), and the shape is the same:
-    // feed, poll, draw.
+    // ★ Why generate first rather than stream. The engine renders in 1.6 s
+    // chunks and the first chunk lands ~1.75 s after its audio was fed, so a
+    // streamed reply starts late and can stall between chunks unless you buffer
+    // ahead. Generating the whole utterance first is the simplest way to lock
+    // picture to sound; the microphone button below streams instead, and the
+    // shape is the same: feed, poll, draw.
+    //
+    // (An earlier note here read the engine's 20 FPS as "slower than a 25 FPS
+    // stream". It is not: 20 FPS — one frame per 50 ms of audio — is
+    // expression-2's native rate, and this file was pacing those frames on a
+    // 25 FPS grid, which played the picture 25% faster than the sound and then
+    // froze on the last frame until the audio caught up.)
     func speak() {
         guard ready, !busy, let wav = Payload.speechWAV else { return }
         let pcm = readPCM16MonoWAV(wav)
@@ -301,7 +309,12 @@ final class AvatarSession: ObservableObject {
                 status = "The engine returned no frames."; busy = false; return
             }
 
-            // Play the sound and step the frames on the same clock.
+            // Play the sound and step the frames on the AUDIO clock. Frame n is
+            // the picture for audio [n, n+1) x 50 ms, so it is due when the
+            // speaker has consumed n x 50 ms — read from `player.currentTime`
+            // (what the device has actually played), not from a wall-clock grid,
+            // so a late audio start or a preempted Task cannot let the mouth
+            // drift from the sound.
             status = "Speaking…"
             let start = Date()
             player?.play()
@@ -310,8 +323,7 @@ final class AvatarSession: ObservableObject {
                 hasFrame = true
                 shown += 1
                 if shown == 1 { recordFirstFrame(cg) }
-                let wait = start.addingTimeInterval(Double(n + 1) * 0.04).timeIntervalSinceNow
-                if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1e9)) }
+                await pace(untilAudioTime: Double(n + 1) * Self.secondsPerFrame, since: start)
             }
             let played = Date().timeIntervalSince(start)
             log(String(format: "played %d frames in %.2f s (%.1f FPS) beside %.2f s of audio",
@@ -388,13 +400,15 @@ final class AvatarSession: ObservableObject {
         status = "Stopped — \(shown) frames at \(w)x\(h)."
     }
 
-    // 5d. Display: pop one frame every 40 ms — 25 FPS, the engine's own rate.
+    // 5d. Display: pop one frame every 50 ms — 20 FPS, the engine's own rate.
     /// The streaming draw loop, used by the microphone button. It shows whatever
-    /// the engine has produced, 25 times a second.
+    /// the engine has produced, 20 times a second. (Polling faster than the
+    /// engine produces — the old 40 ms grid — just drains the queue and shows
+    /// the same frame twice every fifth tick.)
     private func startDisplayLoop() {
         displayTask?.cancel()
         displayTask = Task { [weak self] in
-            // ★ An ABSOLUTE grid, not `sleep(0.04 - work)`. Task.sleep overshoots
+            // ★ An ABSOLUTE grid, not `sleep(0.05 - work)`. Task.sleep overshoots
             // a little every time, and subtracting the work from a fixed delay
             // lets that error accumulate — which is the video sliding behind the
             // audio in front of you.
@@ -410,13 +424,33 @@ final class AvatarSession: ObservableObject {
                     if self.shown == 1 { self.recordFirstFrame(cg) }
                 }
                 n += 1
-                let wait = start.addingTimeInterval(Double(n) * 0.04).timeIntervalSinceNow
+                let wait = start.addingTimeInterval(Double(n) * Self.secondsPerFrame).timeIntervalSinceNow
                 if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1e9)) }
             }
         }
     }
 
     private func stopDisplayLoop() { displayTask?.cancel(); displayTask = nil }
+
+    /// expression-2 emits exactly one frame per 50 ms of audio. Every rate in
+    /// this file derives from this one constant.
+    static let framesPerSecond = 20.0
+    static let secondsPerFrame = 1.0 / framesPerSecond
+
+    /// Wait until the speaker has played `due` seconds of the utterance, read
+    /// from the device clock (`AVAudioPlayer.currentTime`); when there is no
+    /// player, or it has finished, fall back to the wall clock from `start`.
+    /// Sleeps in steps of at most one frame, so it never spins and never wakes
+    /// more than ~2 ms early.
+    private func pace(untilAudioTime due: TimeInterval, since start: Date) async {
+        while true {
+            let now: TimeInterval
+            if let p = player, p.isPlaying { now = p.currentTime } else { now = Date().timeIntervalSince(start) }
+            let remaining = due - now
+            if remaining <= 0.002 { return }
+            try? await Task.sleep(nanoseconds: UInt64(min(remaining, Self.secondsPerFrame) * 1e9))
+        }
+    }
 
     /// Save frame 1 so you can look at it off the phone:
     ///   xcrun devicectl device copy from --device <udid> \
