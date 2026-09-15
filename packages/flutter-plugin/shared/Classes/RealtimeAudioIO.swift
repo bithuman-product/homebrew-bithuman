@@ -1616,6 +1616,18 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     buf.frameLength = AVAudioFrameCount(need)
     if let dst = buf.floatChannelData?[0] {
       chunk.withUnsafeBufferPointer { dst.update(from: $0.baseAddress!, count: need) }
+      if let tex = avatarTextureForLipsync, tex.markerOnNextRelease {
+        // ★SYNC MARKER: 12 ms of 2 kHz at -6 dBFS, Hann-shaped, MIXED INTO this frame's own slice
+        // so it takes the same scheduling path as every other sample (visual-proof lane's design).
+        tex.markerOnNextRelease = false
+        let sr = serverTtsFormat.sampleRate
+        let n = min(need, Int(sr * 0.012))
+        for i in 0..<n {
+          let env = 0.5 * (1 - cos(2 * Double.pi * Double(i) / Double(n)))
+          dst[i] += Float(0.5 * env * sin(2 * Double.pi * 2000.0 * Double(i) / sr))
+        }
+        NSLog("[embody-marker] click mixed into the released slice at host %.3f s", CACurrentMediaTime())
+      }
     }
     notePlayoutScheduled(secs)   // match the actual released quantum (0.04 essence2 / 0.05 embody)
     // macOS-only: device-swap-safe scheduling; iOS has no HAL swap so it schedules directly

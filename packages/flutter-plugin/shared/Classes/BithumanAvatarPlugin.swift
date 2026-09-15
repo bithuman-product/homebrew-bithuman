@@ -1115,6 +1115,20 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// Speech-tagged frames published WITHOUT an audio slice because there was none to
   /// pair with: the engine's padded last chunk. Counted apart from skips on purpose.
   private var embodyPadFrames = 0
+  /// ★SYNC MARKER (adopted from the visual-proof lane's presenter). DEV: EMBODY_MARKER_EVERY=<s>
+  /// — every that many seconds of PUBLISHED speech, one speech frame is painted full white and
+  /// its own 50 ms audio slice carries a 12 ms 2 kHz click. Both go through the ORDINARY paths:
+  /// the flash is the normal frame publish, the click is mixed into the slice the normal release
+  /// takes for that frame. Filmed from outside, the flash-to-click gap IS the A/V offset at the
+  /// ear; a marker that took a shortcut would measure the shortcut. 0 = off.
+  private static let markerEverySpeechFrames: Int = {
+    let s = Double(ProcessInfo.processInfo.environment["EMBODY_MARKER_EVERY"] ?? "0") ?? 0
+    return s > 0 ? max(1, Int(s * 20)) : 0
+  }()
+  private var embodyMarkers = 0
+  /// Set on the frame that flashes; read (and cleared) by the audio side when it releases
+  /// that frame's slice, so the click lands in the same unit.
+  var markerOnNextRelease = false
   private static let maxDrainWaitTicks = 60
   // --- essence2 (Essence2) drive constants — verbatim from the proven canonical
   // composeTickElevate. Only composeTickEssence2 reads these; embody is untouched.
@@ -1578,7 +1592,16 @@ final class AvatarTexture: NSObject, FlutterTexture {
         return
       }
     }
-    publishEmbodyFrame(pulled.frame, dump: pulled.speech)
+    var frame = pulled.frame
+    if pulled.speech, Self.markerEverySpeechFrames > 0,
+       (speechFramesPublished + 1) % Self.markerEverySpeechFrames == 0 {
+      // The marker: THIS frame is the flash, and the slice released for it carries the click.
+      for i in 0..<frame.count { frame[i] = 0xFF }
+      markerOnNextRelease = true
+      embodyMarkers += 1
+      NSLog("[embody-marker] #%d flash on speech frame %d at host %.3f s", embodyMarkers, speechFramesPublished + 1, CACurrentMediaTime())
+    }
+    publishEmbodyFrame(frame, dump: pulled.speech)
     embodyFrameCount += 1
     // Release this frame's 50 ms of bot audio (speech frames carry audio; the idle
     // loop is silent) → A/V paired 1:1.
