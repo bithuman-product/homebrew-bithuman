@@ -1019,6 +1019,9 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// a SPEECH lip-frame is published, so exactly one frame of bot audio (50 ms)
   /// is released to the speaker in lock-step — A/V paired by construction.
   var onSpeechFramePublished: (() -> Void)? = nil
+  /// Asked BEFORE publishing a speech frame: is this frame's 50 ms of audio ready?
+  /// nil (no audio sink attached) means "do not gate" — the local/no-speaker paths.
+  var canReleaseSpeechAudio: (() -> Bool)? = nil
   /// Gate-skip readiness (play ungated while the engine is still warming).
   var startGateEngineReady: Bool {
     #if os(macOS) || os(iOS)
@@ -1109,6 +1112,23 @@ final class AvatarTexture: NSObject, FlutterTexture {
   // processChunk — so it only trips if the turn-end signal was lost, and
   // GUARANTEES the avatar can never freeze in speech.
   private var embodyDrainWaitTicks = 0
+  /// Speech-tagged frames published WITHOUT an audio slice because there was none to
+  /// pair with: the engine's padded last chunk. Counted apart from skips on purpose.
+  private var embodyPadFrames = 0
+  /// ★SYNC MARKER (adopted from the visual-proof lane's presenter). DEV: EMBODY_MARKER_EVERY=<s>
+  /// — every that many seconds of PUBLISHED speech, one speech frame is painted full white and
+  /// its own 50 ms audio slice carries a 12 ms 2 kHz click. Both go through the ORDINARY paths:
+  /// the flash is the normal frame publish, the click is mixed into the slice the normal release
+  /// takes for that frame. Filmed from outside, the flash-to-click gap IS the A/V offset at the
+  /// ear; a marker that took a shortcut would measure the shortcut. 0 = off.
+  private static let markerEverySpeechFrames: Int = {
+    let s = Double(ProcessInfo.processInfo.environment["EMBODY_MARKER_EVERY"] ?? "0") ?? 0
+    return s > 0 ? max(1, Int(s * 20)) : 0
+  }()
+  private var embodyMarkers = 0
+  /// Set on the frame that flashes; read (and cleared) by the audio side when it releases
+  /// that frame's slice, so the click lands in the same unit.
+  var markerOnNextRelease = false
   private static let maxDrainWaitTicks = 60
   // --- essence2 (Essence2) drive constants — verbatim from the proven canonical
   // composeTickElevate. Only composeTickEssence2 reads these; embody is untouched.
@@ -1291,7 +1311,11 @@ final class AvatarTexture: NSObject, FlutterTexture {
       // the same audioQueue path the live TTS uses, so a headless run reproduces
       // real-speech rendering (the synthetic buzz above can't — a steady tone
       // hides identity-specific onset/decode issues). Off unless the var is set.
-      if let wav = ProcessInfo.processInfo.environment["EMBODY_TEST_WAV"], !wav.isEmpty {
+      if var wav = ProcessInfo.processInfo.environment["EMBODY_TEST_WAV"], !wav.isEmpty {
+        // A phone has no shared filesystem with the host, so a drive has to be copied
+        // into the app's own container and named relative to it. Absolute paths are
+        // unchanged; a relative one resolves against the app home.
+        if !wav.hasPrefix("/") { wav = NSHomeDirectory() + "/" + wav }
         NSLog("[embody] TEST_WAV on — feeding %@", wav)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
           guard let self = self,
@@ -1543,7 +1567,43 @@ final class AvatarTexture: NSObject, FlutterTexture {
       return
     }
     embodyDrainWaitTicks = 0   // got a frame → disarm watchdog
-    publishEmbodyFrame(pulled.frame, dump: pulled.speech)
+    // ★INTERIM — REMOVE WHEN THE PLUGIN CONSUMES AN ENGINE CARRYING #693 (TAIL 0): the
+    // engine then trims each utterance to F = round(seconds × fps) and never emits the
+    // padded last chunk (the serve path already does), this case cannot occur, and this
+    // block is deleted in the SAME change that repoints the plugin at that engine — the
+    // two must never coexist. An interim that outlives its cause is a second implementation.
+    //
+    // A speech frame is rendered FROM its audio slice, and that slice was pushed to the
+    // speaker FIFO in the same call that fed the engine — so a speech frame whose slice is
+    // not in the FIFO is a frame the engine rendered from audio that was never pushed:
+    // the silence it appended to complete its last chunk. Measured (macOS, scripted turns,
+    // 2026-09-15): every such moment had no audio queued or pending and none arrived within
+    // 500 ms; the sound was absent, not late. Such a frame is published (the mouth settles
+    // on silence), releases nothing, and is counted as a PAD frame, not a skip. If audio IS
+    // queued or pending the case is not this one, and it stays visible below as a SKIP.
+    if pulled.speech, let can = canReleaseSpeechAudio, !can() {
+      audioLock.lock(); let queued = !audioQueue.isEmpty; audioLock.unlock()
+      if !queued && !rt.hasPendingTail {
+        embodyPadFrames += 1
+        if embodyPadFrames % 10 == 1 {
+          NSLog("[embody-av] pad frame: speech-tagged, no slice, nothing queued or pending — published without audio; total pad=%d", embodyPadFrames)
+        }
+        publishEmbodyFrame(pulled.frame, dump: false)
+        embodyFrameCount += 1
+        embodyLastPublish = now
+        return
+      }
+    }
+    var frame = pulled.frame
+    if pulled.speech, Self.markerEverySpeechFrames > 0,
+       (speechFramesPublished + 1) % Self.markerEverySpeechFrames == 0 {
+      // The marker: THIS frame is the flash, and the slice released for it carries the click.
+      for i in 0..<frame.count { frame[i] = 0xFF }
+      markerOnNextRelease = true
+      embodyMarkers += 1
+      NSLog("[embody-marker] #%d flash on speech frame %d at host %.3f s", embodyMarkers, speechFramesPublished + 1, CACurrentMediaTime())
+    }
+    publishEmbodyFrame(frame, dump: pulled.speech)
     embodyFrameCount += 1
     // Release this frame's 50 ms of bot audio (speech frames carry audio; the idle
     // loop is silent) → A/V paired 1:1.
