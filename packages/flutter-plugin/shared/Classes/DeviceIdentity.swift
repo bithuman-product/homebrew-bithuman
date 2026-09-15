@@ -34,6 +34,7 @@ import Security
 #if os(iOS)
 import UIKit
 #endif
+// macOS-only: IOKit is a macOS framework
 #if os(macOS)
 import IOKit
 #endif
