@@ -71,6 +71,18 @@ PUBLIC_VENDOR_BASE="${PUBLIC_VENDOR_BASE:-https://github.com/bithuman-product/ho
 PUBLIC_SHA_embody_models="c224f7174479db913fabe8823029e9bdeb70bde6efc49f11bfd0495010b8031f"
 PUBLIC_SHA_onnxruntime="7d631c161ae0d9c6f01095bcb5556d0b4f0205dc5111e6d2ddae82cc7050a7ed"
 
+# The expression-2 engine as a PUBLISHED BINARY. The plugin used to compile the
+# engine's adapter SOURCE, staged from the private monorepo — which is why a clone
+# could not build. These are the same artifacts Package.swift resolves for the
+# Swift examples, at the same URLs, pinned to the same checksums, so the Flutter
+# plugin and the Swift package now consume ONE artifact instead of a binary and a
+# source copy of the same engine.
+E2_TAG="${E2_TAG:-v2.6.1}"
+E2_BASE="${E2_BASE:-https://github.com/bithuman-product/homebrew-bithuman/releases/download/$E2_TAG}"
+E2_SHA_Expression2="d4ce14b6b9c463aa7310ca8200f59ded20931cc33f40b6c530eef13b5a40d326"
+E2_SHA_BithumanEngineProtocol="97c81d74e3d583b5dc94d85e11d27c32586af325ab04389bbb1809a5608d8013"
+E2_SHA_UnifiedModelHeader="60a3a1dce241d182e14b3d18607dddc01f129248899097490240b4262f5cae22"
+
 # fetch_public <asset-name> <expected-sha256> <dest-dir> -> 0 on success
 # Anonymous (no gh, no token). Verifies the PINNED digest and REFUSES on mismatch
 # rather than installing bytes it cannot account for.
@@ -170,9 +182,38 @@ locate_engine_sdk() {
 # bundle into its Vendor/embody (no static lib); the umbrella stages Classes into
 # Engines/expression2/Classes and the models into Assets/embody (FROZEN landing).
 # $1 = extra env to pass the engine bootstrap (e.g. EMBODY_VENDOR_SRC=...).
+# Fetch the three PUBLISHED expression-2 xcframeworks into <plat>/Frameworks.
+# Anonymous, digest-pinned, and REFUSES on mismatch. UnifiedModelHeader is not
+# optional: Expression2's own .swiftinterface opens with `import UnifiedModelHeader`,
+# so omitting it fails with "no such module" before a line of plugin code is read.
+stage_expression2_binary() {
+    local dl; dl="$(mktemp -d)"
+    log "Fetching the published expression-2 xcframeworks ($E2_TAG) …"
+    local ok=1
+    for n in Expression2 BithumanEngineProtocol UnifiedModelHeader; do
+        local var="E2_SHA_$n"
+        fetch_public "$n.xcframework.zip" "${!var}" "$dl" || { ok=0; break; }
+    done
+    if [ "$ok" != 1 ]; then rm -rf "$dl"; return 1; fi
+    mkdir -p "$MAC_FW" "$IOS_FW"
+    for n in Expression2 BithumanEngineProtocol UnifiedModelHeader; do
+        ( cd "$dl" && unzip -q -o "$n.xcframework.zip" )
+        [ -d "$dl/$n.xcframework" ] || die "$n.xcframework.zip did not contain $n.xcframework/"
+        rm -rf "$MAC_FW/$n.xcframework" "$IOS_FW/$n.xcframework"
+        cp -R "$dl/$n.xcframework" "$MAC_FW/$n.xcframework"
+        relink "$MAC_FW/$n.xcframework" "$IOS_FW/$n.xcframework"
+    done
+    rm -rf "$dl"
+    log "  staged Expression2 + BithumanEngineProtocol + UnifiedModelHeader → {macos,ios}/Frameworks"
+    return 0
+}
+
 stage_expression2() {
     local extra_env="${1:-}"
     rm -rf "$PLUGIN_ROOT/macos/Engines/expression2" "$PLUGIN_ROOT/ios/Engines/expression2"
+    # PUBLISHED BINARY FIRST — this is what makes a clone buildable.
+    if stage_expression2_binary; then return 0; fi
+    warn "  published xcframeworks unavailable — falling back to the private SOURCE path"
     if ! locate_engine_sdk EXPRESSION2 "expression-2" "${BITHUMAN_EXPRESSION2_DIR:-}"; then
         die "bithuman-models models/expression-2/sdk not found (set BITHUMAN_EXPRESSION2_DIR, place a sibling bithuman-models checkout, or allow a git clone) — expression2 is the DEFAULT engine and is REQUIRED"
     fi

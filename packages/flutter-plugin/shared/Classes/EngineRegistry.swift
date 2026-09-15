@@ -21,6 +21,7 @@
 //
 // Apache-2.0; (c) bitHuman.
 
+import Expression2
 import Foundation
 
 /// One registered engine's static description (identity + behaviour). The
@@ -97,6 +98,17 @@ enum EngineRegistry {
     // essence2 on an embody-only (ESSENCE2_AVAILABLE-unset) build. Its per-agent
     // dir is set out of band via setExpression2AgentDir; the shared engine is
     // extracted by the buffered-display-clock setup before warmUp.
+    // Construct through the engine's own PUBLISHED factory, passing the avatar ref
+    // as an ARGUMENT. The old path set a static (`Expression2Engine.activeAgentDir`)
+    // and then called a bare init — a mechanism that is not part of the published
+    // surface, and one where forgetting the set silently yields the bundled default
+    // instead of the agent the caller asked for. `create(_:)` cannot be forgotten.
+    // A pending dir from setExpression2AgentDir still wins, so that API keeps working.
+    let path = BithumanPlugin.pendingExpression2AgentDir ?? ref.path
+    if !path.isEmpty,
+       let engine = try? Expression2Engine.create(AvatarRef(path: path, motionDir: ref.motionDir)) {
+      return engine
+    }
     return Expression2Engine()
   }
   #endif

@@ -132,10 +132,22 @@ Pod::Spec.new do |s|
   # working plugin: every CLOUD path, the avatar, the texture and both engines are
   # independent of it. Only localAudioStart/Stop/PushText need it, and they refuse
   # by name when it is absent (see CONVERSE_AVAILABLE below).
+  # The PUBLISHED expression-2 engine, as binaries. When present the plugin
+  # LINKS them instead of compiling the engine's adapter source — one artifact
+  # for the Flutter plugin and the Swift package instead of a binary and a source
+  # copy of the same engine. These are Swift frameworks, not C-module ones, so
+  # they do not touch INVARIANT #1's single module-map slot.
+  e2_fws = %w[Expression2 BithumanEngineProtocol UnifiedModelHeader]
+            .map { |n| "Frameworks/#{n}.xcframework" }
+            .select { |rel| File.directory?(File.join(__dir__, rel)) }
+  raise "expression-2 is the DEFAULT engine: expected 3 published xcframeworks or a staged source tree, got #{e2_fws.length}" \
+    unless e2_fws.length == 3 || e2_fws.empty? || Dir.exist?(File.join(__dir__, 'Engines/expression2'))
+
   converse_fw = File.directory?(File.join(__dir__, 'Frameworks/libconverse.xcframework'))
   module_map_xcframeworks = converse_fw ? ['Frameworks/libconverse.xcframework'] : []
   raise "INVARIANT #1 violated: at most 1 module-map xcframework (libconverse), got #{module_map_xcframeworks.length}: #{module_map_xcframeworks.inspect}" unless module_map_xcframeworks.length <= 1
-  s.vendored_frameworks = module_map_xcframeworks unless module_map_xcframeworks.empty?
+  vendored = module_map_xcframeworks + e2_fws
+  s.vendored_frameworks = vendored unless vendored.empty?
   # Each staged engine's native core = a plain static lib (NEVER a 2nd module-map
   # xcframework). Auto-picked from Engines/*/Vendor/*.a (design §2.2's Dir.glob).
   s.vendored_libraries  = engine_libs.map { |p| p.sub(__dir__ + '/', '') } if essence2_lib

@@ -27,6 +27,7 @@ import AVFoundation   // AVCaptureDevice — mic-permission gate (authorizationS
 #endif
 import Accelerate
 import CoreVideo
+import Expression2
 import Foundation
 
 /// OFFLINE SELF-TEST: dump published embody frames so a headless run can be
@@ -54,6 +55,11 @@ enum EmbodyAvatarDump {
 }
 
 public class BithumanPlugin: NSObject, FlutterPlugin {
+  /// Set by `setExpression2AgentDir` BEFORE a load; consumed by EngineRegistry when it
+  /// constructs the engine. Plugin-owned because the engine's PUBLISHED surface has no
+  /// such static — the dir travels as a `create(_:)` argument instead.
+  static var pendingExpression2AgentDir: String? = nil
+
   private weak var registrar: FlutterPluginRegistrar?
   // Retained for native→Dart pushes (frameDimsChanged / pipEvent). Dart
   // installs a MethodCallHandler on the same channel name.
@@ -268,8 +274,9 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // adapter is compiled for iOS and macOS alike, and a downloaded or pushed agent
       // is the ONLY way a phone can render anything but the bundled default.
       let dir = (call.arguments as? [String: Any])?["dir"] as? String
-      Expression2Engine.activeAgentDir = (dir?.isEmpty ?? true) ? nil : dir
-      NSLog("[BithumanAvatar] setExpression2AgentDir → %@", Expression2Engine.activeAgentDir ?? "<bundled default>")
+      BithumanPlugin.pendingExpression2AgentDir = (dir?.isEmpty ?? true) ? nil : dir
+      NSLog("[BithumanAvatar] setExpression2AgentDir → %@",
+            BithumanPlugin.pendingExpression2AgentDir ?? "<bundled default>")
       result(nil)
 
     case "micPermissionStatus":
@@ -1157,11 +1164,11 @@ final class AvatarTexture: NSObject, FlutterTexture {
     var url: URL?
     if let p = ProcessInfo.processInfo.environment["EMBODY_WARM_WAV"], !p.isEmpty {
       url = URL(fileURLWithPath: p)
-    } else if let eng = Expression2Engine.engineDir,
-              FileManager.default.fileExists(atPath: "\(eng)/warm.wav") {
-      url = URL(fileURLWithPath: "\(eng)/warm.wav")   // from the extracted embody.model
     } else {
-      url = Bundle(for: Expression2Engine.self).url(forResource: "warm", withExtension: "wav", subdirectory: "embody")
+      // The engine's own extracted dir is not part of its published surface, so the
+      // warm clip comes from THIS pod's resources (or the host app's). Absent → the
+      // documented fallback: warm-up uses silence.
+      url = Bundle(for: BithumanPlugin.self).url(forResource: "warm", withExtension: "wav", subdirectory: "embody")
           ?? Bundle.main.url(forResource: "warm", withExtension: "wav", subdirectory: "embody")
     }
     guard let u = url, let file = try? AVAudioFile(forReading: u),
@@ -1187,39 +1194,13 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// extract. (The old reason here — "the embody runtime is macOS" — stopped being
   /// true when expression-2 shipped on iPhone.)
   private func ensureEngineExtracted() {
-    // macOS-only: see the note above — the bundled embody.model exists only in the
-    // macOS app; on iOS the engine members come from the downloaded agent dir.
-    #if os(macOS)
-    let fm = FileManager.default
-    guard let model = Bundle(for: Expression2Engine.self).url(forResource: "embody", withExtension: "model", subdirectory: "embody")
-        ?? Bundle.main.url(forResource: "embody", withExtension: "model", subdirectory: "embody") else {
-      return
-    }
-    let base = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true).first
-             ?? NSTemporaryDirectory()
-    let engineDir = "\(base)/ai.bithuman.app/engine"
-    let marker = "\(engineDir)/w2v_frontend_cpuAndNE.mlpackage"
-    if fm.fileExists(atPath: marker) { Expression2Engine.engineDir = engineDir; return }
-    let stage = engineDir + ".tmp"
-    try? fm.removeItem(atPath: stage)
-    do {
-      try fm.createDirectory(atPath: stage, withIntermediateDirectories: true)
-      let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-      p.arguments = ["-qq", model.path, "-d", stage]
-      try p.run(); p.waitUntilExit()
-      guard p.terminationStatus == 0, fm.fileExists(atPath: "\(stage)/w2v_frontend_cpuAndNE.mlpackage") else {
-        NSLog("[embody] engine extract failed (rc=%d) — using loose bundle", p.terminationStatus)
-        try? fm.removeItem(atPath: stage); return
-      }
-      try? fm.removeItem(atPath: engineDir)
-      try fm.moveItem(atPath: stage, toPath: engineDir)
-      Expression2Engine.engineDir = engineDir
-      NSLog("[embody] engine ready from embody.model → %@", engineDir)
-    } catch {
-      NSLog("[embody] engine extract error: %@ — using loose bundle", "\(error)")
-      try? fm.removeItem(atPath: stage)
-    }
-    #endif
+    // NO-OP against the PUBLISHED engine. This used to extract a bundled
+    // `embody.model` and point the engine at it through `Expression2Engine.engineDir`
+    // — a settable static that exists only in the engine's source build and is not on
+    // its published surface. The published engine resolves its own shared members from
+    // the avatar it was created with (`create(_:)` / `create(modelPath:sharedEngineDir:)`),
+    // so there is nothing for the plugin to pre-stage. Kept as a named no-op rather than
+    // deleted at every call site, so the removal is visible where the behaviour changed.
   }
 
   /// Set up the `.bufferedDisplayClock` drive (expression2 / embody). The engine
