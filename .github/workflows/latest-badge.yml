@@ -48,10 +48,21 @@ on:
   workflow_dispatch:
   # ★A THEFT BY HAND ANSWERS TO NO TRIGGER ABOVE except `release`, and a badge
   #  re-pinned by hand hours later leaves no event at all — so this gate is only
-  #  finished once it also runs on a clock. The schedule is left commented out
-  #  deliberately: the coordinator enables it, not this change.
-  # schedule:
-  #   - cron: '23 6 * * *'
+  #  finished once it also runs on a clock. Enabled 2026-09-15.
+  #
+  #  WHY HOURLY, and not daily. Both thefts were HAND-CUT releases, so the
+  #  exposure window is "whenever a person publishes" rather than any schedule
+  #  of ours. A daily run means the badge can point at the wrong artifact for
+  #  most of a day; hourly bounds it to about an hour, which is the window that
+  #  was asked for. The check is three HTTP GETs against one repo's release
+  #  list — it costs nothing to run often, and a detector that runs rarely is
+  #  one whose green you cannot date.
+  #
+  #  :41 rather than :00 on purpose. GitHub queues scheduled runs and the top
+  #  of the hour is the most contended minute on the platform, so an on-the-hour
+  #  cron is the one most likely to be delayed or dropped.
+  schedule:
+    - cron: '41 * * * *'
 
 permissions:
   contents: read
