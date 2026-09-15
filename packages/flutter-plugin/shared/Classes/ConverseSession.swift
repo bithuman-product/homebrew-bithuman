@@ -1,3 +1,10 @@
+// Compiles ONLY when libconverse.xcframework is staged. The on-device
+// conversation brain is OPTIONAL: `scripts/bootstrap.sh` vendors it when it can
+// reach it, and the podspec sets CONVERSE_AVAILABLE from the staged bytes — the
+// same shape essence-2 already uses (ESSENCE2_AVAILABLE). This file needs the `bc_*` C ABI of libconverse.xcframework (import CConverse).
+// Without it the plugin still builds and every CLOUD path works; only
+// localAudioStart / localAudioStop / localPushText are unavailable.
+#if CONVERSE_AVAILABLE
 import CConverse
 import Foundation
 
@@ -258,3 +265,4 @@ final class ConverseSession: @unchecked Sendable {
     }
     deinit { stop() }
 }
+#endif  // CONVERSE_AVAILABLE

@@ -129,8 +129,15 @@ Pod::Spec.new do |s|
   # resolution — the clash 3b53fc0 fixed). onnxruntime.xcframework is a PLAIN binary
   # framework (no Clang module map), so it does NOT occupy the module-map slot. Fail
   # the pod build loudly if a future change ever adds a second module-map xcframework.
-  module_map_xcframeworks = ['Frameworks/libconverse.xcframework']
-  raise "INVARIANT #1 violated: expected exactly 1 module-map xcframework (libconverse), got #{module_map_xcframeworks.length}: #{module_map_xcframeworks.inspect}" unless module_map_xcframeworks.length == 1
+  # libconverse (the on-device conversation brain) is OPTIONAL, decided by the
+  # STAGED BYTES exactly as essence2 is (essence2_lib → ESSENCE2_AVAILABLE). It is
+  # SDK, not an avatar engine, and a clone that cannot reach it must still build a
+  # working plugin: every CLOUD path, the avatar, the texture and both engines are
+  # independent of it. Only localAudioStart/Stop/PushText need it, and they refuse
+  # by name when it is absent (see CONVERSE_AVAILABLE below).
+  converse_fw = File.directory?(File.join(__dir__, 'Frameworks/libconverse.xcframework'))
+  module_map_xcframeworks = converse_fw ? ['Frameworks/libconverse.xcframework'] : []
+  raise "INVARIANT #1 violated: at most 1 module-map xcframework (libconverse), got #{module_map_xcframeworks.length}: #{module_map_xcframeworks.inspect}" unless module_map_xcframeworks.length <= 1
   s.vendored_frameworks = ['Frameworks/onnxruntime.xcframework'] + module_map_xcframeworks
   # Each staged engine's native core = a plain static lib (NEVER a 2nd module-map
   # xcframework). Auto-picked from Engines/*/Vendor/*.a (design §2.2's Dir.glob).
@@ -173,7 +180,12 @@ Pod::Spec.new do |s|
   # BithumanAvatarPlugin.swift compile against. (The essence2 adapter compiles for
   # BOTH macOS and iOS now — `#if (os(macOS) || os(iOS)) && ESSENCE2_AVAILABLE` —
   # so on iOS this flag is what turns the on-device a2x engine ON.)
-  pod_xcconfig['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = '$(inherited) ESSENCE2_AVAILABLE' if essence2_lib
+  conds = ['$(inherited)']
+  conds << 'ESSENCE2_AVAILABLE' if essence2_lib
+  # Set from the staged bytes, never from intent: the local-brain code compiles
+  # in ONLY when the framework it calls is actually present.
+  conds << 'CONVERSE_AVAILABLE'  if converse_fw
+  pod_xcconfig['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = conds.join(' ')
   pod_xcconfig['GCC_PREPROCESSOR_DEFINITIONS'] = '$(inherited) BH_ENGINE_AUTH_HOOKS=1' if auth_hooks
   s.pod_target_xcconfig = pod_xcconfig
 

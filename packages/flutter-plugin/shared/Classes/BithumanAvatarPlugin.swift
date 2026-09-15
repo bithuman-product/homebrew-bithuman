@@ -148,9 +148,11 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       registrarTextures?.unregisterTexture(textureId)
     }
     textures.removeAll()
+    #if CONVERSE_AVAILABLE
     if #available(macOS 26.0, iOS 26.0, *) {
       for (_, ctrl) in converseControllers { (ctrl as? LocalConverseController)?.stop() }
     }
+    #endif
     converseControllers.removeAll()
     converseChannels.removeAll()
     for (_, io) in audioIOs { io.stop() }
@@ -598,6 +600,18 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
 
     #if os(macOS) || os(iOS)
     case "localAudioStart":
+      #if !CONVERSE_AVAILABLE
+      // Built without libconverse.xcframework. Refuse by NAME rather than crash or
+      // return a silent nil: a developer who reaches this has a working cloud path
+      // and needs to be told which component is absent, not left guessing.
+      result(FlutterError(code: "CONVERSE_UNAVAILABLE",
+                          message: "This build has no on-device conversation brain "
+                                 + "(libconverse.xcframework was not staged). The CLOUD "
+                                 + "realtime path, the avatar and both engines are "
+                                 + "unaffected — use BithumanRealtimeSession instead.",
+                          details: nil))
+      return
+      #else
       // LOCAL mode: the on-device brain (Apple ASR → Qwen → Supertonic via
       // converse) drives the SAME RealtimeAudioIO (mic/speaker/avatar) and the
       // SAME avatar Texture the cloud path uses — only the brain differs.
@@ -669,14 +683,18 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
         }
       }
 
+      #endif  // CONVERSE_AVAILABLE
+
     case "localAudioStop":
       guard let args = call.arguments as? [String: Any],
             let textureId = args["textureId"] as? Int64 else {
         result(FlutterError(code: "BAD_ARGS", message: "localAudioStop requires textureId", details: nil)); return
       }
+      #if CONVERSE_AVAILABLE
       if #available(macOS 26.0, iOS 26.0, *) {
         (converseControllers[textureId] as? LocalConverseController)?.stop()
       }
+      #endif
       converseControllers.removeValue(forKey: textureId)
       converseChannels.removeValue(forKey: textureId)
       audioIOs[textureId]?.stop()
@@ -691,11 +709,13 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
             let text = args["text"] as? String else {
         result(FlutterError(code: "BAD_ARGS", message: "localPushText requires text", details: nil)); return
       }
+      #if CONVERSE_AVAILABLE
       if #available(macOS 26.0, iOS 26.0, *) {
         for (_, ctrl) in converseControllers {
           (ctrl as? LocalConverseController)?.pushText(text)
         }
       }
+      #endif
       result(nil)
 
     case "localSetMuted":
