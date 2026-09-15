@@ -261,12 +261,12 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // (student + audiotokenizer + canon). Pass null/"" to revert to the bundled
       // default (A42). The shared w2v/taehv graphs always come from the app
       // bundle. Set BEFORE the next `load` (engine: expression2) so the new
-      // Expression2Runtime warms from this dir. macOS-only (expression-2 runtime is mac).
-      #if os(macOS)
+      // Expression2Runtime warms from this dir. Both platforms: the expression-2
+      // adapter is compiled for iOS and macOS alike, and a downloaded or pushed agent
+      // is the ONLY way a phone can render anything but the bundled default.
       let dir = (call.arguments as? [String: Any])?["dir"] as? String
       Expression2Engine.activeAgentDir = (dir?.isEmpty ?? true) ? nil : dir
       NSLog("[BithumanAvatar] setExpression2AgentDir → %@", Expression2Engine.activeAgentDir ?? "<bundled default>")
-      #endif
       result(nil)
 
     case "micPermissionStatus":
