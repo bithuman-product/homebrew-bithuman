@@ -49,6 +49,19 @@ Pod::Spec.new do |s|
   engine_libs = Dir.glob(File.join(__dir__, 'Engines/*/Vendor/*.a'))
   essence2_lib = !engine_libs.empty?
 
+  # DARK Component-4 auth hooks (shared/Classes/DeviceAuthShim.m) name two
+  # ADDITIVE C symbols no vendored engine exports yet. A `weak_import` does NOT
+  # let a STATIC link tolerate their absence — measured 2026-09-15: the product
+  # app failed to link this pod against essence2-v1.2.0 on Xcode 26.3
+  # ("Undefined symbols: _be_auth_set_request_signer,
+  # _be_internal_sealed_store_register"). So the calls compile in ONLY when a
+  # staged engine .a exports BOTH hooks; otherwise the shim's bh_try_* are -1
+  # no-ops and nothing references the symbols. Decided by the staged bytes.
+  auth_hook_syms = %w[_be_auth_set_request_signer _be_internal_sealed_store_register]
+  auth_hooks = engine_libs.any? do |lib|
+    auth_hook_syms.all? { |sym| system("nm -gU '#{lib}' 2>/dev/null | grep -q ' #{sym}$'") }
+  end
+
   # INVARIANT #1 (design §0.2) — CI ASSERT: an engine's native core is a PLAIN
   # STATIC .a, NEVER a 2nd module-map (C-module) xcframework (two would break each
   # other's Clang module resolution — the clash 3b53fc0 fixed). The single
@@ -161,6 +174,7 @@ Pod::Spec.new do |s|
   # BOTH macOS and iOS now — `#if (os(macOS) || os(iOS)) && ESSENCE2_AVAILABLE` —
   # so on iOS this flag is what turns the on-device a2x engine ON.)
   pod_xcconfig['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = '$(inherited) ESSENCE2_AVAILABLE' if essence2_lib
+  pod_xcconfig['GCC_PREPROCESSOR_DEFINITIONS'] = '$(inherited) BH_ENGINE_AUTH_HOOKS=1' if auth_hooks
   s.pod_target_xcconfig = pod_xcconfig
 
   # User-target xcconfig: applies to the consuming app (Runner) target so its
