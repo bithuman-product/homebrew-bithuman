@@ -1,0 +1,68 @@
+// bithuman — Android half of the umbrella plugin (expression-2 on device).
+//
+// The engine is the PUBLISHED `ai.bithuman:expression2-android` AAR from Maven Central,
+// so a fresh clone builds with no private SDK and no vendor bundle. It needs google()
+// beside mavenCentral(): its LiteRT dependency lives on Google's Maven only. The two
+// Qualcomm coordinates are the Hexagon NPU delegate the SDK loads when the SoC has one
+// (Snapdragon); elsewhere they are inert.
+//
+// ★ The pin is 0.4.6, which the presenter needs (Expression2Frame.audioSample since
+// 0.4.5; the idle-loop member since 0.4.6). Maven Central carries 0.4.1 at the time of
+// writing, so until 0.4.6 is published there this half resolves from mavenLocal only —
+// a stranger's clone builds the Apple halves and NOT this one. Stated, not hidden.
+group = 'ai.bithuman.flutter'
+version = '0.1.0'
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.7.3'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0'
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        mavenLocal()
+    }
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+android {
+    namespace = 'ai.bithuman.flutter'
+    compileSdk = 36
+    defaultConfig {
+        minSdk = 26   // the AAR declares 26
+        ndk { abiFilters 'arm64-v8a' }   // the AAR ships arm64-v8a only
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+    sourceSets {
+        main.kotlin.srcDirs += 'src/main/kotlin'
+    }
+}
+
+dependencies {
+    implementation 'ai.bithuman:expression2-android:0.4.6'
+    implementation 'com.qualcomm.qti:qnn-litert-delegate:2.49.0'
+    implementation 'com.qualcomm.qti:qnn-runtime:2.49.0'
+}
+
+// ★ The app that imports this plugin must ALSO set, in its own android/app build file:
+//     android { packaging { jniLibs { useLegacyPackaging = true } } }
+// The Hexagon (QNN) delegate opens its libraries by PATH from the app's native-library
+// directory; with the default (uncompressed, unextracted) packaging that path is empty,
+// the SDK falls back to the CPU silently, and only `acceleratorNote` says why. A library
+// cannot set packaging for the app that consumes it. (Measured, Galaxy S25+, 2026-09-14/15.)

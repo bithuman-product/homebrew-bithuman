@@ -1,5 +1,5 @@
 name: bithuman
-description: "The bitHuman avatar umbrella Flutter plugin (macOS · iOS) — engine-agnostic glue + the single libconverse module-map xcframework; statically aggregates N engine SDKs (expression-2, essence-2)."
+description: "The bitHuman avatar umbrella Flutter plugin (macOS · iOS · Android) — engine-agnostic glue + the single libconverse module-map xcframework; statically aggregates N engine SDKs (expression-2, essence-2)."
 version: 2.3.3
 homepage: https://www.bithuman.ai
 repository: https://github.com/bithuman-product/homebrew-bithuman
@@ -51,6 +51,9 @@ flutter:
       ios:
         pluginClass: BithumanPlugin
       macos:
+        pluginClass: BithumanPlugin
+      android:
+        package: ai.bithuman.flutter
         pluginClass: BithumanPlugin
 
   # To add assets to your plugin package, add an assets section, like this:
