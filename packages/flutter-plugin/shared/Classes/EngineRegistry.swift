@@ -106,8 +106,31 @@ enum EngineRegistry {
     // instead of the agent the caller asked for. `create(_:)` cannot be forgotten.
     // A pending dir from setExpression2AgentDir still wins, so that API keeps working.
     let path = BithumanPlugin.pendingExpression2AgentDir ?? ref.path
+    // THE CONTAINER AS SERVED. When the path names a FILE — the `.imx` the download door
+    // hands a customer — open it through the published container API instead of expecting
+    // a directory somebody expanded by hand. That expansion is not a step a customer
+    // performs, and skipping it in a measurement skips the step most likely to fail:
+    // this estate has already voided a night of iPhone numbers taken on a pre-expanded
+    // container, because the published build could not open the served one at all.
+    var isDir: ObjCBool = false
+    if !path.isEmpty,
+       FileManager.default.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue {
+      let staging = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("bh-stage")
+      try? FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+      do {
+        let engine = try Expression2Engine.create(avatarContainer: URL(fileURLWithPath: path),
+                                                  stagingDir: staging)
+        NSLog("[engine] opened the CONTAINER as served: %@", path)
+        return engine
+      } catch {
+        // Report it rather than silently falling back to a shape a customer does not
+        // have: a failure to open the served container IS the result.
+        NSLog("[engine] FAILED to open the container as served (%@): %@", path, "\(error)")
+      }
+    }
     if !path.isEmpty,
        let engine = try? Expression2Engine.create(AvatarRef(path: path, motionDir: ref.motionDir)) {
+      NSLog("[engine] opened an expanded agent DIRECTORY: %@", path)
       return engine
     }
     return Expression2Engine()

@@ -1270,7 +1270,11 @@ final class AvatarTexture: NSObject, FlutterTexture {
       // the same audioQueue path the live TTS uses, so a headless run reproduces
       // real-speech rendering (the synthetic buzz above can't — a steady tone
       // hides identity-specific onset/decode issues). Off unless the var is set.
-      if let wav = ProcessInfo.processInfo.environment["EMBODY_TEST_WAV"], !wav.isEmpty {
+      if var wav = ProcessInfo.processInfo.environment["EMBODY_TEST_WAV"], !wav.isEmpty {
+        // A phone has no shared filesystem with the host, so a drive has to be copied
+        // into the app's own container and named relative to it. Absolute paths are
+        // unchanged; a relative one resolves against the app home.
+        if !wav.hasPrefix("/") { wav = NSHomeDirectory() + "/" + wav }
         NSLog("[embody] TEST_WAV on — feeding %@", wav)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
           guard let self = self,
@@ -1518,6 +1522,14 @@ final class AvatarTexture: NSObject, FlutterTexture {
               rt.hasPendingTail ? "y" : "n")
       }
       embodyDrainWaitTicks = 0
+      // Utterance over: emit the EXACT published-speech-frame count. The plugin has
+      // tracked this all along and never logged it, so every coverage figure taken from
+      // this surface was inferred from a 40-frame window — too coarse to see the head
+      // deficit or the tail pad, which are the structure that matters.
+      speechFrameLock.lock(); let total = _speechFramesPublished; speechFrameLock.unlock()
+      if Self.avatarDebugLogging {
+        NSLog("[embody-cov] utterance end: speechFramesPublished=%d (exact)", total)
+      }
       embodySpeaking = false; publishIdleLoopFrame(rt)
       return
     }
@@ -1538,7 +1550,13 @@ final class AvatarTexture: NSObject, FlutterTexture {
     if embodyFpsT0 == 0 { embodyFpsT0 = now }
     if embodyFrameCount % 40 == 0 {
       let dt = now - embodyFpsT0
-      NSLog("[embody-fps] %.1f fps speech (40 frames / %.2fs), queue=%d", dt > 0 ? 40.0 / dt : 0, dt, rt.queuedFrames)
+      // "pulled", not "speech": embodyFrameCount increments for every frame pull()
+      // returns, without consulting the `speech` flag in the tuple. The exact speech
+      // count is carried beside it so a coverage figure never has to be inferred from
+      // a 40-frame window.
+      speechFrameLock.lock(); let sp = _speechFramesPublished; speechFrameLock.unlock()
+      NSLog("[embody-fps] %.1f fps pulled (40 frames / %.2fs), queue=%d, speechFramesPublished=%d",
+            dt > 0 ? 40.0 / dt : 0, dt, rt.queuedFrames, sp)
       embodyFpsT0 = now
     }
   }
