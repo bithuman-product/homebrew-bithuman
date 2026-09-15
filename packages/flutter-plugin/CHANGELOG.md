@@ -1,7 +1,5 @@
 ## Unreleased
 
-## Unreleased
-
 * **Android half of the plugin.** `android/` implements the SAME `ai.bithuman.avatar`
   MethodChannel and `ai.bithuman.avatar.mic/<textureId>/<gen>` EventChannel the Apple
   halves serve, so ONE Flutter app runs on a Galaxy with byte-for-byte the widgets it
