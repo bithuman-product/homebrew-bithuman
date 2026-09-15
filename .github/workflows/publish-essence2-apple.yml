@@ -166,6 +166,7 @@ jobs:
             libessence2-resources.zip libessence2-resources.zip.sha256 \
             onnxruntime.xcframework.zip onnxruntime.xcframework.zip.sha256 onnxruntime.xcframework.zip.checksum \
             --repo "$GITHUB_REPOSITORY" \
+            --latest=false \
             --title "libessence2 $TAP_TAG" \
             --notes "3-slice libessence2.xcframework (macos-arm64 + ios-arm64 + ios-arm64-simulator), the runtime resources, and the onnxruntime dependency. Built, tested and graded by bithuman-models apple-xcframework.yml at $SOURCE_TAG and re-hosted here unchanged (sha256 sidecars attached; libessence2.xcframework.zip = $EXPECTED_XCF_SHA256). Run on an M4 and an iPhone 15 before this release was cut."
           echo "released: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAP_TAG"
