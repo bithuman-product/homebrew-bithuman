@@ -547,6 +547,16 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     try session.setCategory(.playAndRecord, mode: .videoChat, options: options)
     try session.setPreferredSampleRate(48_000)
     try session.setActive(true)
+    // ★THE PLATFORM ASYMMETRY, MEASURED RATHER THAN ASSUMED. iOS has an AVAudioSession
+    // with a real output latency; macOS has no session at all. Audio handed to the player
+    // reaches the ear that much later, and nothing in this file has ever read the number —
+    // so on iOS the picture can lead the sound by exactly this much, constantly, while
+    // macOS shows no such error. Route matters enormously: Bluetooth is typically
+    // hundreds of milliseconds where the built-in speaker is tens.
+    let route = session.currentRoute.outputs.map { "\($0.portType.rawValue)" }.joined(separator: ",")
+    NSLog("[av-latency] outputLatency=%.1f ms  inputLatency=%.1f ms  ioBuffer=%.1f ms  sr=%.0f  route=%@",
+          session.outputLatency * 1000, session.inputLatency * 1000,
+          session.ioBufferDuration * 1000, session.sampleRate, route.isEmpty ? "none" : route)
     // PRIMARY fix: .defaultToSpeaker is unreliable under VP-IO, so force the
     // loudspeaker route explicitly (no-op for Bluetooth/wired routes). This is
     // a route override only — it does NOT change the mode and does NOT disable
@@ -1529,6 +1539,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       // (deallocated) one would silently stop releasing audio — the "no sound
       // after reconnect" bug.
       avatarTextureForLipsync?.onSpeechFramePublished = { [weak self] in self?.releaseEmbodyAudioFrame() }
+      avatarTextureForLipsync?.canReleaseSpeechAudio = { [weak self] in self?.canReleaseEmbodyAudioFrame() ?? true }
       if let s = inBuf.floatChannelData?[0] {
         embodyPacedLock.lock()
         embodyPaced.append(contentsOf: UnsafeBufferPointer(start: s, count: Int(frameCount)))
@@ -1554,6 +1565,23 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   /// so audio and video advance together — A/V locked by construction. While the
   /// front of the buffer hasn't arrived yet (idle/padding frames) it no-ops, so
   /// the speaker stays silent for non-speech frames.
+  /// Can this frame's audio slice be released RIGHT NOW? Asked by the presenter BEFORE
+  /// it publishes a speech frame, because the two must advance together or not at all.
+  ///
+  /// ★Why this exists. releaseEmbodyAudioFrame() returns early when the FIFO is short —
+  /// the picture has already been published by then, the slice is not released, and
+  /// nothing repays it: the next call takes the NEXT slice, not the skipped one. So each
+  /// short-FIFO moment advanced the picture by one frame while the sound stood still, and
+  /// the gap never closed. The comment above claimed the pairing was "locked by
+  /// construction"; it held only while the FIFO was never short, and said nothing about
+  /// the case where it is.
+  func canReleaseEmbodyAudioFrame() -> Bool {
+    let secs = avatarTextureForLipsync?.audioReleaseSeconds ?? 0.05
+    let need = Int(serverTtsFormat.sampleRate * secs)
+    embodyPacedLock.lock(); let have = embodyPaced.count; embodyPacedLock.unlock()
+    return have >= need
+  }
+
   func releaseEmbodyAudioFrame() {
     // If a macOS device swap is rebuilding the graph, DO NOT touch the player and
     // DO NOT drain the FIFO. The Nth-frame↔Nth-slice pairing is preserved: this
@@ -1569,7 +1597,18 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     let secs = avatarTextureForLipsync?.audioReleaseSeconds ?? 0.05
     let need = Int(serverTtsFormat.sampleRate * secs)   // 1200 @ 24 kHz embody; 960 essence2
     embodyPacedLock.lock()
-    guard embodyPaced.count >= need else { embodyPacedLock.unlock(); return }
+    guard embodyPaced.count >= need else {
+      let have = embodyPaced.count
+      embodyPacedLock.unlock()
+      // ★THE DEBT. The picture for this frame is already on the texture; its 50 ms of
+      // sound is not, and nothing here repays it — the next call takes the NEXT slice.
+      // Counted and named so it can never again be inferred from a customer's
+      // description of the symptom.
+      embodySkippedSlices += 1
+      NSLog("[embody-av] SKIPPED this frame's audio slice (have %d of %d samples) — total skipped=%d = %.2f s the picture is ahead",
+            have, need, embodySkippedSlices, Double(embodySkippedSlices) * secs)
+      return
+    }
     let chunk = Array(embodyPaced.prefix(need))
     embodyPaced.removeFirst(need)
     embodyPacedLock.unlock()
@@ -1605,6 +1644,9 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     }
   }
   private var embodyRelN = 0
+  /// How many times a published speech frame went out WITHOUT its audio slice.
+  /// Every one of these is 50 ms the picture has gained on the sound, permanently.
+  private var embodySkippedSlices = 0
   /// Append a diagnostic line to /embody_av.txt (survives an `open`-launched app).
   private func appendAvProbe(_ s: String) {
     let p = (ProcessInfo.processInfo.environment["EMBODY_DUMP_DIR"] ?? "/tmp") + "/embody_av.txt"
