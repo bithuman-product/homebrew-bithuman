@@ -4,9 +4,14 @@ import ai.bithuman.expression2.Expression2Avatar
 import android.graphics.Bitmap
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioTimestamp
 import android.media.AudioTrack
+import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
 import android.os.Process
 import android.util.Log
+import android.view.Choreographer
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.LinkedBlockingQueue
 
@@ -33,7 +38,9 @@ import java.util.concurrent.LinkedBlockingQueue
  *    reporting PLAYING.
  *
  *  - PRESENTATION (4). A frame is shown when P — the samples the DEVICE has actually
- *    consumed — reaches it. P is the clock. No timer participates.
+ *    consumed — reaches it. P is the clock. No timer participates. The presenter
+ *    runs once per vsync on the main looper and shows the NEWEST due unit; older
+ *    units due in the same vsync are counted (`coalesced`), never shown late.
  *
  * IDLE (6) is the same machinery, not a second one. Between turns the producer emits
  * idle units — a frame of the identity's own idle clip plus a frame's worth of
@@ -102,16 +109,11 @@ class AvatarPlayer(
      * see from outside, and it guessed wrong once in twelve replies (log `bhutt`,
      * 2026-09-15: 209 units admitted against the wrong audio).
      *
-     * Three facts remain, and each is now a comparison rather than a guess:
-     *  - HEAD. An utterance's first frame is index 3 (the stream-start phase trim), so
-     *    its first 150 ms of audio precedes any frame. A unit carries everything from
-     *    `head` up to the end of its frame's window: the head goes out under frame 3.
-     *  - PAD. The engine completes a final chunk with silence it invents. `speech`
-     *    says which frames those are — play them under silence and consume nothing,
-     *    and only while there is no real audio waiting: invented silence must never
-     *    delay a reply that has already arrived.
-     *    Comparing their position against "how much have I fed" instead is wrong with
-     *    a live source: the next reply's audio is already at those positions.
+     * Two facts remain, and each is a comparison rather than a guess:
+     *  - HEAD. Since 0.4.6 (#681) frame n IS audio-frame n: an utterance's first
+     *    frame is index 0 and carries its first 40 ms. A unit still carries everything
+     *    from `head` up to the end of its frame's window, so a remainder with no frame
+     *    of its own (a joined segment) goes out under the frame that follows it.
      *  - TAIL. A chunk's frames stop up to 0.4 s short of the audio. When the engine
      *    says the utterance is closed, what is left plays under the last frame.
      */
@@ -124,11 +126,9 @@ class AvatarPlayer(
     private var carry = ByteArray(0)
     /** Stream offsets where the session said a reply's audio stopped; bounds the final drain. */
     private val replyEnds = ArrayDeque<Long>()
-    @Volatile private var nPad = 0
     @Volatile private var nTailUnits = 0
     @Volatile private var nCatchUp = 0
     @Volatile private var nBackwards = 0
-    @Volatile private var nPadDropped = 0
     @Volatile private var nAwait = 0
     @Volatile private var nHold = 0
     @Volatile private var nRingOverrun = 0L
@@ -150,6 +150,21 @@ class AvatarPlayer(
     @Volatile private var presentedSeq = 0L
     private var admittedSeq = 0L
     private val silence = ByteArray(BYTES_PER_FRAME)
+
+    /**
+     * SYNC MARKER — a dev lever, off unless `adb shell setprop debug.bh.marker.every N`.
+     * Every Nth speech unit goes out WHITE with a 12 ms click mixed into the first 12 ms
+     * of its own audio, so a camera or scrcpy+mic capture can read the A/V offset the
+     * user actually experiences off the recording: white flash vs click. The unit is
+     * marked BEFORE admission, so writer, device and presenter treat it like any other;
+     * one `bhmark` line at admission and one when it is shown carry pts, host time and
+     * the device's own output latency so the known part can be subtracted.
+     */
+    private val markerEvery: Int = devInt("debug.bh.marker.every")
+    private val markerFrame: Bitmap? = if (markerEvery > 0) avatar.newFrameBitmap().also { it.eraseColor(Color.WHITE) } else null
+    private var nSpeechAdmitted = 0L
+    @Volatile private var nMarkers = 0
+    private val audioTs = AudioTimestamp()
 
     private val track: AudioTrack = AudioTrack.Builder()
         .setAudioAttributes(AudioAttributes.Builder()
@@ -187,7 +202,9 @@ class AvatarPlayer(
         Thread(::feed, "bh-feed").start()
         Thread(::produce, "bh-produce").start()
         Thread(::write, "bh-write").start()
-        Thread(::present, "bh-present").start()
+        // The presenter is the display's own clock: one callback per vsync on the main
+        // looper, which is also where the bitmap is drawn. No thread, no polling loop.
+        Handler(Looper.getMainLooper()).post { Choreographer.getInstance().postFrameCallback(vsync) }
     }
 
     /** One chunk of the agent's voice: PCM16 mono little-endian @ 24 kHz. */
@@ -223,6 +240,7 @@ class AvatarPlayer(
         track.flush()
         track.play()
         pBase = sessionSamples          // the device counter restarts; the session does not
+        tsValid = false; tsReadAt = 0L  // and so does its timestamp
         inbox.offer(Reset)
     }
 
@@ -257,8 +275,35 @@ class AvatarPlayer(
         }
     }
 
-    /** Samples the device has consumed, on the session timeline. */
-    private fun p(): Long = pBase + track.playbackHeadPosition.toLong()
+    /**
+     * Samples the device has made AUDIBLE, on the session timeline — the clock the
+     * picture is shown against.
+     *
+     * ★ `playbackHeadPosition` is where the device has TAKEN samples to, and the
+     * speaker is behind it by the track's output latency. Measured with the sync
+     * marker (`debug.bh.marker.every`, scrcpy recording of what the device showed and
+     * played, 2026-09-15, ten markers): the white frame led the click by 48-61 ms,
+     * mean 54, while `AudioTimestamp` put the DAC 55-62 ms behind the head position.
+     * So the picture is clocked on the DAC: the framework's timestamp (a frame
+     * position with the nanoTime it was audible at) extrapolated to now. It is
+     * re-read every [TS_REFRESH_MS]; between reads the extrapolation is exact to
+     * the device clock. Where a device gives no timestamp the head position stands,
+     * and the marker says by how much.
+     */
+    private fun p(): Long {
+        val now = System.nanoTime()
+        if (now - tsReadAt > TS_REFRESH_MS * 1_000_000L) {
+            tsReadAt = now
+            tsValid = runCatching { track.getTimestamp(clockTs) }.getOrDefault(false)
+        }
+        if (!tsValid) return pBase + track.playbackHeadPosition.toLong()
+        val dac = clockTs.framePosition + (now - clockTs.nanoTime) * RATE / 1_000_000_000L
+        // never ahead of what was taken (a stale timestamp across a flush), never backwards
+        return pBase + minOf(dac, track.playbackHeadPosition.toLong())
+    }
+    private val clockTs = AudioTimestamp()
+    private var tsReadAt = 0L
+    private var tsValid = false
 
     // ---------------------------------------------------------------- producer
 
@@ -281,7 +326,6 @@ class AvatarPlayer(
         var slot = 0
         var lastSpeechSlot = -1
         var heldFrom = -1L
-        var heldSpeech = true
         var idleAt = 0
         var seenReset = resetGen
         var lastPullOk = false
@@ -302,30 +346,21 @@ class AvatarPlayer(
                     // STARVATION: the ready-frame depth reached zero while the engine
                     // still had an utterance to finish. Counted as episodes, not pulls.
                     if (lastPullOk && avatar.hasPendingTail) nStarve++
-                } else { heldFrom = f.audioSample * BYTES_PER_SAMPLE16; heldSpeech = f.speech }
+                } else heldFrom = f.audioSample * BYTES_PER_SAMPLE16
                 lastPullOk = f != null
             }
 
             if (heldFrom >= 0) {
                 var body: ByteArray? = null
                 var underLast = false
-                var drop = false
                 synchronized(audioLock) {
+                    // Every frame the SDK delivers has audio behind it (0.4.6, tail 0),
+                    // so there is no "invented frame" arm here any more. There were two
+                    // (play it under silence / drop it when real audio waits), and
+                    // between them they inserted 5 s of silence across twelve replies
+                    // and ate 0.65 s of the next reply, twice a conversation — measured
+                    // 2026-09-15 — before they were ordered right. Gone is better.
                     when {
-                        // ★ INVENTED SILENCE NEVER DELAYS REAL AUDIO. The padding exists so
-                        // the mouth closes at the end of a reply; when the next reply's
-                        // samples are already in hand there is no pause to close into, and
-                        // admitting the padding anyway pushes the whole session later —
-                        // measured 2026-09-15: 100 padding units, 5 s of silence inserted
-                        // across twelve replies, the picture still in sync with the audio and
-                        // both of them 5 s behind the conversation.
-                        !heldSpeech && head < audioLen -> { drop = true; nPadDropped++ }
-                        // ★ THE INVENTED FRAMES ARE TESTED FIRST. Their position lies past
-                        // the audio that was fed, so treating one as "a frame whose audio is
-                        // still ahead of us" makes it drag the whole catch-up through the
-                        // NEXT reply's samples — 0.65 s of it, twice a conversation, before
-                        // this ordering.
-                        !heldSpeech -> { body = silence; nPad++ }           // a real pause: the mouth closes
                         // A whole frame's worth of audio sits before this frame and has no
                         // frame of its own — an utterance's 0.4 s tail, the next one's 0.15 s
                         // head. It goes out under the LAST frame, a frame's worth at a time,
@@ -336,7 +371,6 @@ class AvatarPlayer(
                         else -> body = take(heldFrom + BYTES_PER_FRAME)      // its own samples, plus any short remainder before them
                     }
                 }
-                if (drop) { heldFrom = -1L; where = "pad-drop"; continue }
                 nSpeech++; stats.speechUnits = nSpeech; stats.markFirstAudio()
                 if (underLast) {
                     where = "catch-up"
@@ -397,14 +431,37 @@ class AvatarPlayer(
             sessionSamples += SAMPLES_PER_FRAME
             idleAt = (idleAt + 1) % idleClip.size     // forward-only wrap, never ping-pong
         }
-        runCatching { avatar.close() }
+        // PLUGIN: the engine outlives the player. The plugin creates the Expression2Avatar
+        // and closes it in dispose(); a player is stopped and replaced when the app leaves
+        // and returns to the screen (setIdleHold). The example's player closed the engine
+        // here — measured 2026-09-16: the next player crashed the process on its first
+        // pull ("this Expression2Avatar is closed"). The creator closes; the player does not.
     }
 
     private fun admitSpeech(frame: Bitmap, slot: Int, body: ByteArray) {
         val seq = ++admittedSeq
         if (slot >= 0) slotSeq[slot] = seq
-        admit(AvUnit(sessionSamples, frame, epoch, true, stats.turnGen, body, seq))
+        var f = frame
+        if (markerFrame != null && body !== silence && ++nSpeechAdmitted % markerEvery == 0L) {
+            mixClick(body)
+            f = markerFrame
+            nMarkers++
+            Log.i("bhmark", "MARKER $nMarkers ADMIT seq=$seq pts=$sessionSamples hostMs=${System.currentTimeMillis()}")
+        }
+        admit(AvUnit(sessionSamples, f, epoch, true, stats.turnGen, body, seq))
         sessionSamples += (body.size / 2).toLong()
+    }
+
+    /** 12 ms Hann-windowed 2 kHz tone at -6 dBFS, mixed into the head of [body] in place. */
+    private fun mixClick(body: ByteArray) {
+        val n = minOf(CLICK_SAMPLES, body.size / 2)
+        for (i in 0 until n) {
+            val w = 0.5 * (1 - Math.cos(2 * Math.PI * i / (CLICK_SAMPLES - 1)))
+            val tone = 16384.0 * w * Math.sin(2 * Math.PI * CLICK_HZ * i / RATE)
+            val cur = (((body[2 * i + 1].toInt()) shl 8) or (body[2 * i].toInt() and 0xFF)).toShort().toInt()
+            val v = (cur + tone).toInt().coerceIn(-32768, 32767)
+            body[2 * i] = (v and 0xFF).toByte(); body[2 * i + 1] = ((v shr 8) and 0xFF).toByte()
+        }
     }
 
     /**
@@ -648,51 +705,90 @@ class AvatarPlayer(
 
     // --------------------------------------------------------------- presenter
 
-    private fun present() {
-        Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY)
-        var shown = 0
-        var beat = 0L
-        while (running) {
-            val now = System.currentTimeMillis()
-            if (now - beat > 1000) {
-                beat = now
-                stats.refresh()
-                val avg = if (pullCalls > 0) pullNanos / pullCalls / 1_000_000.0 else 0.0
-                Log.i("bhav", "PROD where=$where idle=$nIdle speech=$nSpeech pad=$nPad tailUnits=$nTailUnits " +
-                    "catchUp=$nCatchUp padDropped=$nPadDropped await=$nAwait hold=$nHold back=$nBackwards ringOverrun=$nRingOverrun starve=$nStarve " +
-                    "q=${avatar.queuedFrames} inFlight=${toPresent.size} | " +
-                    String.format("pull avg %.1fms max %dms over50=%d null=%d calls=%d", avg, pullMaxMs, pullOver50, nullPulls, pullCalls) +
-                    " | " + stats.line().replace("\n", " "))
-            }
-            val u = toPresent.poll()
-            if (u == null) { Thread.sleep(2); continue }
-            if (u.epoch != epoch) { if (u.speech) { nPresDropStale++; stats.dropped = (nPresDropStale + nPresDropLate).toInt() }; presentedSeq = maxOf(presentedSeq, u.seq); continue }   // stale: drop whole
-            while (running && u.epoch == epoch && p() < u.ptsSamples) Thread.sleep(1)
-            if (u.epoch != epoch) { if (u.speech) { nPresDropLate++; stats.dropped = (nPresDropStale + nPresDropLate).toInt() }; presentedSeq = maxOf(presentedSeq, u.seq); continue }
-            presentedSeq = maxOf(presentedSeq, u.seq)
-            if (u.speech) nPresSpeech++
-            if (++shown % 100 == 1)
-                Log.i("bhav", "AV shown=$shown pts=${u.ptsSamples} P=${p()} offsetSamples=${p() - u.ptsSamples}")
-            val wasFirst = u.speech && stats.ttffMs < 0 && u.turnGen == stats.turnGen
-            nPresented++
-            stats.onPresented(u.speech, u.turnGen)
-            if (wasFirst && stats.ttffMs >= 0 && byteChunks >= 0) {
-                val st = runCatching { avatar.stats() }.getOrNull()
-                if (st != null) {
-                    val render = st.wallMs - byteWallMs
-                    val wall = (stats.ttffMs - stats.ttfbMs).toDouble()
-                    Log.i("bhsplit", ("AT-FIRST-FRAME ttfb=%dms ttff=%dms ours=%.0fms | " +
-                        "renderMs=%.0f waitingForAudioMs=%.0f | chunksDelta=%d (%d->%d) framesDelta=%d q=%d")
-                        .format(stats.ttfbMs, stats.ttffMs, wall, render, wall - render,
-                            st.chunks - byteChunks, byteChunks, st.chunks,
-                            st.frames - byteFrames, avatar.queuedFrames))
-                }
-            }
-            stats.offsetMs = (p() - u.ptsSamples) * 1000.0 / RATE
-            stats.engineQueue = avatar.queuedFrames
-            stats.inFlight = toPresent.size
-            onFrame(u.frame)
+    @Volatile private var nCoalesced = 0L
+    private var shown = 0L
+    private var beat = 0L
+
+    private val vsync = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!running) return
+            presentDue(frameTimeNanos)
+            Choreographer.getInstance().postFrameCallback(this)
         }
+    }
+
+    /**
+     * One vsync: show the NEWEST unit whose audio the device has reached, and count every
+     * older due unit it superseded as `coalesced`. Two units due in one vsync means the
+     * presenter had fallen behind its own audio; before this it showed each of them in
+     * turn, ever later, and the overlay's `off` read that backlog as A/V drift
+     * (measured 2026-09-15: +460-480 ms with nobody talking and 34-57 units queued).
+     * Now `late` is what it says — the shown frame's distance past its own audio, bounded
+     * by one vsync plus one unit — and the backlog is `inFlight`.
+     */
+    private fun presentDue(frameTimeNanos: Long) {
+        val now = System.currentTimeMillis()
+        if (now - beat > 1000) {
+            beat = now
+            stats.refresh()
+            val avg = if (pullCalls > 0) pullNanos / pullCalls / 1_000_000.0 else 0.0
+            Log.i("bhav", "PROD where=$where idle=$nIdle speech=$nSpeech tailUnits=$nTailUnits " +
+                "catchUp=$nCatchUp await=$nAwait hold=$nHold back=$nBackwards ringOverrun=$nRingOverrun starve=$nStarve " +
+                "coalesced=$nCoalesced markers=$nMarkers q=${avatar.queuedFrames} inFlight=${toPresent.size} | " +
+                String.format("pull avg %.1fms max %dms over50=%d null=%d calls=%d", avg, pullMaxMs, pullOver50, nullPulls, pullCalls) +
+                " | " + stats.line().replace("\n", " "))
+        }
+        val pos = p()
+        var u: AvUnit? = null
+        while (true) {
+            val c = toPresent.peek() ?: break
+            if (c.epoch != epoch) {                       // stale: drop whole
+                toPresent.poll()
+                if (c.speech) { nPresDropStale++; stats.dropped = (nPresDropStale + nPresDropLate).toInt() }
+                presentedSeq = maxOf(presentedSeq, c.seq)
+                continue
+            }
+            if (pos < c.ptsSamples) break
+            toPresent.poll()
+            if (u != null) nCoalesced++
+            u = c
+        }
+        if (u == null) return
+        presentedSeq = maxOf(presentedSeq, u.seq)
+        if (u.speech) nPresSpeech++
+        if (++shown % 100 == 1L)
+            Log.i("bhav", "AV shown=$shown pts=${u.ptsSamples} P=$pos lateSamples=${pos - u.ptsSamples}")
+        val wasFirst = u.speech && stats.ttffMs < 0 && u.turnGen == stats.turnGen
+        nPresented++
+        stats.onPresented(u.speech, u.turnGen)
+        if (wasFirst && stats.ttffMs >= 0 && byteChunks >= 0) {
+            val st = runCatching { avatar.stats() }.getOrNull()
+            if (st != null) {
+                val render = st.wallMs - byteWallMs
+                val wall = (stats.ttffMs - stats.ttfbMs).toDouble()
+                Log.i("bhsplit", ("AT-FIRST-FRAME ttfb=%dms ttff=%dms ours=%.0fms | " +
+                    "renderMs=%.0f waitingForAudioMs=%.0f | chunksDelta=%d (%d->%d) framesDelta=%d q=%d")
+                    .format(stats.ttfbMs, stats.ttffMs, wall, render, wall - render,
+                        st.chunks - byteChunks, byteChunks, st.chunks,
+                        st.frames - byteFrames, avatar.queuedFrames))
+            }
+        }
+        if (u.frame === markerFrame) {
+            // Where is the DAC relative to the head position the picture is clocked on?
+            var latencyMs = Double.NaN
+            if (runCatching { track.getTimestamp(audioTs) }.getOrDefault(false)) {
+                val dac = audioTs.framePosition + (System.nanoTime() - audioTs.nanoTime) * RATE / 1e9
+                latencyMs = (track.playbackHeadPosition.toLong() - dac) * 1000.0 / RATE
+            }
+            Log.i("bhmark", "MARKER SHOWN seq=${u.seq} pts=${u.ptsSamples} P=$pos hostMs=${System.currentTimeMillis()} " +
+                "vsyncMs=${frameTimeNanos / 1_000_000} trackLatencyMs=%.1f dacClock=$tsValid".format(latencyMs) +
+                " (white frame shown when the DAC clock reached pts; the click sits in that unit's first 12 ms, " +
+                "so an external capture of the speaker should see white and click together)")
+        }
+        stats.offsetMs = (pos - u.ptsSamples) * 1000.0 / RATE
+        stats.engineQueue = avatar.queuedFrames
+        stats.inFlight = toPresent.size
+        onFrame(u.frame)
     }
 
     companion object {
@@ -717,6 +813,17 @@ class AvatarPlayer(
         private const val IDLE_FLOOR = 3
         /** Speech bitmaps in flight: producer ahead of writer (LEAD) + writer ahead of presenter (device) + slack. */
         private const val RING = LEAD + DEVICE_UNITS + 4
+        /** How often the DAC timestamp is re-read; between reads it is extrapolated. */
+        private const val TS_REFRESH_MS = 250L
+        /** The sync marker's click: 12 ms of 2 kHz. */
+        private const val CLICK_HZ = 2000.0
+        private val CLICK_SAMPLES = RATE * 12 / 1000
+
+        /** A `debug.*` system property as an int, 0 when unset — settable from `adb shell setprop`. */
+        private fun devInt(key: String): Int = runCatching {
+            val c = Class.forName("android.os.SystemProperties")
+            (c.getMethod("get", String::class.java, String::class.java).invoke(null, key, "0") as String).trim().toInt()
+        }.getOrDefault(0)
 
         /**
          * PCM16 @ 24 kHz -> float in [-1,1] @ 16 kHz, which is what `feed` takes.
