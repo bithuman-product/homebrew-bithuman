@@ -1,8 +1,8 @@
 // The bitHuman UI kit — ONE set of components for iPhone, Android and macOS.
 //
-// ★Owner directive, 2026-09-15: "standardize UI components across planes including
-// loading animation, heroshots, buttons, animation effects etc. so that iPhone,
-// Android, MacOS all share the same effects."
+// ★Owner directive, 2026-09-15 (paraphrased for the public tree): standardize the UI
+// components across every surface — loading animation, heroshots, buttons, animation
+// effects — so that iPhone, Android and macOS all share the same effects.
 //
 // THE MECHANISM MATTERS MORE THAN THE WIDGETS. Components live HERE, in the shared
 // plugin, and are IMPORTED by every surface; no surface defines its own. A surface that
