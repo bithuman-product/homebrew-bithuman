@@ -1567,9 +1567,11 @@ final class AvatarTexture: NSObject, FlutterTexture {
       return
     }
     embodyDrainWaitTicks = 0   // got a frame → disarm watchdog
-    // ★INTERIM — until the engine trims each utterance to F = round(seconds × fps) and
-    // never emits the padded last chunk (the serve path already does: TAIL 0), at which
-    // point this case cannot occur and this block is deleted, not kept.
+    // ★INTERIM — REMOVE WHEN THE PLUGIN CONSUMES AN ENGINE CARRYING #693 (TAIL 0): the
+    // engine then trims each utterance to F = round(seconds × fps) and never emits the
+    // padded last chunk (the serve path already does), this case cannot occur, and this
+    // block is deleted in the SAME change that repoints the plugin at that engine — the
+    // two must never coexist. An interim that outlives its cause is a second implementation.
     //
     // A speech frame is rendered FROM its audio slice, and that slice was pushed to the
     // speaker FIFO in the same call that fed the engine — so a speech frame whose slice is
