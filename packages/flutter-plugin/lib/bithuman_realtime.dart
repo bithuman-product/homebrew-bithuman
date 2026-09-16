@@ -24,6 +24,7 @@ import 'dart:io' show Platform;
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 
@@ -135,6 +136,7 @@ class BithumanRealtimeSession {
   void _resetAudioPacing() {
     _audioGen++;
     _audioBufferedUntil = DateTime.fromMillisecondsSinceEpoch(0);
+    _audibleUntil = DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   // Connection self-validation. Every connect ends by asking the agent to speak
@@ -168,6 +170,29 @@ class BithumanRealtimeSession {
       'listener, do not stop early.';
   Timer? _stressTimer;
   int _stressTurn = 0;
+
+  // INTERRUPTION PROOF (dev-only, `--dart-define=BH_MIC_FILE=<asset key>`): a raw
+  // 24 kHz PCM16 mono asset of the host app is MIXED into the microphone stream —
+  // as if the user spoke — [_devInjectAfter] into every reply that is still in
+  // flight then, so a run yields one voice cut-in per reply with a known onset
+  // (`[barge] INJECT onset`). Paired with the stress driver, its first three
+  // monologues are left alone: 3 x 60 s of the agent talking with nobody in the
+  // room is the echo control (every speech_started there is the agent hearing
+  // itself). Default-off (define unset) in every production build.
+  static const _devMicFile = String.fromEnvironment('BH_MIC_FILE');
+  static const _devInjectAfter = Duration(seconds: 6);
+  static const _devInjectFromStressTurn = 4;
+  Int16List? _inject;
+  int _injectPos = -1;      // sample cursor while mixing; -1 = not mixing
+  // When the audio handed to the plugin so far will have finished playing — the
+  // agent is AUDIBLE until then. On Android the deltas are not paced, so a reply
+  // is fully generated (response.done) seconds before it has been heard; anything
+  // that must know whether the agent is talking asks this, not _haveActiveResponse.
+  DateTime _audibleUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  bool get agentAudible => _audibleUntil.isAfter(DateTime.now());
+  int _injectN = 0;
+  Timer? _injectTimer;
+  bool _injectArmedThisResponse = false;
 
   /// Stress driver (see [_devStress]): request the next long monologue.
   /// Single pending timer — cancel→done bursts must not stack queued turns.
@@ -286,6 +311,15 @@ class BithumanRealtimeSession {
       if (enableMic) {
         _micSub = avatar.micStream.listen(_sendMicBytes);
       }
+      if (_devMicFile.isNotEmpty && _inject == null) {
+        final bd = await rootBundle.load(_devMicFile);
+        final bytes = Uint8List.fromList(bd.buffer.asUint8List(bd.offsetInBytes, bd.lengthInBytes & ~1));
+        _inject = Int16List.view(bytes.buffer);
+        // ignore: avoid_print
+        print('[barge] INJECT asset $_devMicFile: ${_inject!.length} samples '
+            '(${(_inject!.length / 24).round()} ms) mixed into the mic ${_devInjectAfter.inSeconds} s into '
+            'every reply from stress turn $_devInjectFromStressTurn');
+      }
 
       await _connectAndConfigure();
       _status.add(RealtimeStatus.open);
@@ -332,25 +366,27 @@ class BithumanRealtimeSession {
             // that was tripping the VAD into a self-talk loop. Mirrors the
             // iOS WebRTC cloud path.
             'noise_reduction': {'type': 'far_field'},
-            // server_vad fires `speech_started` on speech ONSET (energy-based),
-            // so `interrupt_response` cancels the agent the MOMENT the user
-            // starts talking — not after a full sentence. semantic_vad
-            // eagerness=low waited for a confident, COMPLETE turn before
-            // committing, so the agent talked over the user until they
-            // finished. The `far_field` noise reduction above strips the AEC
-            // residual that used to make energy-VAD self-fire on the bot's own
-            // voice, so onset barge-in is both instant AND echo-safe.
-            // `threshold` is the sensitivity dial: RAISE it (e.g. 0.7) if the
-            // agent ever interrupts itself on echo; LOWER it if a soft barge-in
-            // is missed.
-            // semantic_vad: a model decides when you've actually taken a turn, so
-            // ambient noise / brief sounds don't interrupt the agent — it replaces
-            // the raw energy threshold + duration (server_vad) that were too
-            // twitchy. 'eagerness: low' = least eager to end-turn / barge; bump to
-            // 'medium' if it feels too slow to respond or to let you interrupt.
+            // ★ THE OWNER'S RULE: "the moment the user starts talking the agent
+            // stops talking immediately and falls back to idle." That is speech
+            // ONSET, and only server_vad fires `speech_started` on onset (an energy
+            // detector on the mic stream); with `interrupt_response` the server
+            // cancels the reply at its source and this client cuts the speaker and
+            // lipsync (the speech_started handler below). semantic_vad — shipped
+            // here until 2026-09-15 under a comment that said server_vad — waits
+            // for a model to judge a COMPLETE turn, so the agent talked over the
+            // user until they finished; at eagerness=low, the least eager setting,
+            // that is seconds. The echo side is handled where it belongs: the
+            // platform canceller on the communication audio path (MicCapture on
+            // Android, VP-IO on Apple) plus `far_field` noise reduction above.
+            // `threshold` (0..1) is the one dial: raise it if the agent ever
+            // interrupts itself on its own echo, lower it if a soft cut-in is
+            // missed. 0.5 with 300 ms pre-roll / 500 ms end-of-turn silence is the
+            // iOS WebRTC session's proven value; both platforms send the same block.
             'turn_detection': {
-              'type': 'semantic_vad',
-              'eagerness': 'low',
+              'type': 'server_vad',
+              'threshold': 0.5,
+              'prefix_padding_ms': 300,
+              'silence_duration_ms': 500,
               'create_response': true,
               'interrupt_response': true,
             },
@@ -481,6 +517,26 @@ class BithumanRealtimeSession {
   int _micDbgN = 0;
   void _sendMicBytes(Uint8List pcm24kPcm16le) {
     if (!_open || _ws == null || pcm24kPcm16le.isEmpty) return;
+    var pcm = pcm24kPcm16le;
+    final inj = _inject;
+    var injectedOnset = false;
+    if (inj != null && _injectPos >= 0) {
+      // Proof-run only: add the asset's samples to this packet, clipped.
+      final n = pcm24kPcm16le.length & ~1;
+      final mixed = Uint8List(n);
+      var p = _injectPos;
+      for (int i = 0; i < n; i += 2) {
+        var s = (pcm24kPcm16le[i + 1] << 8) | pcm24kPcm16le[i];
+        if ((s & 0x8000) != 0) s -= 0x10000;
+        if (p < inj.length) s += inj[p++];
+        if (s > 32767) { s = 32767; } else if (s < -32768) { s = -32768; }
+        mixed[i] = s & 0xFF;
+        mixed[i + 1] = (s >> 8) & 0xFF;
+      }
+      injectedOnset = _injectPos == 0;
+      _injectPos = p >= inj.length ? -1 : p;
+      pcm = mixed;
+    }
     // Compute peak/32768 for the "mic is hot" UI pulse. Cannot use
     // Int16List.view here — Flutter's EventChannel may hand back a
     // Uint8List whose offsetInBytes is odd, which fails the
@@ -489,25 +545,39 @@ class BithumanRealtimeSession {
     // requirement and the throw was previously taking down _sendMicBytes
     // BEFORE the WS send, so OpenAI was getting zero audio.
     int peak = 0;
-    final n = pcm24kPcm16le.length & ~1; // round down to even
+    final n = pcm.length & ~1; // round down to even
     for (int i = 0; i < n; i += 16) {
-      final lo = pcm24kPcm16le[i];
-      final hi = pcm24kPcm16le[i + 1];
+      final lo = pcm[i];
+      final hi = pcm[i + 1];
       var s = (hi << 8) | lo;
       if ((s & 0x8000) != 0) s -= 0x10000;
       final v = s < 0 ? -s : s;
       if (v > peak) peak = v;
     }
     _micLevel.add(peak / 32768.0);
+    _micDbgN++;
     if (muted) {
-      if (++_micDbgN % 50 == 0) print('[mic-dbg] MUTED, not sending (peak=$peak)');
+      if (_micDbgN % 10 == 0) print('[mic-dbg] MUTED, not sending (peak=$peak)');
       return;
     }
+    final hostMs = DateTime.now().millisecondsSinceEpoch;
     _send({
       'type': 'input_audio_buffer.append',
-      'audio': base64Encode(pcm24kPcm16le),
+      'audio': base64Encode(pcm),
     });
-    if (++_micDbgN % 50 == 0) print('[mic-dbg] sent #$_micDbgN to OpenAI, peak=$peak');
+    // One line a second in production (the packet count proves the uplink is
+    // continuous: +10/s); every packet during a proof run.
+    if (_devMicFile.isNotEmpty || _micDbgN % 10 == 0) {
+      print('[mic-dbg] sent #$_micDbgN to OpenAI, peak=$peak bytes=${pcm.length} hostMs=$hostMs');
+    }
+    if (injectedOnset) {
+      _injectN++;
+      // ignore: avoid_print
+      print('[barge] INJECT onset #$_injectN hostMs=$hostMs packet=#$_micDbgN active=$_haveActiveResponse audible=$agentAudible');
+    } else if (inj != null && _injectPos < 0 && pcm != pcm24kPcm16le) {
+      // ignore: avoid_print
+      print('[barge] INJECT end #$_injectN hostMs=$hostMs');
+    }
   }
 
   /// Mark the end of the user's turn explicitly (when server VAD is off).
@@ -565,6 +635,9 @@ class BithumanRealtimeSession {
     _cancelConnectionWatchdog();
     _stressTimer?.cancel();
     _stressTimer = null;
+    _injectTimer?.cancel();
+    _injectTimer = null;
+    _injectPos = -1;
     // Drop any post-disconnect audio.delta that's still in flight on
     // the WS read buffer — without this they'd push lipsync into the
     // avatar even after we've torn the session down.
@@ -616,6 +689,13 @@ class BithumanRealtimeSession {
         final b64 = evt['delta'] as String?;
         if (b64 == null) return;
         final pcm24kBytes = base64Decode(b64);
+        if (_inject != null && !_injectArmedThisResponse && _stressTurn >= _devInjectFromStressTurn) {
+          _injectArmedThisResponse = true;
+          _injectTimer?.cancel();
+          _injectTimer = Timer(_devInjectAfter, () {
+            if (_open && agentAudible && _injectPos < 0) _injectPos = 0;
+          });
+        }
         // Cheap peak for the "agent speaking" UI pulse. Same Int16List
         // alignment trap as the mic path — decode pairs of bytes
         // manually so an odd offsetInBytes never crashes us.
@@ -641,6 +721,7 @@ class BithumanRealtimeSession {
         final chunkDur = Duration(
             microseconds: ((pcm24kBytes.length ~/ 2) * 1000000 / 24000).round());
         final now = DateTime.now();
+        _audibleUntil = (_audibleUntil.isAfter(now) ? _audibleUntil : now).add(chunkDur);
         var waitMs = 0;
         // ★ ANDROID IS NOT PACED HERE. There the plugin IS the speaker: playSpeakerPCM
         // buffers the reply, feeds the engine, and writes each frame's own samples
@@ -672,6 +753,8 @@ class BithumanRealtimeSession {
         // is behind us; resume forwarding audio.delta normally.
         _droppingCancelledAudio = false;
         _haveActiveResponse = true;
+        _injectArmedThisResponse = false;
+        _stressTimer?.cancel(); // a reply is in flight; the driver waits for its done
         _resetAudioPacing(); // fresh turn plays immediately, no carried lead
         _markConnectionValidated(); // the server is responding → socket healthy
         break;
@@ -703,6 +786,11 @@ class BithumanRealtimeSession {
       case 'response.done':
         _haveActiveResponse = false;
         _status.add(RealtimeStatus.responseDone);
+        final doneStatus = ((evt['response'] as Map<String, dynamic>?)?['status'] as String?) ?? '';
+        if (doneStatus != 'completed') {
+          // ignore: avoid_print
+          print('[barge] response.done status=$doneStatus hostMs=${DateTime.now().millisecondsSinceEpoch}');
+        }
         // Flush the avatar's final partial lipsync chunk so the last word isn't
         // clipped. response.done arrives BEFORE the paced audio deltas finish
         // being handed to playSpeakerPCM (client-side _paceLead pacing), so defer
@@ -722,7 +810,11 @@ class BithumanRealtimeSession {
             try { await avatar.notifyTurnEnd(); } catch (_) {}
           }
         }());
-        if (_devStress) _scheduleStressTurn(const Duration(seconds: 2));
+        // A cancelled reply means the user is talking: the server creates the
+        // next reply itself (create_response), the driver must not race it.
+        if (_devStress && doneStatus == 'completed') {
+          _scheduleStressTurn(_audibleUntil.difference(DateTime.now()) + const Duration(seconds: 2));
+        }
         break;
       case 'input_audio_buffer.speech_started':
         // Barge-in: fire the moment server-VAD detects the user has
@@ -741,15 +833,26 @@ class BithumanRealtimeSession {
         // back through the mic. Without speakerphone routing the
         // earpiece-mic path has weak AEC and the server fires false
         // speech_started events on agent-self-leak.
+        final ssMs = DateTime.now().millisecondsSinceEpoch;
+        // ignore: avoid_print
+        print('[barge] speech_started hostMs=$ssMs audio_start_ms=${evt['audio_start_ms']} '
+            'active=$_haveActiveResponse audible=$agentAudible injecting=${_injectPos >= 0}');
+        _stressTimer?.cancel();
         if (_haveActiveResponse) {
           _send({'type': 'response.cancel'});
         }
         _droppingCancelledAudio = true;
         _resetAudioPacing(); // drop any delta parked in a pacing delay
         await avatar.interrupt();
+        // ignore: avoid_print
+        print('[barge] interrupt returned hostMs=${DateTime.now().millisecondsSinceEpoch} '
+            '(+${DateTime.now().millisecondsSinceEpoch - ssMs} ms after speech_started)');
         _status.add(RealtimeStatus.userSpeaking);
         break;
       case 'input_audio_buffer.speech_stopped':
+        // ignore: avoid_print
+        print('[barge] speech_stopped hostMs=${DateTime.now().millisecondsSinceEpoch} '
+            'audio_end_ms=${evt['audio_end_ms']}');
         _status.add(RealtimeStatus.userStopped);
         break;
       case 'error':
@@ -765,6 +868,7 @@ class BithumanRealtimeSession {
         //   - rate_limit / similar: visible elsewhere, not a "down" state
         final soft = code.contains('cancellation_failed') ||
             code.contains('input_audio_buffer_commit_empty') ||
+            code.contains('conversation_already_has_active_response') ||
             msg.contains('no active response');
         // ignore: avoid_print
         print('[realtime] server ${soft ? "warning" : "error"}: '

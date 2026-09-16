@@ -19,7 +19,7 @@
 //
 // Audio: the realtime session (Dart, WebSocket) hands the agent's 24 kHz PCM16 in via
 // playSpeakerPCM and takes the microphone's 24 kHz PCM16 out over the mic EventChannel;
-// MicCapture carries the half-duplex mute (the agent must not hear itself).
+// MicCapture keeps the microphone open on the platform's communication path (full duplex).
 
 package ai.bithuman.flutter
 
@@ -260,9 +260,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         })
         s.micChannel = ch
         val startCapture = {
-            val p = s.player
-            val mic = MicCapture(context,
-                speaking = { p?.speakingRecently(MicCapture.MIC_MUTE_TAIL_MS) ?: false }) { buf, n ->
+            val mic = MicCapture(context) { buf, n ->
                 val sink = s.micSink ?: return@MicCapture
                 val chunk = buf.copyOf(n)
                 main.post { if (!s.stopped.get()) sink.success(chunk) }
