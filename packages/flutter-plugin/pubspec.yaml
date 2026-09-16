@@ -1,6 +1,6 @@
 name: bithuman
 description: "The bitHuman avatar umbrella Flutter plugin (macOS · iOS · Android) — engine-agnostic glue + the single libconverse module-map xcframework; statically aggregates N engine SDKs (expression-2, essence-2)."
-version: 2.6.4
+version: 2.6.5
 homepage: https://www.bithuman.ai
 repository: https://github.com/bithuman-product/homebrew-bithuman
 issue_tracker: https://github.com/bithuman-product/homebrew-bithuman/issues

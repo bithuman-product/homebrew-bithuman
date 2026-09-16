@@ -1,6 +1,87 @@
+## 2.6.5 — 2026-09-16
+
+Tag `flutter-plugin-v2.6.5`. **The Android half of the barge-in fix.** The pin moves
+`ai.bithuman:essence2-android` **0.5.9 → 0.5.10**, public on Maven Central since
+`maven-metadata.xml` `lastUpdated 20260916205927`.
+
+★ **WHICH VERSION FIXED WHICH PLATFORM — read this before assuming 2.6.4 closed it.** The
+defect the owner reported is one defect with three copies, and they shipped on different
+clocks:
+
+| | Apple (`essence2Tag`) | **Android (`essence2-android`)** |
+|---|---|---|
+| 2.6.3 | broken (v1.7.0) | broken (0.5.9) |
+| 2.6.4 | **fixed** (v1.8.0) | still broken (0.5.9) |
+| **2.6.5** | fixed (v1.8.0) | **fixed (0.5.10)** |
+
+So **2.6.4 shipped the fix on Apple while still pinning the Android AAR that carries the
+bug** — interrupt the agent on Android under 2.6.4 and the video behind the avatar still
+snaps back to the start of its clip. Nothing is wrong with 2.6.4's Apple work; it simply
+was not the whole defect, and a reader upgrading for "an interruption stops rewinding the
+driver video" needs to know that sentence was true of one platform at that version.
+
+**What the Android half is.** Every cut, and every new utterance, seeded the next walk at
+driver frame 0 and the composited face followed it there. It rides on the frame it was on
+now (bithuman-models #774). It is ONE default value —
+`Essence2Avatar.resetAudio(startFrame: Int = 0 → -1)`, where `-1` means continue the walk.
+
+★ **Proved from the published bytes, and it could not have been proved any other way.** A
+Kotlin default lives in `resetAudio$default`, not in a signature, so
+`api/essence2-android.api` is **byte-identical** between 0.5.9 and 0.5.10 and no
+API-surface check could ever have caught this. Read off the `classes.jar` Central serves,
+with the published 0.5.9 as its own control:
+
+| read off `Essence2Avatar.resetAudio$default` | published 0.5.9 | **published 0.5.10** |
+|---|---|---|
+| `startFrame` default opcode | `iconst_0` — rewind to frame 0 | **`iconst_m1`** — continue the walk |
+
+AAR sha256 `4074a827835a534dfc8176554fd18380ae3265037cb71402c6661a6cc5553e3c` — **==
+Central's own `.sha256` sidecar** (sha1 `3acad881da94…` == its `.sha1`) — `lible_jni.so`
+`59ddea6a3a64cbb42471e93f12385e38302caee726ccbf421a4bd94b8c7cea19`; `.aar`/`.pom`/
+`.module`/`-relink.zip` all VALIDSIG by `0C6FA32B…D477FFA1` from a **keyserver-only**
+keyring, a one-byte tamper reads BADSIG, and a version that does not exist 404s — so a 200
+means something.
+
+**No plugin source change.** `javap -p` over every class in 0.5.10's `classes.jar` is
+identical member for member to 0.5.9's, so the same `AvatarEngine` adapter opens it and
+everything 0.5.9 carried is still here (the warp prior in place, the motion thread, the
+driver cursor).
+
+★ **2.6.4 also carried a change its own entry does not name**, recorded here so the
+history is complete rather than re-derived later: homebrew-bithuman #68, the LOCAL-mode
+interrupt gate. It replaces a sustained-energy floor with **HOLD → CONFIRM → RELEASE**, and
+**it is OFF on the cloud path**, where `server_vad` already barges faster and better
+informed — so a consumer on the default transport, Android included, gets nothing new from
+it. Why it is not simply a better constant, which is the part worth keeping: on LOCAL paths
+there is no server VAD, so an energy gate is the only thing that can interrupt the agent —
+and no floor can do that job here, because the two distributions overlap. Within 2 s of
+onset **6 of 16 real barge-ins never reached the 4000 floor, while the agent's own echo
+residual reached 4049-6530**; every floor from 500 to 7000 was swept and none puts both
+failure modes at zero. So the shape changed instead: HOLD pauses the speaker losslessly
+the instant something might be speech (the reply keeps buffering, nothing is decided),
+CONFIRM re-reads the microphone with the far end now physically silent and the echo gone
+with it, RELEASE resumes from the sample it stopped on if nobody was there — a false alarm
+costs a ~0.3 s hiccup instead of the agent's turn. A self-interruption would need
+speech-level microphone energy while nothing is playing, which echo cannot produce: a
+property of the shape, not a lucky number. **If you are ever tempted to simplify it back
+to a threshold, that sweep is why it cannot be one.**
+
+★ **The pin moved only after Central served 0.5.10**, never after a local publish.
+Measured 2026-09-16: `mavenLocal()` cannot SHADOW a version Central serves — a `~/.m2`
+poisoned with a different artifact at the same coordinate still resolved Central's bytes —
+but it CAN supply a version Central LACKS, which is how plugin 2.4.0 came to import a class
+Central's 0.4.6 did not have. Resolution proved from a clean cache with an empty
+`GRADLE_USER_HOME`, `FAIL_ON_PROJECT_REPOS`, no `mavenLocal()` and `maven.repo.local` at an
+empty directory; both negative controls fire — published `0.4.6` dies on `Unresolved
+reference 'Expression2IdleLoop'`, and a pin one version ahead dies on `Could not find
+ai.bithuman:essence2-android:0.5.11`.
+
 ## 2.6.4 — 2026-09-16
 
-Tag `flutter-plugin-v2.6.4`. One change: the Apple essence-2 engine pin moves
+Tag `flutter-plugin-v2.6.4`. ★ This entry says "one change" and the tag carries two: it
+also includes homebrew-bithuman #68, the LOCAL-mode HOLD → CONFIRM → RELEASE interrupt
+gate, which landed between 2.6.3 and this tag and is named in 2.6.5's entry above. The
+Apple essence-2 engine pin moves
 `essence2-v1.7.0 → essence2-v1.8.0` on **both** Apple paths in one commit (`Package.swift`'s
 `essence2Tag` + `libessence2` binaryTarget checksum, and this package's own
 `LIBESSENCE2_*` block), with `BITHUMAN_MODELS_REF` moved to `6bed5ee7a` — the tree that
