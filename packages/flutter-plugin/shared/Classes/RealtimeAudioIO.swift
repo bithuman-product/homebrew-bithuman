@@ -362,20 +362,30 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   //
   // ★ THOSE TWO NUMBERS ARE MEDIANS, AND THE DISTRIBUTIONS OVERLAP (measured
   // 2026-09-16 on the iMac, from the two graded macOS conversation runs' own
-  // `[bhmic] peak1s` seconds — 1 s buckets, the finest resolution the log carries):
+  // `[bhmic] peak1s` seconds — 1 s buckets, the finest resolution the log carries.
+  // A real barge-in is a `speech_started` with audible=true AND injecting=false, so
+  // the harness's own injected cut-ins are not counted as human ones):
   //
-  //             run    agent's own residual, agent audible    real barge-ins
-  //                    median    p95     WORST second          peaks, sorted
-  //             aecA      124   1002           4049            2059 … 8383  (n=5)
-  //             aecB      202   4440           6530             158 … 8568  (n=14)
+  //   run    the agent's own residual, agent audible    real barge-ins, peak reached
+  //          median   p90    p95    WORST second        within +2 s of the onset
+  //   aecA      124    456   1002        4049           2059 … 8383          (n=5)
+  //   aecB      202   3420   4440        6530           2795 … 8568         (n=11)
   //
-  // At this floor, 7 of those 19 real interruptions never cleared it — the server's
-  // VAD caught every one. And the floor still sits BELOW the residual's own worst
-  // second in both runs, so it does not buy freedom from self-barge either. There is
-  // no value of this constant that separates the two: an absolute peak on the
-  // post-AEC mic is not a statistic that tells the user's voice from the agent's on
-  // this hardware. (aecB's room was not certified empty, so part of its tail may be
-  // room sound; aecA's 4049 already crosses aecA's weakest barge-in at 2059.)
+  // Two ways this floor fails, in opposite directions:
+  //
+  //   SLOW/DEAF — within 2 s of the onset, the only window in which a cut is worth
+  //   anything, 6 of those 16 real interruptions never reached 4000. Widen to 3 s and
+  //   it is 2 of 16; to 5 s, 1 of 16. The voice does get there — it just takes
+  //   seconds, which for a detector whose entire job is to be fast is the same as
+  //   missing it. The server's VAD caught all 16.
+  //
+  //   DEAF TO ITSELF — the floor still sits BELOW the residual's own worst second in
+  //   both runs (4049 and 6530), so it does not buy freedom from self-barge either.
+  //
+  // There is no value of this constant that separates the two: an absolute peak on
+  // the post-AEC mic is not a statistic that tells the user's voice from the agent's
+  // on this hardware. (aecB's room was not certified empty, so part of its tail may
+  // be room sound; aecA's 4049 already crosses aecA's weakest barge-in at 2059.)
   //
   // WHAT THAT MEANS PER MODE. CLOUD ignores this entirely — `voicePeakThreshold` is
   // 0 there and `server_vad` + far_field noise reduction is the barge (see the ruling
