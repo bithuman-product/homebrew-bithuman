@@ -12,21 +12,27 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('Essence2CatalogEntry.fromJson', () {
+    // The row below is SYNTHETIC on purpose, like the two tests under it.
+    // fromJson is a pure map->object mapping: nothing here is fetched, so a
+    // real delivery URL would buy no coverage and would rot on the next
+    // catalog rotation. It did: this fixture carried a real A63GVG1577
+    // elevatedir-v3 URL and digest that went 404 when the catalog moved on,
+    // leaving a public repo citing a dead artifact. Keep it fake.
     test('maps a full elevate-catalog-v1 row', () {
-      final e = Essence2CatalogEntry.fromJson('A63GVG1577', const {
-        'agent_id': 'A63GVG1577',
+      final e = Essence2CatalogEntry.fromJson('A00EXAMPLE', const {
+        'agent_id': 'A00EXAMPLE',
         'url':
-            'https://models.bithuman.ai/elevate/A63GVG1577/A63GVG1577-elevatedir-v3-148709eb.tar.gz',
+            'https://models.bithuman.ai/elevate/A00EXAMPLE/A00EXAMPLE-elevatedir-v3-0123abcd.tar.gz',
         'sha256':
-            '148709EB12F068F6A4D1956E53C1FE533F5A039EE8C0760DF07D6F8520423AA8',
+            '0123ABCD4567EF89012345678901234567890123456789012345678901234567',
         'size': 227511949,
         'format_version': 'elevatedir-v3',
       });
-      expect(e.agentId, 'A63GVG1577');
-      expect(e.url, contains('A63GVG1577-elevatedir-v3-148709eb.tar.gz'));
+      expect(e.agentId, 'A00EXAMPLE');
+      expect(e.url, contains('A00EXAMPLE-elevatedir-v3-0123abcd.tar.gz'));
       // SHA-256 is normalised to lowercase so the shasum comparison is exact.
       expect(e.sha256,
-          '148709eb12f068f6a4d1956e53c1fe533f5a039ee8c0760df07d6f8520423aa8');
+          '0123abcd4567ef89012345678901234567890123456789012345678901234567');
       expect(e.size, 227511949);
       expect(e.formatVersion, 'elevatedir-v3');
     });
