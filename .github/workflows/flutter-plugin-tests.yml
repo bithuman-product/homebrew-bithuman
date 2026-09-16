@@ -43,6 +43,36 @@ jobs:
           N=$(ls test/*_test.dart 2>/dev/null | wc -l | tr -d ' ')
           echo "test files: $N"; ls test/*_test.dart
           [ "$N" -ge 1 ] || { echo "::error::no *_test.dart under packages/flutter-plugin/test — nothing was graded"; exit 1; }
+      # ★THE FORMAT RATCHET — a re-add is caught HERE, on every push, not at
+      # publish time. The publish door in publish-pubdev.yml is the refusal
+      # that matters, but it only runs on a `flutter-v*` tag, so on its own a
+      # new copy could sit in the tree for months before anyone saw it.
+      #
+      # OWNER RULING 2026-09-16: bitHuman's on-device container format is
+      # proprietary and stays in a private repo. This repository is PUBLIC and
+      # pub.dev would publish `lib/` AS SOURCE.
+      #
+      # ★A RATCHET, NOT A CLIFF. One reader exists today and its removal needs
+      # an engine-side unpack entry point (see the note above it in
+      # lib/bithuman.dart) — so the count is baselined and may only SHRINK. A
+      # SECOND file gaining one is refused by name. It screens for OUR OWN
+      # symbol, never for the layout: naming the format here to detect the
+      # format would be the disclosure it prevents.
+      - name: no NEW file parses the avatar container
+        run: |
+          set -euo pipefail
+          BASELINE=1
+          N=$(grep -rl "_unpackImxContainer" lib/ 2>/dev/null | wc -l | tr -d " ")
+          echo "files parsing the container in lib/: $N (baseline $BASELINE)"
+          grep -rl "_unpackImxContainer" lib/ 2>/dev/null || true
+          if [ "$N" -gt "$BASELINE" ]; then
+            echo "::error::a NEW file parses the proprietary avatar container. This is a RATCHET: the one reader that exists today is expected and baselined, a SECOND one is not. The one implementation belongs in the engine's compiled bytes, not in this public repo — and not rewritten into ios/Classes or shared/Classes, which are in it too. Do not raise BASELINE to make this pass."
+            exit 1
+          fi
+          if [ "$N" -lt "$BASELINE" ]; then
+            echo "::notice::the container reader is gone from $((BASELINE - N)) file(s) — lower BASELINE to $N in this step and in publish-pubdev.yml's preflight."
+          fi
+
       - name: flutter pub get
         run: flutter pub get
       - name: flutter test
