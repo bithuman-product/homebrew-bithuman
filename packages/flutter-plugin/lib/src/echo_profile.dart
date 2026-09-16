@@ -69,10 +69,15 @@ class EchoProfile {
   /// 0.5 in this one.
   ///
   /// So homebrew-bithuman #58 was RIGHT: "threshold tuning cannot touch it; it moves
-  /// the sensitivity, not the latency", for the 0.5/0.7 decision. 0.3 is still untested
-  /// at n = 8 and is the only part that stayed suggestive (4 trials, 138.4-139.1, no
-  /// bimodality at all) — untested is not a finding, and nothing should be spent on it
-  /// until someone runs it.
+  /// the sensitivity, not the latency", for the 0.5/0.7 decision.
+  ///
+  /// 0.3 is still untested at n = 8 and is the only part that stayed suggestive (4
+  /// trials, 138.4-139.1, no bimodality at all). It is not worth running: its n = 4
+  /// median sits 8 ms under 0.7's n = 8 median, so even if every bit of that is real it
+  /// is 8 ms of a ~400 ms leg, bought by halving the threshold on the one row that
+  /// raised it to stop the agent interrupting itself. The question is closed on size,
+  /// not on evidence — which is a different sentence from "someone should measure it",
+  /// and the honest one here.
   ///
   /// ★ WHAT THE EPISODE IS WORTH KEEPING FOR: a 4-sample median of a BIMODAL
   /// distribution is not a measurement, and it read as a clean monotone result across
