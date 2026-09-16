@@ -82,7 +82,6 @@ public struct EngineCapabilities {
     public var driveModel: DriveModel
     public var audioReleaseSeconds: Double   // 0.05 expression2 / 0.04 essence2
     public var speechCushion: Int            // 32 expression2 / 1 essence2
-    public var maxAudioQueueSamples: Int     // 96_000 expression2 / 32_000 essence2
     public var hasNativeIdleLoop: Bool       // expression2 pre-renders; essence2 = native passthrough
     public var supportsHeadMode: Bool        // essence2 FULL/HEAD; expression2 false
     public var requiresEngineAbi: Int        // matched against the avatar manifest
@@ -90,14 +89,12 @@ public struct EngineCapabilities {
     public init(driveModel: DriveModel,
                 audioReleaseSeconds: Double,
                 speechCushion: Int,
-                maxAudioQueueSamples: Int,
                 hasNativeIdleLoop: Bool,
                 supportsHeadMode: Bool,
                 requiresEngineAbi: Int) {
         self.driveModel = driveModel
         self.audioReleaseSeconds = audioReleaseSeconds
         self.speechCushion = speechCushion
-        self.maxAudioQueueSamples = maxAudioQueueSamples
         self.hasNativeIdleLoop = hasNativeIdleLoop
         self.supportsHeadMode = supportsHeadMode
         self.requiresEngineAbi = requiresEngineAbi
@@ -109,7 +106,6 @@ public struct EngineCapabilities {
         driveModel: .bufferedDisplayClock,
         audioReleaseSeconds: 0.05,
         speechCushion: 32,
-        maxAudioQueueSamples: 96_000,
         hasNativeIdleLoop: true,
         supportsHeadMode: false,
         requiresEngineAbi: 1)
@@ -120,7 +116,6 @@ public struct EngineCapabilities {
         driveModel: .atomicSlotClock,
         audioReleaseSeconds: 0.04,
         speechCushion: 1,
-        maxAudioQueueSamples: 32_000,
         hasNativeIdleLoop: false,
         supportsHeadMode: true,
         requiresEngineAbi: 2)

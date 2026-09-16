@@ -419,9 +419,19 @@ class BithumanAvatar {
   /// Call from the Realtime session's `speech_started` handler so
   /// barge-in fires the instant the user opens their mouth, not at
   /// end-of-sentence.
-  Future<void> interrupt() async {
+  Future<void> interrupt({String reason = 'app'}) async {
     if (_disposed) return;
-    await _channel.invokeMethod('interrupt', {'textureId': textureId});
+    await _channel.invokeMethod('interrupt', {'textureId': textureId, 'reason': reason});
+  }
+
+  /// Write one line into the NATIVE log stream (NSLog / logcat) beside the
+  /// presenter's own `bh*` lines. ★A release iOS build's Dart `print` reaches the
+  /// unified log only — not the console `devicectl` attaches — so every transport
+  /// event an instrument must see (speech_started, a reply's first byte, ...) goes
+  /// through here; the reader then has one stream with one clock.
+  Future<void> nativeLog(String line) async {
+    if (_disposed) return;
+    try { await _channel.invokeMethod('log', {'line': line}); } catch (_) {}
   }
 
   /// Hint whether the agent is audibly speaking right now. Android

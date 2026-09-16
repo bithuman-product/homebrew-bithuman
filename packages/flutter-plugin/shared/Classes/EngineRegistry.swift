@@ -62,7 +62,7 @@ enum EngineRegistry {
   }
 
   /// Static behaviour for a slug — replaces every `engineKind == "essence2"`
-  /// policy read (audioReleaseSeconds / maxAudioQueueSamples / cushion).
+  /// policy read (audioReleaseSeconds / cushion).
   static func capabilities(for slug: String) -> EngineCapabilities {
     descriptor(for: slug).capabilities
   }

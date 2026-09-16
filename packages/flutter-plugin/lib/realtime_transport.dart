@@ -292,7 +292,7 @@ class WebRTCTransport implements RealtimeTransport {
     // stops articulating audio the user never hears (phantom talk).
     _interruptForwardSub = _session.interruptStream.listen((_) async {
       try {
-        await avatar.interrupt();
+        await avatar.interrupt(reason: 'webrtc_speech_started');
       } catch (_) {/* swallowed */}
     });
     await _session.start();
