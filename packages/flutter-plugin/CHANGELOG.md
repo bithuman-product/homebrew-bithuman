@@ -1,3 +1,35 @@
+## 2.6.3 — 2026-09-16
+
+Tag `flutter-plugin-v2.6.3`. One change: the Android essence-2 pin moves
+`ai.bithuman:essence2-android` **0.5.8 → 0.5.9**, the coordinate the owner published to
+Maven Central on 2026-09-16 (served from `repo1.maven.org` since `maven-metadata.xml`
+`lastUpdated 20260916194252`; AAR sha256 `bafe6e2926…` == Central's own `.sha256`
+sidecar, `lible_jni.so` `fec2c0ecc…`, `.aar`/`.pom`/`.module`/`-relink.zip` all VALIDSIG
+by `0C6FA32B…D477FFA1` from a keyserver-only keyring, one-byte tamper reads BADSIG).
+
+**The warp prior plays in place** (bithuman-models #747). `Identity::P(si)` was an
+offset into a 394,788,864 B `P.f16` that every plane expanded from a 2,966,479 B
+`P_hevc.mov` at activate and mmap'd — fully resident after one lap, for a member read
+one frame at a time on the driver's own walk. It is a cursor now, through the same
+`DriverCursor` the driver uses. On a Galaxy S25+ through THIS plugin's adapter: engine
+create **891.1 → 164.1 ms**, VmRSS after one lap **1,018,944 → 683,268 kB**, the
+mapping's **385,536 kB → 0**, **394,788,864 B → 0 B** written to app storage, per-push
+**17.733 → 16.454 ms**, and **304/304 delivered frames identical si for si** through
+ART.
+
+No plugin source changes — `javap` over every class in 0.5.9's `classes.jar` is
+identical member for member to 0.5.8's, so the same `AvatarEngine` adapter opens it.
+
+★ **Proved against the published coordinate, from a clean cache.** The plugin's
+SDK-facing Kotlin (`AvatarEngine`, `AvatarPlayer`, `AvatarStats`, `MicCapture`) compiles
+against `expression2-android:0.4.7` + `essence2-android:0.5.9` with an empty
+`GRADLE_USER_HOME`, `FAIL_ON_PROJECT_REPOS`, no `mavenLocal()` and `maven.repo.local`
+pointed at an empty directory; the bytes Gradle resolved are Central's
+(`eb72f9209…`, `bafe6e292…`). Two negative controls fire: against Central's published
+**0.4.6** the same compile dies on `Unresolved reference 'Expression2IdleLoop'`, and a
+pin one version AHEAD of Central dies on `Could not find
+ai.bithuman:essence2-android:0.5.10` — which is the failure a local publish would hide.
+
 ## 2.6.2 — 2026-09-16
 
 **A measurement build says so on screen, and the echo canceller is attested rather
