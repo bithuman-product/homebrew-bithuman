@@ -1,5 +1,18 @@
 ## Unreleased
 
+## 2.6.1 — 2026-09-16
+
+Tag `flutter-plugin-v2.6.1`. One change: the Android essence-2 pin moves
+`ai.bithuman:essence2-android` **0.5.7 → 0.5.8**, the coordinate the owner published
+to Maven Central on 2026-09-16. 0.5.8 delivers every frame (0.5.7 delivered 72–77 % of
+a reply's frames under the plugin's un-paced transport — bithuman-models #737): the
+SDK's own motion thread extends the motion frontier, never behind a `feed()`, and the
+driver cursor cannot hand out the slot the decoder is writing (#738). No plugin source
+changes; the same `AvatarEngine` adapter opens 0.5.8. Both Android pins
+(`expression2-android:0.4.7`, `essence2-android:0.5.8`) now resolve from
+`mavenCentral()` alone — this is the first tag a stranger's clone builds on Android
+without mavenLocal.
+
 ## 2.6.0 — 2026-09-16
 
 Tag `flutter-plugin-v2.6.0`. Android runs essence-2 (#49) and macOS presents, hears and
