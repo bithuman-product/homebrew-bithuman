@@ -11,7 +11,7 @@ bitHuman is a real-time avatar animation platform. You push audio in, and get li
 | Kiosk / 24-7 / edge box | Self-hosted Essence (CPU) | `pip install bithuman` | `Examples/python/local-essence/` |
 | On-prem NVIDIA GPU | Self-hosted Expression (Docker) | `docker pull bithuman/expression-avatar:latest` | [docs: deployment](https://docs.bithuman.ai/guides/deployment) |
 | macOS / iPad / iPhone app | Swift SDK (on-device) | SwiftPM `homebrew-bithuman` >= 0.8.1 | `Examples/swift/` |
-| Mac, no code | CLI | `brew install bithuman-product/bithuman/bithuman-cli` (or `pip install bithuman-cli`) | `Examples/cli/` |
+| Mac, no code | CLI | `brew install bithuman-product/bithuman/bithuman-cli` | `Examples/cli/` |
 | Any language, HTTP only | REST API | `curl https://api.bithuman.ai/v1/...` | `Examples/rest-api/` |
 | 100% offline Mac | Ollama + Apple Speech + bitHuman | -- | `Examples/integrations/offline-mac/` |
 | Browser embed (iframe) | Embed widget | `bithuman-chat-widget-v5.js` | See docs: [embed](https://docs.bithuman.ai/api/embedding) |
@@ -136,7 +136,7 @@ All requests require `api-secret: YOUR_SECRET` header.
 | POST | `/v1/dynamics/generate` | Create gesture animations |
 | GET | `/v1/dynamics/{agent_id}` | List available gestures |
 
-### CLI (`bithuman` — install via Homebrew, `curl|sh`, or `pip install bithuman-cli` (macOS Apple Silicon only — on Linux use the `curl|sh` installer); the `bithuman` PyPI wheel is library-only as of 2.3)
+### CLI (`bithuman` — install via Homebrew or the `curl|sh` installer; the CLI is not distributed on PyPI, and the `bithuman` PyPI wheel is the library only)
 
 | Command | Purpose |
 |---|---|

@@ -5,3 +5,13 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Captured HTTP responses from hand-probing the API are scratch, not source.
+# Six of them (m12.bin, r13/r14/r15.json, h12/h15.txt — 401 refusals and their
+# response headers) rode into this PUBLIC repo's root on a `git add` during the
+# cli-v2.6.14 pin (#23) and were served over raw.githubusercontent for three
+# days. Nothing at this root is a .json or a .bin, so ignoring them by shape
+# costs nothing and stops the next one at the stage.
+/*.json
+/*.bin
+/h[0-9]*.txt

@@ -15,9 +15,19 @@ or `printf %s "$KEY" | bithuman login --with-token`. Full contract:
 https://docs.bithuman.ai/cli/agents
 
 ## Install
-- macOS (Apple Silicon): `brew install bithuman`
+- macOS (Apple Silicon): `brew install bithuman-product/bithuman/bithuman-cli`
+  (the full name implies the tap; the installed command is `bithuman`)
 - macOS + Linux (x86_64/aarch64): `curl -fsSL https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/install.sh | sh`
-- pip (macOS arm64): `pip install bithuman-cli`
+- No package manager: the per-target tarball from
+  https://github.com/bithuman-product/homebrew-bithuman/releases/latest —
+  `bithuman-aarch64-apple-darwin.tar.gz` or
+  `bithuman-x86_64-unknown-linux-gnu.tar.gz`, each with a `.sha256` beside it.
+
+The CLI is not distributed on PyPI. `pip install bithuman-cli` is not an
+install path for it: that name is retired as a user-facing coordinate and does
+not resolve today, so do not suggest it. `pip install bithuman` is the Python
+SDK library only and deliberately puts no `bithuman` command on PATH — the
+binary comes from one of the three lines above.
 
 The conversation brain is included with your account — `bithuman run`
 bootstraps a managed brain on first use (billed to credits; just `bithuman
