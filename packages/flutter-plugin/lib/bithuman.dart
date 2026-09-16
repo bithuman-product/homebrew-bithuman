@@ -745,9 +745,9 @@ Future<String> downloadExpression2Avatar(
     client.close(force: true);
   }
 
-  // Extract into a fresh staging dir. ★ ACCEPTS BOTH container forms (Phase-3):
-  // sniff the 4-byte magic — a unified `IMX\0` container unpacks via the flat
-  // TOC (same on-disk layout the zip path produced); else the legacy zip path
+  // Extract into a fresh staging dir. ★ ACCEPTS BOTH container forms: sniff the
+  // leading bytes — bitHuman's own container unpacks to the same on-disk layout
+  // the zip path produced; else the legacy zip path
   // (`unzip` CRC-checks each entry → a corrupt/truncated download fails there).
   // Rollout is reversible: every shipped zip `.avatar` keeps loading unchanged.
   final stageDir = Directory('${destDir.path}.tmp');
@@ -899,7 +899,7 @@ Future<String> downloadAgentImx(
     }
     await tmp.rename(local.path);
     // Validate the downloaded file before returning. An .imx must
-    // start with the literal bytes "IMX\0" and be at least a few MB.
+    // begin with bitHuman's container marker and be at least a few MB.
     final size = await local.length();
     if (size < 1024 * 1024) {
       await local.delete();
@@ -912,7 +912,7 @@ Future<String> downloadAgentImx(
         magic[2] != 0x58 || magic[3] != 0x00) {
       await local.delete();
       throw BithumanAvatarException(
-          'downloaded .imx has wrong magic header (expected "IMX\\0")');
+          'downloaded .imx is not a bitHuman container');
     }
     return local.path;
   } finally {
@@ -1145,26 +1145,37 @@ Future<String?> nativeEngineVersion() async {
 }
 
 
-// ── Phase-3 unified `.imx` container — consumer accept-both ──────────────────
-// The on-device `.model`/`.avatar` are zip archives today; Phase-3 optionally
-// FOLDS the exact same members into the unified `IMX\0` v2 flat-TOC container
-// (the producer-side `UNIFIED_CONTAINER` flag governs which form is emitted —
-// see expression-2 tools/expression2-model/Archive.swift). The unpack here is
-// the byte-exact Dart mirror of Swift `Archive.unpackImx`: it reconstructs the
-// SAME on-disk layout the legacy `unzip` produced, so every downstream reader
-// (the Expression2Engine load path keyed on `activeAgentDir`) is unchanged.
+// ── on-device avatar container — consumer accept-both ────────────────────────
+// The on-device `.model`/`.avatar` may arrive as a zip archive or as bitHuman's
+// own single-file container. Both reconstruct the SAME on-disk layout, so every
+// downstream reader (the Expression2Engine load path keyed on `activeAgentDir`)
+// is unchanged either way.
 //
-// Container layout (little-endian throughout):
-//   magic "IMX\0" (4) | version:u16 (=2) | count:u16
-//   then `count` TOC entries: nameLen:u16 | name:utf8 | offset:u64 | size:u64
-//   then the concatenated payloads at their absolute offsets.
+// ★THE CONTAINER FORMAT IS PROPRIETARY AND IS NOT DESCRIBED HERE.
+// Owner ruling 2026-09-16: it is closed source and stays in a private repo.
+// This file is in a PUBLIC repository and is the source pub.dev would publish,
+// so the byte layout that used to be written out in this comment is gone.
+//
+// ★AND THE READER BELOW STILL HAS TO GO — it is a second implementation of a
+// format whose one implementation belongs in compiled bytes. The fix is NOT to
+// rewrite it in Swift or Kotlin: ios/Classes and shared/Classes are in this
+// same public repo, so that would move the disclosure, not end it. The fix is
+// to call the ENGINE, which already reads the container inside the xcframework
+// and the AAR. Concretely: give the engine SDKs an unpack entry point beside
+// the existing `AvatarRef(path:)` — which today wants an ALREADY-EXPANDED
+// directory, and that is the only reason this Dart code exists at all — expose
+// it on the platform channel, and delete everything below.
+//
+// Until that lands, `.github/workflows/publish-pubdev.yml` REFUSES to publish
+// this package at all. See the preflight step there: it is deliberately red
+// while the reader exists, because publishing is the irreversible act.
 
-const List<int> _imxMagic = [0x49, 0x4D, 0x58, 0x00]; // "IMX\0"
+const List<int> _imxMagic = [0x49, 0x4D, 0x58, 0x00];
 const int _imxVersion = 2;
 
-/// Extract an on-device avatar/model container into [dir]. Sniffs the 4-byte
-/// magic: a unified `IMX\0` container → [_unpackImxContainer]; else the legacy
-/// zip path (`unzip`, which CRC-checks every entry). Throws on failure.
+/// Extract an on-device avatar/model container into [dir]. Sniffs the leading
+/// bytes: bitHuman's own container → [_unpackImxContainer]; else the legacy zip
+/// path (`unzip`, which CRC-checks every entry). Throws on failure.
 Future<void> _extractAvatarContainer(File archive, Directory dir) async {
   final raf = await archive.open();
   List<int> head;
@@ -1186,9 +1197,9 @@ Future<void> _extractAvatarContainer(File archive, Directory dir) async {
   }
 }
 
-/// Unpack a unified `IMX\0` v2 flat-TOC container into [dir], reconstructing the
-/// `.mlpackage` directory trees from the flattened TOC entry names. Byte-exact
-/// mirror of Swift `Archive.unpackImx` (offsets ABSOLUTE; payloads verbatim).
+/// Unpack a single-file avatar container into [dir], reconstructing the
+/// `.mlpackage` directory trees from the flattened member names.
+/// ★Proprietary format — see the note above; this belongs in compiled bytes.
 Future<void> _unpackImxContainer(File archive, Directory dir) async {
   final raf = await archive.open();
   try {
@@ -1202,37 +1213,37 @@ Future<void> _unpackImxContainer(File archive, Directory dir) async {
     }
 
     final headD = await raf.read(8);
-    if (headD.length != 8) throw 'IMX: file too small for header';
+    if (headD.length != 8) throw 'avatar container: file too small';
     if (!(headD[0] == _imxMagic[0] && headD[1] == _imxMagic[1] &&
           headD[2] == _imxMagic[2] && headD[3] == _imxMagic[3])) {
-      throw 'IMX: bad magic';
+      throw 'avatar container: not a bitHuman container';
     }
     final version = le16(headD, 4);
-    if (version != _imxVersion) throw 'IMX: unsupported version $version';
+    if (version != _imxVersion) throw 'avatar container: unsupported version';
     final count = le16(headD, 6);
 
-    // Parse the flat TOC.
+    // Parse the member index.
     final entries = <_ImxEntry>[];
     var cursor = 8;
     for (var i = 0; i < count; i++) {
       await raf.setPosition(cursor);
       final lenD = await raf.read(2);
-      if (lenD.length != 2) throw 'IMX: truncated TOC (nameLen)';
+      if (lenD.length != 2) throw 'avatar container: truncated index';
       final nameLen = le16(lenD, 0);
       cursor += 2;
       await raf.setPosition(cursor);
       final nameD = await raf.read(nameLen);
-      if (nameD.length != nameLen) throw 'IMX: truncated TOC (name)';
+      if (nameD.length != nameLen) throw 'avatar container: truncated index';
       final name = utf8.decode(nameD);
       cursor += nameLen;
       await raf.setPosition(cursor);
       final osD = await raf.read(16);
-      if (osD.length != 16) throw 'IMX: truncated TOC (offset/size)';
+      if (osD.length != 16) throw 'avatar container: truncated index';
       final off = le64(osD, 0), size = le64(osD, 8);
       cursor += 16;
       // Reject path traversal (defensive — the producer never emits "..").
       if (name.startsWith('/') || name.contains('..')) {
-        throw 'IMX: unsafe entry name $name';
+        throw 'avatar container: unsafe member name';
       }
       entries.add(_ImxEntry(name, off, size));
     }
@@ -1252,7 +1263,7 @@ Future<void> _unpackImxContainer(File archive, Directory dir) async {
         while (remaining > 0) {
           final want = remaining < chunkCap ? remaining : chunkCap;
           final chunk = await raf.read(want);
-          if (chunk.isEmpty) throw 'IMX: truncated reading ${e.name}';
+          if (chunk.isEmpty) throw 'avatar container: truncated reading ${e.name}';
           sink.add(chunk);
           remaining -= chunk.length;
         }

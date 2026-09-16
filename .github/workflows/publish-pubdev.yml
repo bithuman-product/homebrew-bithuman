@@ -59,6 +59,47 @@ jobs:
             exit 1
           fi
 
+      # ★★ THE FORMAT DOOR — refuses to publish while the plugin carries a
+      # reader for bitHuman's proprietary container.
+      #
+      # OWNER RULING 2026-09-16: the container format is proprietary, is closed
+      # source, and stays in a private repo. This repository is PUBLIC, and
+      # `dart pub publish` uploads lib/ AS SOURCE to a registry where a version
+      # can be retracted but never withdrawn. Publishing is therefore the one
+      # irreversible act in this workflow, and this is the step that stands in
+      # front of it.
+      #
+      # ★MEASURED 2026-09-16, and it is why this is a REFUSAL rather than a
+      # note: nothing has ever been published — pub.dev returns 404 for the
+      # package and for its API, there are ZERO `flutter-v*` tags, and this
+      # workflow has never run. The disclosure is still fully removable. One
+      # tag would end that: pubspec already says the version the tag guard
+      # above wants, so `git tag flutter-v<version> && git push` is the whole
+      # distance between "fixable" and "permanent".
+      #
+      # ★IT SCREENS FOR OUR OWN SYMBOL, NOT FOR THE FORMAT. The authoritative
+      # description of what must not appear lives in the private repo
+      # (models/_core/container/IMX_CONTRACT.md) and stays there; naming the
+      # layout here to detect the layout would be the disclosure it prevents.
+      # The container reader in lib/ is a function we named, so the symbol is
+      # enough.
+      #
+      # ★EXPECTED TO BE RED TODAY. That is the point: the reader is still
+      # present (see the note above it in lib/bithuman.dart). It goes green when
+      # the unpack moves into the engine's compiled bytes and the Dart
+      # implementation is deleted — not by weakening this step.
+      - name: "PREFLIGHT: no proprietary container reader in the published source"
+        run: |
+          set -euo pipefail
+          hits=$(grep -rln "_unpackImxContainer" lib/ || true)
+          if [ -n "$hits" ]; then
+            echo "::error::REFUSING TO PUBLISH. These files implement bitHuman's proprietary container format and pub.dev publishes lib/ as SOURCE, permanently:"
+            echo "$hits" | sed 's/^/  /'
+            echo "The fix is to call the engine (which already reads the container inside the xcframework / AAR) and delete the Dart implementation — not to weaken this check, and not to re-implement it in ios/Classes or shared/Classes, which are in this same public repo."
+            exit 1
+          fi
+          echo "no container reader in lib/ — safe to publish"
+
       - name: Install dependencies
         run: flutter pub get
 
