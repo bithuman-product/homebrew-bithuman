@@ -305,11 +305,39 @@ class BithumanRealtimeSession {
       // running by the time the WS opens — the very first mic packet
       // we send is already echo-cancelled.
       //
-      // vadThreshold: 0 — the native energy barge is intentionally OFF on the
-      // cloud path. Barge here is driven by OpenAI server_vad (speech_started →
-      // response.cancel + avatar.interrupt), which cancels the cloud response at
-      // its source. A local energy cut would silence the speaker without telling
-      // OpenAI to stop generating. The vad_threshold knob drives LOCAL mode only.
+      // vadThreshold: 0 — the native energy barge stays OFF on the cloud path, and
+      // as of 2026-09-16 that is a MEASURED ruling rather than an assumption. Barge
+      // here is OpenAI server_vad (speech_started → response.cancel + avatar.interrupt).
+      //
+      // ★ THE REASON THIS LINE USED TO GIVE WAS WRONG, AND SO WAS THE ARITHMETIC THAT
+      // ATTACKED IT. The old text said a local cut "would silence the speaker without
+      // telling OpenAI to stop generating"; the counter-argument (issue #58) was that
+      // ~635 ms of the 643 ms `onset_to_silence_ms` is the server leg, so cutting
+      // locally pays it. Both were settled against the live Realtime API — 11 sessions
+      // on this exact session.update, no device, no room — and both are false:
+      //
+      //   • THE SERVER ALREADY CANCELS ITSELF. With `interrupt_response: true` the
+      //     reply ends `response.done status=cancelled reason=turn_detected` 20–29 ms
+      //     after the server's own speech_started (19.7 / 29.0 / 29.0 over three arms),
+      //     measured with the client sending no cancel at all. Nothing is left
+      //     generating. (There is no `response.cancelled` event on the GA shape at
+      //     all — 0 in 11 sessions; cancellation is signalled by `response.done`.)
+      //   • A CLIENT CUT THE SERVER DOES NOT CONFIRM COSTS THE WHOLE TURN. Cancelling
+      //     on a non-speech burst ends the reply `reason=client_cancelled` and NO
+      //     replacement response is created: the agent stops mid-sentence and never
+      //     resumes. Up to 500 ms of the killed reply still arrives after the cancel
+      //     (2 deltas, last at +46 ms) — that is what `_droppingCancelledAudio` is for.
+      //   • AND THE LOCAL GATE IS NOT FASTER. It is a 0.30 s sustain window by
+      //     construction (`voiceSustainSecs`, the fix for a hair-trigger peak detector).
+      //     Raced against server_vad on ONE signal in ONE session, it fired 153 ms LATER
+      //     (median, 6/6 trials, 0 local wins). The 643 ms it was to beat also carries
+      //     ~156 ms that never happened: the server back-dates `audio_start_ms` (measured
+      //     −156 ms median, −156…−260 over 5 sweeps against a known onset).
+      //   • THE FLOOR CANNOT SEPARATE THE TWO VOICES ON DEVICE ANYWAY. See
+      //     `voicePeakThresholdDuringBot` in RealtimeAudioIO.swift for the distributions.
+      //
+      // So: server_vad stays the cloud barge. The vad_threshold knob drives LOCAL mode
+      // only, where there is no server VAD and this energy gate is the only trigger.
       await avatar.audioStart(
           vadThreshold: 0, enableMic: enableMic, vpioAgc: EchoProfile.current.vpioAgc);
       if (enableMic) {
