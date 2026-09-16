@@ -1,3 +1,28 @@
+## Unreleased — not tagged, not published
+
+**The Dart voice module stopped importing the render module.** `bithuman_realtime.dart`
+and `realtime_transport.dart` opened with `import 'bithuman.dart'` and four constructors
+took `required BithumanAvatar avatar` — the concrete render class. They now take
+`VoiceHost` (`lib/src/voice_host.dart`, fourteen members: mic, speaker, barge-in, the
+WebRTC lipsync attach, the on-device brain), and **`BithumanAvatar implements VoiceHost`**
+with no new code. The arrow points render → voice.
+
+**Source-compatible for every consumer.** `avatar: avatar` still compiles wherever `avatar`
+is a `BithumanAvatar`; measured against `bithuman-examples/app/avatar_chat` and
+`bithuman-jarvis-app`, whose analyzer output is byte-identical before and after.
+
+What it buys: a voice session with no avatar is now a thing the type system can say.
+`test/e2e/headless_voice_host_test.dart` runs a real `BithumanRealtimeSession` against
+fourteen methods of plain Dart — no engine, no texture, no method channel — on a Linux
+runner. "To test voice chat we do not even need visuals", executed.
+
+Also: transport routing is a registry rather than an `if`
+(`lib/src/transport_protocol.dart` — descriptor, capability record, resolver, and a
+written recipe), and the routing rule takes the platform as an argument, so the two
+Apple-only rows that CI has never graded are graded now. Held by
+`scripts/check_voice_render_edge_dart.sh` (8 rules, one mutation each, exact partition)
+beside its Swift twin.
+
 ## 2.6.5 — 2026-09-16
 
 Tag `flutter-plugin-v2.6.5`. **The Android half of the barge-in fix.** The pin moves

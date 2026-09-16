@@ -27,9 +27,11 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 
-import 'bithuman.dart';
+import 'src/voice_host.dart';
 import 'src/dev_levers.dart';
 import 'src/echo_profile.dart';
+
+export 'src/voice_host.dart' show VoiceHost;
 
 /// One Realtime session over a single WebSocket.
 ///
@@ -49,7 +51,12 @@ class BithumanRealtimeSession {
   }
 
   final String apiKey;
-  final BithumanAvatar avatar;
+  /// The platform surface this session drives — mic, speaker, echo canceller
+  /// and (if it has one) a mouth. Declared as the PROTOCOL, never as the render
+  /// class: `BithumanAvatar` conforms, and so does a test double with no engine
+  /// and no texture, which is what makes "test voice chat with no visuals" a
+  /// thing this file can express. See `src/voice_host.dart`.
+  final VoiceHost avatar;
   final String model;
   final String systemPrompt;
   final String voice;

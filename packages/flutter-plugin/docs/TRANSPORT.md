@@ -5,6 +5,17 @@ plugin native audio. Companion tooling: `scripts/stress-webrtc-iphone.sh`._
 
 ## 1. Current state (who owns audio, per platform)
 
+> ★**THE TABLE BELOW IS 2026-06 AND ITS iOS COLUMN NO LONGER MATCHES THE CODE.** iOS cloud
+> has taken `WebSocketTransport`, not `WebRTCTransport`, since task #62 — running a second
+> audio unit beside libwebrtc's caused ducking and echo outside the AEC reference. Read the
+> routing from `lib/src/transport_protocol.dart` (the registry) and `pickTransportDescriptor`
+> (the rule), which are data and one function rather than prose, and which
+> `test/e2e/transport_registry_test.dart` grades row by row on every platform. The rest of
+> this document — the AEC evidence chain in §2 especially — is still the ground truth it
+> was written to be. Left standing and dated rather than quietly deleted: a wrong reason
+> stops the next reader from looking.
+
+
 | | macOS cloud | iOS cloud | Android cloud | local (macOS/iOS) |
 |---|---|---|---|---|
 | Transport | `WebSocketTransport` (`bithuman_realtime.dart`) | `WebRTCTransport` (`openai_webrtc_session.dart`) | `WebRTCTransport` | `LocalConverseTransport` |

@@ -28,11 +28,19 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:bithuman/bithuman.dart';
 import 'package:bithuman/bithuman_realtime.dart';
 
 import 'openai_webrtc_session.dart';
+import 'src/transport_protocol.dart';
 import 'src/dev_levers.dart';
+
+export 'src/transport_protocol.dart';
+// Re-exported WITHOUT a matching import on purpose: `VoiceHost` already reaches
+// this library through bithuman_realtime.dart (the voice library exports the
+// voice protocol), so importing it here is what the analyzer calls an
+// unnecessary_import. The export stays because a consumer of THIS library must
+// be able to name the type its four constructors take.
+export 'src/voice_host.dart' show VoiceHost;
 
 /// Lifecycle states that any underlying transport can be in. Maps the
 /// concrete `RealtimeStatus` (WebSocket) and `WebRTCStatus` (WebRTC)
@@ -96,9 +104,14 @@ abstract class RealtimeTransport {
   bool get muted;
   set muted(bool value);
 
+  /// The registry row this transport was built from — its id, its label and
+  /// its capability record (`src/transport_protocol.dart`). Reading a capability
+  /// off the instance and off the registry must give the same answer, which is
+  /// why [canMute] below is defined AS the record rather than beside it.
+  TransportDescriptor get descriptor;
+
   /// Whether mic-mute is actually wired for this transport. The UI hides the
-  /// mute button when false so the control never lies (local mode has no
-  /// native mic-mute hook yet).
+  /// mute button when false so the control never lies.
   bool get canMute;
 
   /// Open the connection + start the audio loop. Returns once the
@@ -129,7 +142,7 @@ abstract class RealtimeTransport {
 class WebSocketTransport implements RealtimeTransport {
   WebSocketTransport({
     required String apiKey,
-    required BithumanAvatar avatar,
+    required VoiceHost avatar,
     required String model,
     required String voice,
     required String systemPrompt,
@@ -179,7 +192,9 @@ class WebSocketTransport implements RealtimeTransport {
   @override
   set muted(bool value) => _session.muted = value;
   @override
-  bool get canMute => true; // wired to the native VP-IO session
+  bool get canMute => descriptor.canMute;
+  @override
+  TransportDescriptor get descriptor => kWebSocketTransport;
 
   @override
   Future<void> start({bool mic = true}) => _session.start(enableMic: mic);
@@ -243,7 +258,7 @@ class WebRTCTransport implements RealtimeTransport {
           vadThreshold: vadThreshold,
         );
 
-  final BithumanAvatar avatar;
+  final VoiceHost avatar;
   final OpenAIWebRTCSession _session;
   StreamSubscription<dynamic>? _remoteAudioSub;
   StreamSubscription<dynamic>? _interruptForwardSub;
@@ -277,7 +292,9 @@ class WebRTCTransport implements RealtimeTransport {
     _session.setMicMuted(value); // flips the local audio track's enabled flag
   }
   @override
-  bool get canMute => true;
+  bool get canMute => descriptor.canMute;
+  @override
+  TransportDescriptor get descriptor => kWebRtcTransport;
 
   @override
   Future<void> start({bool mic = true}) async {
@@ -362,7 +379,7 @@ class LocalConverseTransport implements RealtimeTransport {
     this.vadThreshold = 0,
     this.systemPrompt = '',
   });
-  final BithumanAvatar avatar;
+  final VoiceHost avatar;
   final String ggufPath;
   final String? supertonicAssets;
   final String? voice;
@@ -404,7 +421,9 @@ class LocalConverseTransport implements RealtimeTransport {
     avatar.localSetMuted(value); // gates the native mic→brain (STT) forward
   }
   @override
-  bool get canMute => true; // wired to RealtimeAudioIO's micMuted flag
+  bool get canMute => descriptor.canMute;
+  @override
+  TransportDescriptor get descriptor => kLocalConverseTransport;
 
   @override
   Future<void> start({bool mic = true}) async {
@@ -554,7 +573,7 @@ const String _kTransportDefine = DevLevers.transport;
 /// it is no less true of a docstring.
 RealtimeTransport pickTransport({
   required String apiKey,
-  required BithumanAvatar avatar,
+  required VoiceHost avatar,
   required String model,
   required String voice,
   required String systemPrompt,
@@ -563,42 +582,94 @@ RealtimeTransport pickTransport({
   String? ggufPath,
   String? supertonicAssets,
   String? transportOverride, // test injection; defaults to the dart-define
+  String? operatingSystem,   // test injection; defaults to Platform's
+}) {
+  final os = operatingSystem ?? Platform.operatingSystem;
+  final d = pickTransportDescriptor(
+    localMode: localMode,
+    ggufPath: ggufPath,
+    transportOverride: transportOverride,
+    operatingSystem: os,
+  );
+  // One device trace, one clock: say which audio stack owns this session before
+  // it opens. `nativeLog` is documented not to throw; the guard is for a third-
+  // party [VoiceHost] that has not read that sentence.
+  try {
+    avatar.nativeLog('[transport] picked ${d.label} (${d.id}) on $os');
+  } catch (_) {}
+
+  // ONE BRANCH PER REGISTERED ID — the Dart twin of Swift's
+  // `EngineRegistry.make`. A 4th transport adds a `case` here and a row in
+  // `kTransportRegistry`; nothing above this line changes.
+  switch (d.id) {
+    case 'local':
+      return LocalConverseTransport(
+        avatar: avatar,
+        ggufPath: ggufPath!,
+        supertonicAssets: supertonicAssets,
+        voice: voice,
+        vadThreshold: vadThreshold,
+        systemPrompt: systemPrompt,
+      );
+    case 'webrtc':
+      return WebRTCTransport(
+        apiKey: apiKey,
+        avatar: avatar,
+        model: model,
+        voice: voice,
+        systemPrompt: systemPrompt,
+        vadThreshold: vadThreshold,
+      );
+    case 'websocket':
+    default:
+      return WebSocketTransport(
+        apiKey: apiKey,
+        avatar: avatar,
+        model: model,
+        voice: voice,
+        systemPrompt: systemPrompt,
+        vadThreshold: vadThreshold,
+      );
+  }
+}
+
+/// The ROUTING half of [pickTransport], with no construction in it: which
+/// registered transport serves this request on this platform. Split out so the
+/// contract can be graded without a [VoiceHost], a socket or a platform channel
+/// — `test/e2e/transport_registry_test.dart` drives every row of the decision
+/// table through this one function.
+///
+/// The order below IS the contract, unchanged from the `if`-chain it replaces:
+///
+///   1. LOCAL is a request for a CAPABILITY, not a name. An explicit
+///      `localMode` that carries a brain on disk wins over any override — and
+///      is refused where the registry says the brain cannot run (Apple only:
+///      it binds Apple SpeechAnalyzer), falling through to a cloud transport
+///      rather than failing.
+///   2. A NAMED transport (`transportOverride`, else `BITHUMAN_TRANSPORT`),
+///      matched case-insensitively against the registry. A name that needs the
+///      local brain is not reachable this way — the brain has no path here — and
+///      neither is one the platform cannot run.
+///   3. Otherwise [kDefaultTransport]. An unknown name is NOT an error: a stale
+///      `--dart-define` must not brick a session.
+TransportDescriptor pickTransportDescriptor({
+  required bool localMode,
+  required String? ggufPath,
+  required String? transportOverride,
+  required String operatingSystem,
 }) {
   if (localMode &&
-      (Platform.isMacOS || Platform.isIOS) &&
       ggufPath != null &&
-      ggufPath.isNotEmpty) {
-    return LocalConverseTransport(
-      avatar: avatar,
-      ggufPath: ggufPath,
-      supertonicAssets: supertonicAssets,
-      voice: voice,
-      vadThreshold: vadThreshold,
-      systemPrompt: systemPrompt,
-    );
+      ggufPath.isNotEmpty &&
+      kLocalConverseTransport.runsOn(operatingSystem)) {
+    return kLocalConverseTransport;
   }
-  // Every platform takes the WebSocket transport by default: the plugin's native
-  // audio surface (speaker + echo-cancelled mic) exists on macOS, iOS AND Android,
-  // and the WebSocket path is the one whose bot PCM the avatar lipsyncs from
-  // sample-accurately. WebRTC stays an explicit opt-in A/B.
-  final wantWebrtc =
-      (transportOverride ?? _kTransportDefine).toLowerCase() == 'webrtc';
-  if (wantWebrtc) {
-    return WebRTCTransport(
-      apiKey: apiKey,
-      avatar: avatar,
-      model: model,
-      voice: voice,
-      systemPrompt: systemPrompt,
-      vadThreshold: vadThreshold,
-    );
+  final name = (transportOverride ?? _kTransportDefine).toLowerCase();
+  final named = transportDescriptorFor(name);
+  if (named != null &&
+      !named.requiresLocalBrain &&
+      named.runsOn(operatingSystem)) {
+    return named;
   }
-  return WebSocketTransport(
-    apiKey: apiKey,
-    avatar: avatar,
-    model: model,
-    voice: voice,
-    systemPrompt: systemPrompt,
-    vadThreshold: vadThreshold,
-  );
+  return kDefaultTransport;
 }

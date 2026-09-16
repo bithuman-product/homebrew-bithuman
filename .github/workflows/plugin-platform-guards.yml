@@ -18,6 +18,8 @@ on:
       - 'scripts/prove_dev_levers_release.sh'
       - 'scripts/check_voice_render_edge.sh'
       - 'scripts/prove_lipsync_sink_headless.sh'
+      - 'scripts/check_voice_render_edge_dart.sh'
+      - 'scripts/ci/mutate_voice_render_edge_dart.py'
       - '.github/workflows/plugin-platform-guards.yml'
   push:
     branches: [main]
@@ -32,6 +34,8 @@ on:
       - 'scripts/prove_dev_levers_release.sh'
       - 'scripts/check_voice_render_edge.sh'
       - 'scripts/prove_lipsync_sink_headless.sh'
+      - 'scripts/check_voice_render_edge_dart.sh'
+      - 'scripts/ci/mutate_voice_render_edge_dart.py'
       - '.github/workflows/plugin-platform-guards.yml'
   workflow_dispatch:
 
@@ -148,3 +152,53 @@ jobs:
           mutate M3; grade "M3 AvatarTexture stops declaring the conformance" R3a
           mutate M4; grade "M4 a protocol member vanishes from the texture" R3b
           ./scripts/check_voice_render_edge.sh
+
+  # ── THE SAME EDGE, ONE LAYER UP, IN DART ──────────────────────────────────────────
+  # The Swift voice unit stopped naming AvatarTexture on 2026-09-16; the DART voice
+  # module was still opening with `import 'bithuman.dart'` and typing four constructors
+  # `required BithumanAvatar avatar`. Same defect, same cost: "a voice session with no
+  # avatar" was untypeable, so voice could only be tested through render. The edge is
+  # TURNED — `BithumanAvatar implements VoiceHost` — and nothing about that is visible
+  # at runtime: put the import back and the package still compiles and still ships.
+  #
+  # Pure python, so it runs on ubuntu. The COMPILED half of this boundary is
+  # packages/flutter-plugin/test/e2e/headless_voice_host_test.dart, run by
+  # flutter-plugin-tests.yml: a real BithumanRealtimeSession against a VoiceHost with no
+  # render in it, which stops COMPILING if a constructor is re-typed.
+  voice-render-edge-dart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: the Dart voice module does not import render, and the protocol is the measured surface
+        run: ./scripts/check_voice_render_edge_dart.sh
+      - name: Negative controls — an EXACT PARTITION, one mutation per rule
+        run: |
+          set -u
+          L=packages/flutter-plugin/lib
+          B=$(mktemp -d); trap 'rm -rf "$B"' EXIT HUP INT TERM
+          mkdir -p "$B/src"
+          cp $L/realtime_transport.dart $L/bithuman_realtime.dart $L/bithuman.dart "$B/"
+          cp $L/src/transport_protocol.dart "$B/src/"
+          restore() { cp "$B"/*.dart $L/; cp "$B"/src/*.dart $L/src/; }
+          grade() {
+            label="$1"; shift
+            out=$(./scripts/check_voice_render_edge_dart.sh 2>&1) || true
+            for want in "$@"; do
+              echo "$out" | grep -q "FAIL  $want " || { echo "$out"; echo "::error::$label — $want was expected to go RED and did not; the rule is not looking"; restore; exit 1; }
+            done
+            reds=$(echo "$out" | grep -c "FAIL  " || true)
+            [ "$reds" -eq "$#" ] || { echo "$out"; echo "::error::$label — $reds rules went red, expected exactly $# ($*). The partition is not exact."; restore; exit 1; }
+            echo "control fires exactly: $label -> $*"
+            restore
+          }
+          m() { python3 scripts/ci/mutate_voice_render_edge_dart.py "$1" >/dev/null; }
+          m M1; grade "M1 the render import comes back"                  R1a
+          m M2; grade "M2 a constructor is re-typed to the render class" R1b
+          m M3; grade "M3 the conformance declaration disappears"        R2a
+          m M4; grade "M4 a protocol member vanishes from the avatar"    R2b
+          m M5; grade "M5 voice invokes a RENDER verb through the host"  R3
+          m M6; grade "M6 the routing rule goes back to literals"        R4a
+          m M7; grade "M7 a transport hard-codes its own capability"     R4b
+          m M8; grade "M8 a registered id loses its build branch"        R4c
+          ./scripts/check_voice_render_edge_dart.sh

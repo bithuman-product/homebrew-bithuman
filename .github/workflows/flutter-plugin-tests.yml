@@ -62,7 +62,10 @@ jobs:
             test/e2e/fake_avatar_platform.dart \
             test/e2e/realtime_session_mock_test.dart \
             test/e2e/transport_state_machine_test.dart \
-            test/e2e/transport_pick_test.dart ; do
+            test/e2e/transport_pick_test.dart \
+            test/e2e/recording_voice_host.dart \
+            test/e2e/headless_voice_host_test.dart \
+            test/e2e/transport_registry_test.dart ; do
             [ -f "$f" ] || { echo "::error::$f is missing — the headless voice harness (a real BithumanRealtimeSession against a loopback mock, with NO engine and NO texture) is the one thing here that grades the voice layer end to end. If it genuinely moved, move this list with it; do not delete the line to make the step pass."; exit 1; }
           done
       # ★THE FORMAT RATCHET — a re-add is caught HERE, on every push, not at
