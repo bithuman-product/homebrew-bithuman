@@ -233,9 +233,11 @@ native deps into `<plat>/Frameworks/` + each engine under `<plat>/Engines/<engin
   bundle (the A42 demo). SOURCE-ONLY: no static lib. Adapter source →
   `Engines/expression2/Classes`; models → `Assets/embody`.
 - **essence2** (OPTIONAL) — its bootstrap fetches + sha-verifies the
-  `libessence2-v1.0-a2x` release and extracts the per-platform `libessence2.a`
-  + resources → `Engines/essence2/{Classes,include,Vendor}`; absent it, the build
-  is byte-identical embody-only.
+  `libessence2` release **this plugin pins** (`LIBESSENCE2_RELEASE` +
+  `LIBESSENCE2_SHA256` in `scripts/bootstrap.sh`, the same release
+  `Package.swift`'s `essence2Tag` serves) and extracts the per-platform
+  `libessence2.a` + resources → `Engines/essence2/{Classes,include,Vendor}`;
+  absent it, the build is byte-identical embody-only.
 
 macOS needs two Homebrew dylibs at link + runtime via `@rpath`:
 `brew install llama.cpp onnxruntime` (the app's xcconfig wires the `@rpath`). The

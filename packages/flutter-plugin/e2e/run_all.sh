@@ -172,7 +172,7 @@ run_ios() {
     # phase — auto-skip with the reason instead.
     if ! ls -d "$HERE/../ios/Frameworks/libessence2.xcframework/"ios-arm64*-simulator >/dev/null 2>&1; then
         echo "  SKIP: libessence2.xcframework has no ios-simulator slice"
-        echo "        (re-vendor from the bithuman-models release essence2-libessence2-v1.0-a2x)"
+        echo "        (re-run scripts/bootstrap.sh — it pins the release, tag + sha256)"
         result_ios="skip (no sim slice)"
         return
     fi

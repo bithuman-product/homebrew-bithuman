@@ -58,6 +58,60 @@ EXPRESSION2_VENDOR_REPO="${EXPRESSION2_VENDOR_REPO:-bithuman-product/bithuman-mo
 ORT_VENDOR_TAG="${ORT_VENDOR_TAG:-essence2-ort-vendor-1.26.0}"
 ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 
+# ======================================================= THE APPLE ENGINE PIN
+# ★ A TAG OF THIS REPO MUST NAME AN ENGINE. The Android half already works this
+# way — android/build.gradle names `ai.bithuman:essence2-android:0.5.8`, an
+# immutable Maven coordinate committed beside the code that uses it, so
+# `flutter-plugin-v2.6.1` names exactly one Android engine forever. The Apple
+# half named none, and it cost us twice:
+#
+#   • THE BINARY. Until 2026-09-16 this script ran the engine SDK's own
+#     bootstrap with no engine coordinate, so the tag came from a DEFAULT in
+#     the PRIVATE repo — `LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE-essence2-v1.2.0}"`,
+#     last rolled 2026-09-06 and never moved again. essence2-v1.2.0 is a
+#     PRE-RELEASE whose own title reads "superseded by essence2-v1.5.0", while
+#     Package.swift (the SwiftPM path, same repo, same engine) served
+#     essence2-v1.7.0. Two Apple paths, five releases apart, no gate between
+#     them. Measured on the published bytes 2026-09-16: the v1.2.0 slices carry
+#     0 `DriverCursor` and 0 `decoded IN PLACE`; the v1.7.0 slices carry 257 and
+#     1. Nothing that ran on a device that day linked v1.2.0 — every Apple build
+#     overrode the default by hand — but the pod's own committed assumptions
+#     were written for it: `s.resources` globbed `a2x_w2v.*.onnx`, a name only
+#     the v1.2.0-era archive ships, so the app carried no audio encoder at all
+#     and `be_essence2_create` returned -2 on the first macOS run that day.
+#
+#   • THE SOURCE. `locate_engine_sdk` takes a ref and both call sites omitted
+#     it, so the engine adapter Swift compiled into this pod came from
+#     bithuman-models main HEAD **at bootstrap time**, into gitignored
+#     directories, with no revision recorded anywhere. Two developers building
+#     the same tag a week apart got different engine code and neither could
+#     tell.
+#
+# So the coordinates live HERE, committed, immutable, beside the Android ones.
+# The digests are the sha256 of the release assets and are checked by the
+# engine SDK's bootstrap before anything is installed. `essence2Tag` in
+# Package.swift and `LIBESSENCE2_RELEASE` below name the SAME release, and
+# `scripts/check-apple-engine-pin.sh` refuses a commit where they do not — it
+# also refuses a `BITHUMAN_MODELS_REF` that is not a full commit sha, because a
+# branch name is not a pin. Roll the two together, never one alone.
+#
+# Env overrides stay honoured for development; the committed values are what a
+# tag ships.
+
+# The bithuman-models revision whose engine ADAPTER SOURCE (models/*/sdk/Classes)
+# this pod compiles. A full 40-hex commit sha — never a branch.
+# 18e32a7e2 = 2026-09-16, the tree the essence2-v1.7.0 / v2.6.3 Apple builds ran on.
+BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-18e32a7e2ed523d87723a97d7dcc7a37b1f664ab}"
+
+# The essence-2 Apple ENGINE + its runtime RESOURCES. One release carries both.
+# Must equal `essence2Tag` in Package.swift; the digests must equal that file's
+# `libessence2.xcframework.zip` binaryTarget checksum and the release's own
+# resources sidecar. Passed to the engine SDK bootstrap explicitly below.
+LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.7.0}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-ee21342f611d94c7a8a3ef497d8dfc67f146ff6513403b2741d6f6011f805b1f}"
+LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.7.0}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-3274cf92ef211846cc62116c2aad1cd7015a8f2c9bf5b67677d4912a82e2c656}"
+
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so
 # a clone with no credential can fetch them. Digests are PINNED HERE, not read
@@ -109,59 +163,83 @@ relink() {
 # Every engine's Layer-1 sdk/ lives in the PRIVATE engine monorepo
 # bithuman-product/bithuman-models under models/<engine>/sdk. Locate one
 # engine's sdk/ by: (1) BITHUMAN_<ENGINE>_DIR dev override, (2) a sibling
-# bithuman-models checkout next to this repo, (3) ONE shared shallow gh clone
-# of the monorepo into a cache (serves every engine).
-# Sets ENGINE_SDK to the resolved sdk/ path (empty if not found).
+# bithuman-models checkout next to this repo, (3) ONE shared shallow clone of
+# the monorepo into a cache AT $ref (serves every engine).
+# Sets ENGINE_SDK to the resolved sdk/ path (empty if not found), and
+# ENGINE_SDK_REV to the revision it actually resolved (or "unpinned: <reason>"
+# for 1 and 2, which are developer paths this script cannot pin).
 #   $1 = slug (EXPRESSION2|ESSENCE2)  $2 = models/ dir name (expression-2|essence-2)
-#   $3 = override env VALUE           $4 = ref
+#   $3 = override env VALUE           $4 = ref (REQUIRED — the committed pin)
 MODELS_REPO="${BITHUMAN_MODELS_REPO:-bithuman-product/bithuman-models}"
 MODELS_CACHE="$HOME/.cache/bithuman/bithuman-models"
 ENGINE_SDK=""
+ENGINE_SDK_REV=""
+# Print the revision of a checkout, or a reason it has none.
+sdk_rev_of() {  # $1 = any path inside a git work tree
+    ( cd "$1" && git rev-parse HEAD 2>/dev/null ) || echo "not-a-git-checkout"
+}
 locate_engine_sdk() {
-    local slug="$1" model="$2" override="$3" ref="${4:-main}"
+    local slug="$1" model="$2" override="$3" ref="${4:-}"
     local cache="$MODELS_CACHE"
-    ENGINE_SDK=""
-    # 1. explicit dev override (engine dir root OR its sdk/).
+    ENGINE_SDK=""; ENGINE_SDK_REV=""
+    [ -n "$ref" ] || die "locate_engine_sdk $slug called with no ref — the engine adapter source must be pinned (BITHUMAN_MODELS_REF)"
+    # 1. explicit dev override (engine dir root OR its sdk/). A DEVELOPER path:
+    # it wins over the pin by design, so say out loud what it resolved to —
+    # the whole defect this pin fixes was an unrecorded revision.
     if [ -n "$override" ]; then
-        if [ -f "$override/scripts/bootstrap.sh" ]; then ENGINE_SDK="$override"; return 0; fi
-        if [ -f "$override/sdk/scripts/bootstrap.sh" ]; then ENGINE_SDK="$override/sdk"; return 0; fi
+        if [ -f "$override/scripts/bootstrap.sh" ]; then
+            ENGINE_SDK="$override"; ENGINE_SDK_REV="OVERRIDE BITHUMAN_${slug}_DIR @ $(sdk_rev_of "$override")"; return 0; fi
+        if [ -f "$override/sdk/scripts/bootstrap.sh" ]; then
+            ENGINE_SDK="$override/sdk"; ENGINE_SDK_REV="OVERRIDE BITHUMAN_${slug}_DIR @ $(sdk_rev_of "$override")"; return 0; fi
         warn "BITHUMAN_${slug}_DIR=$override has no (sdk/)scripts/bootstrap.sh"
     fi
-    # 2. sibling bithuman-models checkout next to this umbrella repo.
+    # 2. sibling bithuman-models checkout next to this umbrella repo. Also a
+    # DEVELOPER path and also unpinned: whatever that tree is checked out at,
+    # dirty or not, is what compiles into the pod. Named, for the same reason.
     if [ -f "$PLUGIN_ROOT/../bithuman-models/models/$model/sdk/scripts/bootstrap.sh" ]; then
-        ENGINE_SDK="$(cd "$PLUGIN_ROOT/../bithuman-models/models/$model/sdk" && pwd)"; return 0
+        ENGINE_SDK="$(cd "$PLUGIN_ROOT/../bithuman-models/models/$model/sdk" && pwd)"
+        ENGINE_SDK_REV="SIBLING CHECKOUT $PLUGIN_ROOT/../bithuman-models @ $(sdk_rev_of "$PLUGIN_ROOT/../bithuman-models")"
+        return 0
     fi
-    # 3. one shared shallow clone of the monorepo into a cache (private repo →
-    # prefer gh's auth). Re-used across engines and runs.
+    # 3. one shared shallow clone of the monorepo into a cache, checked out AT
+    # THE PIN. This is the reproducible path — the one a clean clone takes.
     if [ ! -d "$cache/models" ]; then
         mkdir -p "$(dirname "$cache")"; rm -rf "$cache"
-        log "Cloning $MODELS_REPO ($ref) → $cache"
+        log "Cloning $MODELS_REPO → $cache"
+        # No `-b $ref`: the pin is a COMMIT SHA and `clone -b` takes only branch
+        # and tag names. Clone the default branch shallow, then fetch the pin
+        # itself below — `git fetch origin <sha>` is served for any commit
+        # reachable from a ref, which a pin on main always is.
         if command -v gh >/dev/null 2>&1; then
-            gh repo clone "$MODELS_REPO" "$cache" -- --depth 1 -b "$ref" >/dev/null 2>&1 \
-              || git clone --depth 1 -b "$ref" "https://github.com/$MODELS_REPO.git" "$cache" >/dev/null 2>&1 || true
+            gh repo clone "$MODELS_REPO" "$cache" -- --depth 1 >/dev/null 2>&1 \
+              || git clone --depth 1 "https://github.com/$MODELS_REPO.git" "$cache" >/dev/null 2>&1 || true
         else
-            git clone --depth 1 -b "$ref" "https://github.com/$MODELS_REPO.git" "$cache" >/dev/null 2>&1 || true
+            git clone --depth 1 "https://github.com/$MODELS_REPO.git" "$cache" >/dev/null 2>&1 || true
         fi
-    else
-        # Refresh the cache to the CURRENT tip of $ref. This must FAIL LOUD: the
-        # cache holds the engine adapter SOURCE compiled into the pod, and a
-        # silently-stale cache pins it forever while every log line reads
-        # success (found 2026-07-06: an echelon cache frozen at a pre-dec_P2
-        # Expression2Engine because the plain-git refresh of the PRIVATE repo
-        # had no credentials and the old `|| true` swallowed the failure).
-        # gh's credential helper carries the auth (gh auth login / GH_TOKEN);
-        # plain git is the fallback for public/credential-cached setups.
+    fi
+    if [ -d "$cache/.git" ]; then
+        # Move the cache ONTO THE PIN. This must FAIL LOUD: the cache holds the
+        # engine adapter SOURCE compiled into the pod, and a silently-stale
+        # cache pins it forever while every log line reads success (found
+        # 2026-07-06: an echelon cache frozen at a pre-dec_P2 Expression2Engine
+        # because the plain-git refresh of the PRIVATE repo had no credentials
+        # and the old `|| true` swallowed the failure). gh's credential helper
+        # carries the auth (gh auth login / GH_TOKEN); plain git is the fallback
+        # for public/credential-cached setups. Cheap to re-run: a cache already
+        # at the pin fetches one commit it already has.
         if ! ( cd "$cache" && { \
                  if command -v gh >/dev/null 2>&1; then \
                      git -c credential.helper='!gh auth git-credential' fetch -q --depth 1 origin "$ref"; \
                  else \
                      git fetch -q --depth 1 origin "$ref"; \
                  fi; } && git checkout -q FETCH_HEAD ) >/dev/null 2>&1; then
-            die "engine SDK cache refresh FAILED ($MODELS_REPO ref $ref at $cache) — refusing to stage a possibly-stale engine adapter.
+            die "engine SDK checkout of the PIN FAILED ($MODELS_REPO @ $ref, cache $cache) — refusing to stage an engine adapter this script cannot name.
   Fix: gh auth login (or export GH_TOKEN), or rm -rf $cache to re-clone, or set BITHUMAN_${slug}_DIR / place a sibling bithuman-models checkout."
         fi
     fi
-    [ -f "$cache/models/$model/sdk/scripts/bootstrap.sh" ] && { ENGINE_SDK="$cache/models/$model/sdk"; return 0; }
+    if [ -f "$cache/models/$model/sdk/scripts/bootstrap.sh" ]; then
+        ENGINE_SDK="$cache/models/$model/sdk"; ENGINE_SDK_REV="PINNED $(sdk_rev_of "$cache")"; return 0
+    fi
     return 1
 }
 
@@ -173,11 +251,12 @@ locate_engine_sdk() {
 stage_expression2() {
     local extra_env="${1:-}"
     rm -rf "$PLUGIN_ROOT/macos/Engines/expression2" "$PLUGIN_ROOT/ios/Engines/expression2"
-    if ! locate_engine_sdk EXPRESSION2 "expression-2" "${BITHUMAN_EXPRESSION2_DIR:-}"; then
+    if ! locate_engine_sdk EXPRESSION2 "expression-2" "${BITHUMAN_EXPRESSION2_DIR:-}" "$BITHUMAN_MODELS_REF"; then
         die "bithuman-models models/expression-2/sdk not found (set BITHUMAN_EXPRESSION2_DIR, place a sibling bithuman-models checkout, or allow a git clone) — expression2 is the DEFAULT engine and is REQUIRED"
     fi
     local sdk="$ENGINE_SDK"
     log "Staging expression2 (embody) engine SDK from $sdk"
+    log "  engine adapter source: $ENGINE_SDK_REV"
     # Run the engine's own bootstrap (fetches the embody models). A nonzero exit
     # is a HARD failure (e.g. sha mismatch) we must not swallow.
     ( cd "$sdk" && env $extra_env bash scripts/bootstrap.sh ) \
@@ -217,16 +296,28 @@ stage_essence2_plat() {  # $1=plat, $2=slice .a path, $3=resources dir, $4=sdk p
 
 stage_essence2() {
     rm -rf "$PLUGIN_ROOT/macos/Engines/essence2" "$PLUGIN_ROOT/ios/Engines/essence2"
-    if ! locate_engine_sdk ESSENCE2 "essence-2" "${BITHUMAN_ESSENCE2_DIR:-}"; then
+    if ! locate_engine_sdk ESSENCE2 "essence-2" "${BITHUMAN_ESSENCE2_DIR:-}" "$BITHUMAN_MODELS_REF"; then
         warn "bithuman-models models/essence-2/sdk not found (set BITHUMAN_ESSENCE2_DIR, place a sibling bithuman-models checkout, or allow a git clone) — essence2 disabled (embody-only)"
         return 0
     fi
     local sdk="$ENGINE_SDK"
     log "Staging essence2 engine SDK from $sdk"
+    log "  engine adapter source: $ENGINE_SDK_REV"
+    log "  engine binary: $LIBESSENCE2_RELEASE (${LIBESSENCE2_SHA256:0:16}…), resources: $LIBESSENCE2_RESOURCES_RELEASE (${LIBESSENCE2_RESOURCES_SHA256:0:16}…)"
+    # ★ THE PIN IS PASSED, NOT INHERITED. The engine SDK's own bootstrap carries
+    # a DEFAULT tag of its own, in the private repo, on whatever revision this
+    # checkout happens to be — that default is what shipped essence2-v1.2.0 into
+    # this pod while Package.swift served v1.7.0. Naming all four coordinates
+    # here makes the plugin tag, and only the plugin tag, decide.
     # The engine SDK bootstrap exits 0 (degrade to embody-only) on a download
     # failure / missing release, but `die`s (nonzero) on a sha256 MISMATCH — so a
     # nonzero here is a HARD, loud failure we must NOT swallow.
-    ( cd "$sdk" && bash scripts/bootstrap.sh ) \
+    ( cd "$sdk" && env \
+        LIBESSENCE2_RELEASE="$LIBESSENCE2_RELEASE" \
+        LIBESSENCE2_SHA256="$LIBESSENCE2_SHA256" \
+        LIBESSENCE2_RESOURCES_RELEASE="$LIBESSENCE2_RESOURCES_RELEASE" \
+        LIBESSENCE2_RESOURCES_SHA256="$LIBESSENCE2_RESOURCES_SHA256" \
+        bash scripts/bootstrap.sh ) \
         || die "essence2 SDK bootstrap FAILED (e.g. libessence2 sha256 mismatch) — aborting"
     local mac_a="$sdk/Vendor/libessence2-macos.a"
     local ios_a="$sdk/Vendor/libessence2-ios.a"
