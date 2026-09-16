@@ -21,6 +21,8 @@ import 'dart:convert';
 import 'dart:io' show HttpClient, HttpClientResponse, Platform;
 
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'src/dev_levers.dart';
+import 'src/echo_profile.dart';
 
 enum WebRTCStatus {
   idle,
@@ -64,7 +66,7 @@ class OpenAIWebRTCSession {
   /// the deterministic full-path health check (token → SDP → data channel →
   /// model → remote audio → speaker) it doubled as. Default-off in every
   /// build that doesn't set the define explicitly.
-  static const _devGreeting = bool.fromEnvironment('BITHUMAN_DEV_GREETING');
+  static const _devGreeting = DevLevers.greeting;
 
   /// Dev-only connect greeting (see the data-channel open handler).
   /// Mirrors BithumanRealtimeSession._greetingInstructions (WS transport).
@@ -83,7 +85,7 @@ class OpenAIWebRTCSession {
   /// console and computes barge-ins/min. Mutually exclusive with
   /// BITHUMAN_DEV_GREETING (both fire response.create on channel open).
   /// Default-off in every build that doesn't set the define explicitly.
-  static const _devStress = bool.fromEnvironment('BITHUMAN_DEV_STRESS');
+  static const _devStress = DevLevers.stress;
 
   /// Stress-turn instructions: long uninterrupted speech maximises the
   /// echo-exposure window per turn. `response.instructions` REPLACES the
@@ -364,12 +366,13 @@ class OpenAIWebRTCSession {
             // config, waited for a confident COMPLETE turn, so the bot talked
             // over the user — the wrong behaviour for instant barge.) The native
             // `vad_threshold` knob has no effect here: WebRTC owns the mic inside
-            // libwebrtc, so the server's own threshold (0.5, the proven WS value)
-            // is the dial. far_field noise reduction (above) keeps AEC residual
-            // from false-tripping it.
+            // libwebrtc, so the server's own threshold is the dial — the DEVICE
+            // row in EchoProfile, the same table the WebSocket path reads.
+            // far_field noise reduction (above) keeps AEC residual from
+            // false-tripping it.
             'turn_detection': {
               'type': 'server_vad',
-              'threshold': 0.5,
+              'threshold': EchoProfile.current.serverVadThreshold,
               'prefix_padding_ms': 300,
               'silence_duration_ms': 500,
               'create_response': true,

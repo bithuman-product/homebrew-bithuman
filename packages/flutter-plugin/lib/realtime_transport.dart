@@ -32,6 +32,7 @@ import 'package:bithuman/bithuman.dart';
 import 'package:bithuman/bithuman_realtime.dart';
 
 import 'openai_webrtc_session.dart';
+import 'src/dev_levers.dart';
 
 /// Lifecycle states that any underlying transport can be in. Maps the
 /// concrete `RealtimeStatus` (WebSocket) and `WebRTCStatus` (WebRTC)
@@ -518,7 +519,7 @@ class LocalConverseTransport implements RealtimeTransport {
 /// override on macOS: the plugin's `attachWebrtcRemoteAudio` is iOS-only
 /// today, so the avatar's lipsync is not driven (audio/AEC/barge behavior is
 /// what the A/B measures). Local mode is unaffected — no cloud transport.
-const String _kTransportDefine = String.fromEnvironment('BITHUMAN_TRANSPORT');
+const String _kTransportDefine = DevLevers.transport;
 
 /// Platform-conditional factory. Local mode (macOS/iOS) → on-device
 /// converse; Android cloud → WebRTC (always); macOS + iOS cloud →
