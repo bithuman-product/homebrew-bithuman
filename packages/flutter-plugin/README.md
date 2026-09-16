@@ -141,6 +141,33 @@ await session.stop();    // closes WS, tears down audio graph
 await avatar.dispose();
 ```
 
+### …and the same thirty lines with no avatar at all
+
+`avatar:` is typed `VoiceHost` (`lib/src/voice_host.dart`), not `BithumanAvatar` — a
+fourteen-member protocol covering the mic, the speaker, the echo canceller, barge-in and
+the on-device brain. `BithumanAvatar` implements it, which is why the snippet above is
+unchanged; but so can anything else, and the voice module no longer imports the render
+module at all.
+
+That is what makes voice testable on its own: `test/e2e/headless_voice_host_test.dart`
+runs a real `BithumanRealtimeSession` against `RecordingVoiceHost` — plain Dart, no
+engine, no texture, no platform channel — on an ordinary Linux CI runner. Pass your own
+conformer to record audio, drive a different renderer, or stand a voice session up in a
+process that has no UI.
+
+```dart
+class MyVoiceHost implements VoiceHost { /* 14 members, no render */ }
+
+final session = BithumanRealtimeSession(
+  apiKey: key, avatar: MyVoiceHost(), systemPrompt: '…', voice: 'alloy', vadThreshold: 0,
+);
+```
+
+Which transport a session gets is a registry, not an `if`: `lib/src/transport_protocol.dart`
+carries one `TransportDescriptor` per transport (id, label, `canMute`,
+`requiresLocalBrain`, the platforms it runs on) and `pickTransportDescriptor` routes from
+that record. See ARCHITECTURE.md "Recipe: add a 3rd transport".
+
 `session.start()` brings the native audio engine up before the WebSocket so the first mic frame OpenAI sees is already echo-cancelled.
 
 ## Engine registry (Dart)

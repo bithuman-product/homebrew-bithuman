@@ -302,6 +302,35 @@ brain, or the audio IO.
 
 ---
 
+## Recipe: add a 3rd transport
+
+The voice half now has what the engine half has had: a descriptor, a registry, a
+capability record and a resolver (`lib/src/transport_protocol.dart`). Before this, the
+factory was an `if` comparing a string to the literal `'webrtc'`, and every capability a
+caller might ask — can it mute? does it need the on-device brain? does it run here? —
+lived as a hand-written getter or as a condition inside that `if`.
+
+A new transport (say `pipecat`) slots in with **no change to the routing rule**:
+
+1. **One class** in `lib/realtime_transport.dart` implementing `RealtimeTransport`
+   (5 streams + 8 methods + `descriptor`), wrapping whatever client it wraps. It takes a
+   `VoiceHost`, never an avatar.
+2. **One row** in `kTransportRegistry`: `id`, `label`, `canMute`, and — only if they are
+   not the defaults — `requiresLocalBrain` and the `platforms` it runs on.
+3. **One `case`** in `pickTransport`'s switch, the Dart twin of Swift's
+   `EngineRegistry.make`. `pickTransportDescriptor` is untouched: it already routes by
+   the record.
+4. **Its `canMute` reads its row** (`=> descriptor.canMute`), so the instance and the
+   registry cannot disagree. `scripts/check_voice_render_edge_dart.sh` R4b refuses a
+   hard-coded one, and R4c refuses a row with no branch to build it.
+
+**Done checklist:** class compiles · row registered · `case` added · `canMute` reads the
+record · a row in the decision table in `test/e2e/transport_registry_test.dart` (which
+takes the platform as an ARGUMENT, so an Apple-only transport is graded on a Linux
+runner). No edits to the other transports, to the Realtime client, or to the UI.
+
+---
+
 ## The `ai.bithuman.avatar` channel — which half is voice
 
 One method channel carries two modules. This is the **measured** split (2026-09-16,
@@ -347,6 +376,43 @@ no avatar schedules bot audio straight to the speaker and does no lipsync work a
 `scripts/check_voice_render_edge.sh` holds the edge (run by *plugin platform guards*,
 with a four-way mutation control); `scripts/prove_lipsync_sink_headless.sh` compiles
 the protocol against a conformer that has no render in it.
+
+### The same edge in Dart — and the arrow now points render → voice
+
+`lib/bithuman_realtime.dart` (the Realtime client) and `lib/realtime_transport.dart`
+(three transports + the factory) are the **Dart voice module**. Until 2026-09-16 both
+opened with `import 'bithuman.dart'` and four constructors took
+`required BithumanAvatar avatar` — the concrete render class. Same defect as the Swift
+one above, one layer up, with the same cost: *a voice session with no avatar* was not a
+thing the type system could say, so the only way to test voice was through render.
+
+Every call those two files make on that object is a **voice verb** on the channel (plus
+the four the census above calls "both"). None of them is `load`, `setDisplayMode`,
+`pushAudio`, PiP or a texture id. So the edge is **turned, not cut**:
+`lib/src/voice_host.dart` declares the fourteen-member `VoiceHost` protocol, the voice
+module imports only that, and **`BithumanAvatar implements VoiceHost`** with no new code
+— every member already existed there with those signatures. Render depends on voice; voice
+depends on nothing.
+
+| | Swift | Dart |
+|---|---|---|
+| protocol | `Protocol/LipsyncSink.swift` (12) | `lib/src/voice_host.dart` (14) |
+| conformer | `AvatarTexture` | `BithumanAvatar` |
+| source gate | `scripts/check_voice_render_edge.sh` | `scripts/check_voice_render_edge_dart.sh` |
+| compiled gate | `scripts/prove_lipsync_sink_headless.sh` | `test/e2e/headless_voice_host_test.dart` |
+
+The two gates grade different failures and both are needed. The compiled one is the real
+statement — `headless_voice_host_test.dart` runs a REAL `BithumanRealtimeSession` against
+`RecordingVoiceHost`, fourteen methods of plain Dart with no engine, no texture and no
+method channel, so re-typing a constructor doesn't fail a grep, it fails the **compile**.
+The source one grades the two things a compile cannot: that the *import* is gone (a file
+can import render and never use it) and that the protocol has not drifted wider than its
+callers. Eight rules, one mutation each, exact partition.
+
+★**This is the owner's acceptance test, executed**: "to test voice chat we do not even
+need visuals". `test/e2e/realtime_session_mock_test.dart` is the same conversation through
+`FakeAvatarPlatform` — a fine double, and it stays — but it mocks the method channel
+*underneath a real `BithumanAvatar`*, so it passes whether or not voice depends on render.
 
 ★**Nothing in CI compiles this package's Swift** (measured 2026-09-16). `swift-package.yml`
 builds a *different* package; `prove_dev_levers_release.sh` and

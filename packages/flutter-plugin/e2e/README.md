@@ -24,6 +24,19 @@ REAL `BithumanRealtimeSession` against a REAL loopback socket served by
 replaced by `test/e2e/fake_avatar_platform.dart`. No engine, no texture, no
 GPU, no key.
 
+★ **AND SINCE 2026-09-16 THERE IS A STRONGER FORM OF IT.** That harness mocks the
+method channel *underneath a real `BithumanAvatar`* — an excellent double, but it
+passes whether or not the voice module depends on the render module, because the
+render class is still in the picture. `test/e2e/headless_voice_host_test.dart` runs
+the same conversation against `test/e2e/recording_voice_host.dart`: fourteen methods
+of plain Dart implementing `VoiceHost`, with **no `BithumanAvatar`, no method channel
+and no mock messenger at all**. It is the arm that would stop COMPILING if a voice
+constructor were re-typed back to the render class, which no grep can say.
+`test/e2e/transport_registry_test.dart` grades the transport routing table row by row
+for every platform — including the two Apple-only rows a Linux runner has never been
+able to reach through `pickTransport`, because the *rule* now takes the platform as an
+argument while the *factory* still reads `Platform`.
+
 ### What does NOT run here, and why
 
 `integration_test/engine_smoke_test.dart` in the app repo loads a real engine
