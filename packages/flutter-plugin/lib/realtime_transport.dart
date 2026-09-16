@@ -522,30 +522,30 @@ class LocalConverseTransport implements RealtimeTransport {
 const String _kTransportDefine = DevLevers.transport;
 
 /// Platform-conditional factory. Local mode (macOS/iOS) → on-device
-/// converse; EVERY cloud plane — Android, iOS, macOS — → WebSocket + the
+/// converse; EVERY cloud platform — Android, iOS, macOS — → WebSocket + the
 /// plugin's native audio (unless [_kTransportDefine] opts into WebRTC — see
 /// above). Adding a new transport = one branch here, no UI change.
 ///
-/// ★ ONE CLOUD TRANSPORT, ALL PLANES, AND THIS PARAGRAPH USED TO SAY THE
-/// OPPOSITE. It read "Android MUST take the WebRTC branch: the Android plugin's
-/// frames-path revival stubs the native VP-IO surface (`audioStart` returns
-/// false, `playSpeakerPCM` is a no-op, the mic EventChannel never emits), so the
+/// ★ ONE CLOUD TRANSPORT EVERYWHERE, AND THIS PARAGRAPH USED TO SAY THE OPPOSITE.
+/// It read "Android MUST take the WebRTC branch: the Android plugin's frames-path
+/// revival stubs the native VP-IO surface (`audioStart` returns false,
+/// `playSpeakerPCM` is a no-op, the mic EventChannel never emits), so the
 /// WebSocket transport connects fine but is mute AND deaf there" — three lines
 /// above a `return WebSocketTransport(...)` that Android has taken for some time.
 /// None of it is true now: `BithumanPlugin.kt` implements `audioStart` (it opens
 /// the mic EventChannel), `playSpeakerPCM` and `interrupt`, and `MicCapture.kt`
 /// captures on VOICE_COMMUNICATION with the platform AEC in MODE_IN_COMMUNICATION
-/// — which is what `EchoProfile.android` is measured against.
+/// — which is the configuration `EchoProfile.android` is measured against.
 ///
-/// That matters beyond tidiness. The owner's rule is that each plane follows the
-/// same voice-interaction model so it is one codebase serving all of them, and
-/// this factory is where that is true or false. A reader auditing "do all planes
-/// barge the same way?" who believed this paragraph would have concluded Android
-/// runs libwebrtc's APM and a different VAD, and gone looking for a second
-/// implementation to unify. There is one: `server_vad` on this transport, the
-/// same event handler, on every plane. A wrong reason stops the next reader from
-/// looking — `scripts/check_platform_guards.sh` says exactly that about `#if`
-/// reasons, and it is no less true of a docstring.
+/// That matters beyond tidiness. Every target is meant to follow the SAME voice
+/// interaction model, one codebase serving all of them, and this factory is where
+/// that is true or false. A reader auditing "does every target barge the same
+/// way?" who believed this paragraph would have concluded Android runs libwebrtc's
+/// APM and a different VAD, and gone looking for a second implementation to unify.
+/// There is one: `server_vad` on this transport, the same event handler,
+/// everywhere. A wrong reason stops the next reader from looking —
+/// `scripts/check_platform_guards.sh` argues exactly that about `#if` reasons, and
+/// it is no less true of a docstring.
 RealtimeTransport pickTransport({
   required String apiKey,
   required BithumanAvatar avatar,

@@ -317,9 +317,10 @@ class BithumanRealtimeSession {
       // on this exact session.update, no device, no room — and both are false:
       //
       //   • THE SERVER ALREADY CANCELS ITSELF. With `interrupt_response: true` the
-      //     reply ends `response.done status=cancelled reason=turn_detected` 23–29 ms
-      //     after the server's own speech_started, with the client silent. Nothing is
-      //     left generating. (There is no `response.cancelled` event on the GA shape at
+      //     reply ends `response.done status=cancelled reason=turn_detected` 20–29 ms
+      //     after the server's own speech_started (19.7 / 29.0 / 29.0 over three arms),
+      //     measured with the client sending no cancel at all. Nothing is left
+      //     generating. (There is no `response.cancelled` event on the GA shape at
       //     all — 0 in 11 sessions; cancellation is signalled by `response.done`.)
       //   • A CLIENT CUT THE SERVER DOES NOT CONFIRM COSTS THE WHOLE TURN. Cancelling
       //     on a non-speech burst ends the reply `reason=client_cancelled` and NO
