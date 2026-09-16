@@ -1101,7 +1101,6 @@ final class AvatarTexture: NSObject, FlutterTexture {
   private var avatar: (any BithumanEngine)? = nil
   private var embodyDisplayTimer: DispatchSourceTimer? = nil  // even 20 fps display clock
   private var embodySpeaking = false         // true = playing live model frames; false = idle loop
-  private var embodyIdleLoopIdx = 0          // playhead into rt.idleLoop while idle
   private var embodyIdleCount = 0            // idle-loop frames published (for logging)
   private var embodyFrameCount: Int = 0
   private var embodyFpsT0: Double = 0
@@ -1626,11 +1625,19 @@ final class AvatarTexture: NSObject, FlutterTexture {
 
   /// Publish the next frame of the pre-rendered idle loop (zero inference). Falls
   /// back to the single idle frame until the loop is built (first ~2 s of warm-up).
+  /// One idle tick: the engine's NEXT idle frame, from its cursor over the clip
+  /// (forward only, the wrap where the file ends — the engine logs each wrap with
+  /// the index it happened at). The decoder's own IOSurface buffer goes to the
+  /// texture untouched; only an engine without that surface (no clip, or an
+  /// engine that serves idle as bytes) takes the BGR copy path.
   private func publishIdleLoopFrame(_ rt: any BithumanEngine) {
-    let loop = rt.idleLoop
-    guard !loop.isEmpty else { if let i = rt.idle { publishEmbodyFrame(i) }; return }
-    publishEmbodyFrame(loop[embodyIdleLoopIdx % loop.count])
-    embodyIdleLoopIdx += 1
+    if let pb = rt.idleNextPixelBuffer() {
+      publishPixelBufferToTexture(pb)
+    } else if rt.idle(into: &bgrBuffer) > 0 {
+      publishBGRToTexture()
+    } else {
+      return
+    }
     embodyIdleCount += 1
     if embodyIdleCount % 100 == 0 { NSLog("[embody-idle] loop playing (%d frames, 0 inference)", embodyIdleCount) }
   }
@@ -1735,7 +1742,14 @@ final class AvatarTexture: NSObject, FlutterTexture {
       }
     }
     CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+    publishPixelBufferToTexture(pixelBuffer)
+  }
 
+  /// Publish an already-filled BGRA pixel buffer to the Flutter texture. The
+  /// engine's idle frames arrive here straight from its hardware decoder
+  /// (IOSurface-backed, the same format the pool above makes), so an idle tick
+  /// costs no pixel copy at all; speech frames arrive via publishBGRToTexture.
+  private func publishPixelBufferToTexture(_ pixelBuffer: CVPixelBuffer) {
     pixelBufferLock.lock()
     latestPixelBuffer = pixelBuffer
     #if os(iOS)

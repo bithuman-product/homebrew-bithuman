@@ -24,6 +24,7 @@
 package ai.bithuman.flutter
 
 import ai.bithuman.expression2.Expression2Avatar
+import ai.bithuman.expression2.Expression2IdleLoop
 import ai.bithuman.expression2.Expression2ModelStore
 import android.Manifest
 import android.app.Activity
@@ -74,8 +75,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val ready = AtomicBoolean(false)
         val stopped = AtomicBoolean(false)
         var player: AvatarPlayer? = null
-        /** The identity's idle loop, kept so a held session can start a fresh player. */
-        var idle: List<Bitmap> = emptyList()
+        /** The identity's idle loop — the SDK's cursor over its clip — kept so a held session can start a fresh player. */
+        var idle: Expression2IdleLoop? = null
         var mic: MicCapture? = null
         var micSink: EventChannel.EventSink? = null
         var micChannel: EventChannel? = null
@@ -208,17 +209,13 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     if (total > 0 && done == total) Log.i(TAG, "fetched $member")
                 }
                 val avatar = Expression2Avatar.create(context, model)
-                // The idle loop the agent plays between turns: the SDK's own member when the
-                // identity's manifest carries it (expression2-android >= 0.4.6), else the
-                // example's download. When the fallback stops being reached, delete IdleClip.
-                val idle = runCatching { avatar.idleLoop }.getOrDefault(emptyList()).ifEmpty {
-                    Log.i(TAG, "idle loop from the SDK unavailable: " +
-                        (runCatching { avatar.idleLoopUnavailableReason }.getOrNull() ?: "no idleLoop on this SDK") +
-                        " — falling back to the member download")
-                    IdleClip.load(context, code)
-                }
+                // The idle loop the agent plays between turns is the SDK's: the identity's own
+                // clip from the same store as the weights, decoded in place, every frame of it.
+                // No clip is a logged reason and a still face, never a second download.
+                val idle = avatar.idleLoop
+                if (idle == null) Log.w(TAG, "idle loop unavailable: ${avatar.idleLoopUnavailableReason}")
                 Log.i(TAG, "avatar ready ${avatar.width}x${avatar.height} (${avatar.accelerator}${avatar.acceleratorNote.let { if (it.isBlank()) "" else " — $it" }}, " +
-                    "overlap=${avatar.overlapActive}, idle ${idle.size}f) +${(System.nanoTime() - t0) / 1_000_000} ms")
+                    "overlap=${avatar.overlapActive}, idle ${idle?.frameCount ?: 0}f in place) +${(System.nanoTime() - t0) / 1_000_000} ms")
                 entry.surfaceTexture().setDefaultBufferSize(avatar.width, avatar.height)
                 val s = AvatarSession(code, avatar, entry, Surface(entry.surfaceTexture()))
                 s.idle = idle

@@ -1,6 +1,7 @@
 package ai.bithuman.flutter
 
 import ai.bithuman.expression2.Expression2Avatar
+import ai.bithuman.expression2.Expression2IdleLoop
 import android.graphics.Bitmap
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -47,11 +48,15 @@ import java.util.concurrent.LinkedBlockingQueue
  * silence — admitted and presented exactly like speech. So there is one clock, one
  * state machine, and no frozen frame. `pts` is the session's own monotonic sample
  * count and spans both, so idle and speech cannot disagree about where they are.
+ * The idle frame is decoded IN PLACE by the SDK (`Expression2IdleLoop.next` fills a
+ * slot of the same bitmap ring speech uses): every frame of the clip, in order, with
+ * the wrap where the clip ends — the SDK logs each wrap with its index. Nothing here
+ * holds the clip and nothing here decides where it loops.
  */
 class AvatarPlayer(
     private val avatar: Expression2Avatar,
-    /** The identity's idle clip, decoded. Empty if it could not be fetched. */
-    private val idleClip: List<Bitmap>,
+    /** The identity's idle clip, the SDK's own cursor over it. Null if the model has none. */
+    private val idleLoop: Expression2IdleLoop?,
     /**
      * ★ Whether the HOST APP is a debuggable build (`ApplicationInfo.FLAG_DEBUGGABLE`).
      * Every dev lever below is gated on this, so a release APK on a customer's phone
@@ -155,6 +160,8 @@ class AvatarPlayer(
     @Volatile private var nAwait = 0
     @Volatile private var nHold = 0
     @Volatile private var nRingOverrun = 0L
+    /** Idle decodes that had no frame ready within a frame's time (the codec runs ahead; this should read 0). */
+    @Volatile private var nIdleStall = 0
     @Volatile private var nStarve = 0
     private var starveAt = 0L
     private var holdAtStarve = 0
@@ -375,7 +382,6 @@ class AvatarPlayer(
         var slot = 0
         var lastSpeechSlot = -1
         var heldFrom = -1L
-        var idleAt = 0
         var seenReset = resetGen
         var lastPullOk = false
 
@@ -530,16 +536,31 @@ class AvatarPlayer(
                 }
                 continue
             }
-            if (idleClip.isEmpty()) { where = "no-idle-clip"; Thread.sleep(4); continue }
+            if (idleLoop == null) { where = "no-idle-clip"; Thread.sleep(4); continue }
             // The producer is bounded by toWrite anyway; yielding here keeps it from
             // competing with the writer for the CPU the writer needs on time.
             if (toWrite.remainingCapacity() == 0) { Thread.sleep(2); continue }
+            // The idle frame lands in the SAME ring as speech — one ring, one overrun check,
+            // and no second set of bitmaps — decoded by the SDK straight into the slot.
+            if (slotSeq[slot] > presentedSeq) nRingOverrun++
+            where = "idle-decode"
+            val idx = idleLoop.next(speechFrames[slot])
+            if (idx < 0) { nIdleStall++; Thread.sleep(2); continue }
             where = "idle-admit"
             nIdle++; stats.idleUnits = nIdle
-            admit(AvUnit(sessionSamples, idleClip[idleAt], e, false, stats.turnGen, silence, 0, 'I'))
+            val seq = ++admittedSeq
+            slotSeq[slot] = seq
+            admit(AvUnit(sessionSamples, speechFrames[slot], e, false, stats.turnGen, silence, seq, 'I'))
             where = "idle-done"
             sessionSamples += SAMPLES_PER_FRAME
-            idleAt = (idleAt + 1) % idleClip.size     // forward-only wrap, never ping-pong
+            slot = (slot + 1) % RING
+            // Once an idle frame has been shown there is no "last speech frame" to hold or
+            // to play a remainder under: holding one would jump back to a mouth from the
+            // previous turn. The clip keeps playing until the next reply's first frame lands,
+            // and that frame carries its own head remainder — as the first reply's does.
+            lastSpeechSlot = -1
+            if (idx == 0 && nIdle > 1)
+                Log.i("bhav", "IDLE wrap ${idleLoop.wraps}: frame ${idleLoop.frameCount - 1} -> 0 (clip ${idleLoop.frameCount} frames, idle units=$nIdle)")
         }
         // ★ THE PLAYER DOES NOT CLOSE THE ENGINE IT DID NOT CREATE. It used to, here,
         // and it cost the demos lane a crash on the first re-adoption: in an app that
@@ -855,6 +876,7 @@ class AvatarPlayer(
             val avg = if (pullCalls > 0) pullNanos / pullCalls / 1_000_000.0 else 0.0
             Log.i("bhav", "PROD where=$where idle=$nIdle speech=$nSpeech tailUnits=$nTailUnits " +
                 "catchUp=$nCatchUp await=$nAwait hold=$nHold stale=$nStale back=$nBackwards ringOverrun=$nRingOverrun starve=$nStarve barges=$nBarge leaks=$nLeak " +
+                "idleStall=$nIdleStall idleAt=${idleLoop?.lastIndex ?: -1}/${idleLoop?.frameCount ?: 0} idleWraps=${idleLoop?.wraps ?: 0} " +
                 "coalesced=$nCoalesced markers=$nMarkers q=${avatar.queuedFrames} inFlight=${toPresent.size} | " +
                 String.format("pull avg %.1fms max %dms over50=%d null=%d calls=%d", avg, pullMaxMs, pullOver50, nullPulls, pullCalls) +
                 " | " + stats.line().replace("\n", " "))
