@@ -18,7 +18,7 @@
 //     product 'Expression' ... not found in package 'homebrew-bithuman'
 //
 //   - bitHumanKit              binary umbrella, tag v2.4.0. `import bitHumanKit`.
-//   - Expression2              expression-2 engine alone, tag v2.6.1.
+//   - Expression2              expression-2 engine alone, tag v2.6.3.
 //                              `import Expression2`. FOUR binaryTargets ride
 //                              under it now, not three — see UnifiedModelHeader.
 //   - Essence2                 essence-2 engine alone, archives on tag
@@ -70,13 +70,18 @@
 //                  `Bithuman.create(modelPath:)`. The `Bithuman` ACTOR is real;
 //                  "the portable libessence C++ runtime" was not.
 //   - Expression2  Layer-1 expression-2 avatar engine, pure Swift + CoreML.
-//                  Published at tag v2.6.1 (see `expression2Tag` below). The
-//                  ENGINE binary on v2.6.1 is the v2.6.0 archive re-hosted
-//                  BYTE-FOR-BYTE (same checksum d4ce14b6…, and its own
-//                  Info.plist still reads 2.6.0, which is the honest record of
-//                  when those bytes were built and proven). What is new on
-//                  v2.6.1 is the pair of modules that ride under it — see the
-//                  ★ …Binary note at the targets.
+//                  Published at tag v2.6.3 (see `expression2Tag` below).
+//                  v2.6.3 (2026-09-16): the idle clip plays whole, decoded in
+//                  place — `idleLoop: [[UInt8]]` is DELETED from the public
+//                  surface (a consumer naming it does not compile; take
+//                  `idleNextPixelBuffer()` / `idle(into:)`), and
+//                  `idleFrameCount` / `idleIndex` / `idleWraps` /
+//                  `idleUnavailableReason` are added. `pullPos()` is the same
+//                  4-tuple as v2.6.2. v2.6.2 was the first release since
+//                  2.6.0 whose bytes moved (v2.6.1's engine was the v2.6.0
+//                  archive re-hosted byte-for-byte; what was new on v2.6.1 was
+//                  the pair of modules that ride under it — see the ★ …Binary
+//                  note at the targets).
 //                  `import Expression2`, then `Expression2Engine.create(modelPath:)`.
 //                  ★ CODE ONLY — NO MODEL WEIGHTS, AND THAT PART IS UNCHANGED.
 //                  What DID change at v2.6.0: the engine can now be GIVEN a model.
@@ -389,7 +394,7 @@
 //
 // RELEASE NOTE:
 //   `bitHumanKit` (the umbrella, tag v2.4.0) and `Expression2` + its binary
-//   `BithumanEngineProtocol` + `UnifiedModelHeader` (tag v2.6.1) ship today.
+//   `BithumanEngineProtocol` + `UnifiedModelHeader` (tag v2.6.3) ship today.
 //   ★ v2.6.1 EXISTS FOR ONE REASON: the archives on v2.6.0 named an
 //   enterprise-only tier that no public artifact may name. Counted with
 //   `strings -a` reading each file as raw bytes on stdin, V12+V13 over every
@@ -450,7 +455,7 @@ let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/release
 // tag the consumer's `from:` picks and then reads absolute URLs out of the
 // manifest it finds there — the asset does not have to live on the resolved tag.
 // ---------------------------------------------------------------------------
-let expression2Tag = "v2.6.2"
+let expression2Tag = "v2.6.3"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 
@@ -701,17 +706,17 @@ let package = Package(
         .binaryTarget(
             name: "Expression2Binary",
             url: "\(expression2Base)/Expression2.xcframework.zip",
-            checksum: "a09b1a434484f27e26cf4c99a99cb8b15ac865bbdeb80389cc5b99b3923b4848"
+            checksum: "3722710998831779acc33e5f1c8e60a8af6ef6879764c26d9f1cbae717b78aea"
         ),
         .binaryTarget(
             name: "BithumanEngineProtocolBinary",
             url: "\(expression2Base)/BithumanEngineProtocol.xcframework.zip",
-            checksum: "4bc4346cf9db33071770a466294514186c5b98e4e48910d05b0cf79ff1c52e61"
+            checksum: "ee58694d6bd7663047750702f21a51ace1a35bfe421403349e001885b6678641"
         ),
         .binaryTarget(
             name: "UnifiedModelHeaderBinary",
             url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
-            checksum: "f13540723e551621990fe2ce3d1e13a4874ae2cb3038fc60034bb3e5be2ca1c6"
+            checksum: "a8bf748cd564dc1348eb3c8f789fbc1e79077d34bdacb7755c5135c4abc744a5"
         ),
         // The essence-2 engine itself. The target name matches the xcframework
         // inside the archive; the MODULES it vends are `CLibEssence2` and, since
