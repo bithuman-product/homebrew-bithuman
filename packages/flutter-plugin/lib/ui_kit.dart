@@ -28,6 +28,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'glass_tokens.dart';
+import 'src/dev_levers.dart';
 export 'glass_tokens.dart';
 export 'avatar_fit.dart';
 
@@ -335,8 +336,64 @@ class AutoHidingChromeState extends State<AutoHidingChrome> {
             duration: Motion.surface, curve: Motion.curve,
             child: IgnorePointer(ignoring: !_visible, child: widget.child),
           ),
+          // Never fades, never hides: a build that does not behave like the product says so.
+          const MeasurementBanner(),
         ]),
       );
+}
+
+/// ★A MEASUREMENT BUILD MUST SAY ON SCREEN THAT IT IS ONE.
+///
+/// Twice on 2026-09-16 the owner watched our own instrumentation and reported it as a
+/// product defect. The iPhone FLOORS probe paints a black screen by construction and he
+/// filed "black screen". A macOS arm ran the stress driver — which by design requests the
+/// next monologue after every completed response — and he filed "after the agent finishes
+/// talking it keeps self talking on and on", which is a literal description of the
+/// driver's rule. Both builds were doing exactly what they were told. Neither said so.
+///
+/// The instruments that were supposed to settle it could not: a `strings` scan of the
+/// Mach-O cannot see a Flutter dart-define (they live in the AOT snapshot), so the only
+/// record of what a build was doing was its BUILD LOG, on a different machine, in a
+/// different lane's directory. The screen in front of the person is the right place.
+///
+/// Costs a release build nothing: every lever below is `DevLevers.enabled && ...` with
+/// `enabled = !kReleaseMode`, a compile-time constant, so `_active` folds to `false` and
+/// the whole widget is eliminated.
+class MeasurementBanner extends StatelessWidget {
+  const MeasurementBanner({super.key});
+
+  /// The levers that make the app BEHAVE unlike the product — the ones that get
+  /// misread. A verbose log or a frame counter changes nothing anyone can hear or see.
+  static List<String> get _on => [
+        if (DevLevers.stress) 'SELF-DRIVING (monologues on its own)',
+        if (DevLevers.micFile.isNotEmpty) 'VOICE INJECTED INTO THE MIC',
+        if (DevLevers.greeting) 'GREETS UNPROMPTED',
+        if (DevLevers.transport.isNotEmpty) 'TRANSPORT=${DevLevers.transport}',
+        if (DevLevers.wsUrl.isNotEmpty) 'MOCK SERVER',
+      ];
+
+  @override
+  Widget build(BuildContext context) {
+    final on = _on;
+    if (on.isEmpty) return const SizedBox.shrink();
+    return Positioned(
+      top: 0, left: 0, right: 0,
+      child: SafeArea(
+        bottom: false,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          color: const Color(0xCCB3261E),
+          child: Text(
+            'MEASUREMENT BUILD — NOT THE PRODUCT\n${on.join('  ·  ')}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white, fontSize: 11, height: 1.35,
+              fontWeight: FontWeight.w600, letterSpacing: 0.3),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ─── WINDOW (macOS) ─────────────────────────────────────────────────────────

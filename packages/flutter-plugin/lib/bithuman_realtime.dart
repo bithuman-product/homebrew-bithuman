@@ -354,11 +354,11 @@ class BithumanRealtimeSession {
     // canceller actually is; this half says what threshold the server was asked for.
     // Together they are what clause 11 grades: a plane cannot buy `echo_self_interruptions
     // = 0` by raising the threshold, because the threshold is in the record beside it.
-    final _echo = EchoProfile.current;
-    _log('[bhaec] serverVadThreshold=${_echo.serverVadThreshold} '
-        'vpioAgcRequested=${_echo.vpioAgc ? 1 : 0} '
-        'echoRow=${_echo.device.name} residualMaxDbfs=${_echo.residualDbfsMax} '
-        'measuredUtc=${_echo.measuredUtc}');
+    final echo = EchoProfile.current;
+    _log('[bhaec] serverVadThreshold=${echo.serverVadThreshold} '
+        'vpioAgcRequested=${echo.vpioAgc ? 1 : 0} '
+        'echoRow=${echo.device.name} residualMaxDbfs=${echo.residualDbfsMax} '
+        'measuredUtc=${echo.measuredUtc}');
     // Configure the session — GA shape. Audio I/O is nested under
     // `audio.input` / `audio.output`; turn_detection lives inside
     // `audio.input`. PCM16 mono @ 24 kHz both directions.
