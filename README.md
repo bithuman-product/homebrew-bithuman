@@ -44,9 +44,11 @@ it cuts off within ~50 ms.
 No cloud round-trip. Works offline once the models are cached.
 
 > Previously known as `bitchat`, then `bithuman-cli`, then briefly
-> `bithuman`. The formula name is now `bithuman-cli` again to match
-> the PyPI `pip install bithuman-cli` convention; `brew install bithuman`
-> still resolves via a deprecated alias. If you have the legacy
+> `bithuman`. The formula name is `bithuman-cli`; the binary it installs
+> is `bithuman`, so you still type `bithuman run`. (The `-cli` suffix is a
+> Homebrew package name only — the CLI is not distributed on PyPI, and that
+> name does not resolve there.) `brew install bithuman` still resolves via a
+> deprecated alias. If you have the legacy
 > `bitchat` formula installed, run
 > `brew uninstall bitchat && brew untap bithuman-product/bitchat`,
 > then follow the install steps below.

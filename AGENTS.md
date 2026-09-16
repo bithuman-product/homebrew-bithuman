@@ -237,7 +237,7 @@ The bitHuman platform spans three repos, each owning one layer of the stack:
 | Repo | Visibility | Layer | What it contains |
 |------|-----------|-------|------------------|
 | **bithuman-sdk-internal** | Private | Engine + SDKs | `libessence` engine + Python / Swift / Kotlin / Rust language bindings (source). Publishes the binary wheels / xcframework / AAR. |
-| **bithuman-apps** | Private | Apps | CLI (`bithuman-cli` on PyPI, Homebrew formula source), Flutter plugin, reference apps (Mac, iPad, iPhone). Each consumes the SDKs the same way any third-party would. |
+| **bithuman-apps** | Private, archived | Apps | Superseded. Historical Flutter plugin and reference apps (Mac, iPad, iPhone); the CLI now lives in its own repo and ships from this tap. |
 | **homebrew-bithuman** | Public | Landing pages + examples | SwiftPM facade for the binary release, `python/` PyPI landing, runnable `Examples/`. (The `docs.bithuman.ai` site source now lives in the `bithuman-product/public-docs` repo, not here.) |
 
 Reference apps and the CLI do **not** live inside `homebrew-bithuman` or `bithuman-sdk-internal`. They are in `bithuman-apps` and depend on the SDKs as normal downstream consumers.
