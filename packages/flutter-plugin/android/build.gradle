@@ -63,6 +63,11 @@ dependencies {
     implementation 'ai.bithuman:expression2-android:0.4.7'
     // 0.5.7: the first coordinate with `Essence2Avatar.idle` (the driver footage between
     // turns) and a meter that refuses without a credential rather than rendering free.
+    // ★ 0.5.7's motion frontier advances only behind feed(): under THIS plugin's un-paced
+    // transport it delivered 72-77 % of a reply's frames on a Galaxy S25+ (bithuman-models
+    // #737). 0.5.8 carries the SDK's own motion thread and the driver-cursor fix (#738);
+    // it is staged in the Portal, not public — the pin moves when it is (never before:
+    // a coordinate nobody can resolve is a build nobody can make).
     implementation 'ai.bithuman:essence2-android:0.5.7'
     implementation 'com.qualcomm.qti:qnn-litert-delegate:2.49.0'
     implementation 'com.qualcomm.qti:qnn-runtime:2.49.0'
