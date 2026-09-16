@@ -53,6 +53,19 @@ class AvatarPlayer(
     /** The identity's idle clip, decoded. Empty if it could not be fetched. */
     private val idleClip: List<Bitmap>,
     /**
+     * ★ Whether the HOST APP is a debuggable build (`ApplicationInfo.FLAG_DEBUGGABLE`).
+     * Every dev lever below is gated on this, so a release APK on a customer's phone
+     * cannot be steered by a system property. On 2026-09-15 a measurement script set
+     * `debug.bh.marker.every=40` on the test Galaxy and never reset it; the property
+     * is persistent, so every build installed afterwards — release builds included —
+     * shipped a WHITE frame and a 12 ms 2 kHz click every 40th speech unit (2.0 s)
+     * while the agent talked. The owner reported it as "a screen flash at every chunk
+     * and a weird 'do' sound every second". A dev lever that a release build honours
+     * is not a dev lever; it is a latent customer defect switched on by whoever last held
+     * the phone.
+     */
+    private val debuggable: Boolean = false,
+    /**
      * ★ MEASUREMENT ONLY, AND IT CHANGES THE AUDIO PATH — say so wherever a number from
      * such a build is quoted. A chat app plays through `USAGE_VOICE_COMMUNICATION`: that
      * is the stream the platform runs its echo canceller on, and a conversation needs it.
@@ -160,7 +173,7 @@ class AvatarPlayer(
      * one `bhmark` line at admission and one when it is shown carry pts, host time and
      * the device's own output latency so the known part can be subtracted.
      */
-    private val markerEvery: Int = devInt("debug.bh.marker.every")
+    private val markerEvery: Int = if (debuggable) devInt("debug.bh.marker.every") else 0
     private val markerFrame: Bitmap? = if (markerEvery > 0) avatar.newFrameBitmap().also { it.eraseColor(Color.WHITE) } else null
     private var nSpeechAdmitted = 0L
     @Volatile private var nMarkers = 0
