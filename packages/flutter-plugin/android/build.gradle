@@ -62,7 +62,7 @@ dependencies {
     implementation 'ai.bithuman:expression2-android:0.4.7'
     // 0.5.9 (public on Central since 2026-09-16): the warp prior plays IN PLACE —
     // `Identity::P(si)` is a cursor over `P_hevc.mov` instead of an offset into a
-    // 394,788,864 B `P.f16` every plane expanded at activate and mmap'd (bithuman-models
+    // 394,788,864 B `P.f16` the SDK expanded at activate and mmap'd (bithuman-models
     // #747). On a Galaxy S25+: engine create 891.1 -> 164.1 ms, RSS after one lap
     // 1,018,944 -> 683,268 kB, the mapping's 385,536 kB gone, 394,788,864 -> 0 B written
     // to app storage, per-push 17.733 -> 16.454 ms, and 304/304 delivered frames identical

@@ -8,7 +8,7 @@ sidecar, `lible_jni.so` `fec2c0ecc…`, `.aar`/`.pom`/`.module`/`-relink.zip` al
 by `0C6FA32B…D477FFA1` from a keyserver-only keyring, one-byte tamper reads BADSIG).
 
 **The warp prior plays in place** (bithuman-models #747). `Identity::P(si)` was an
-offset into a 394,788,864 B `P.f16` that every plane expanded from a 2,966,479 B
+offset into a 394,788,864 B `P.f16` that the SDK expanded from a 2,966,479 B
 `P_hevc.mov` at activate and mmap'd — fully resident after one lap, for a member read
 one frame at a time on the driver's own walk. It is a cursor now, through the same
 `DriverCursor` the driver uses. On a Galaxy S25+ through THIS plugin's adapter: engine
