@@ -37,15 +37,27 @@ for every platform — including the two Apple-only rows a Linux runner has neve
 able to reach through `pickTransport`, because the *rule* now takes the platform as an
 argument while the *factory* still reads `Platform`.
 
-### What does NOT run here, and why
+### What does NOT run here, and why — and what is SPLIT rather than skipped
 
-`integration_test/engine_smoke_test.dart` in the app repo loads a real engine
-from a staged bundle and pushes synthesized PCM through it. It cannot join the
-push gate: `integration_test` needs a running Flutter application on a device
-or simulator, and the engine needs its `.avatar` / `.elevatedir` bytes and (on
-Apple) a CoreML compile that costs minutes. It is the reason `run_all.sh`
-still exists. It is a device leg, not a CI leg, and saying so is the point —
-the alternative is a step that "passes" because it skipped.
+`integration_test/engine_smoke_test.dart` in the app repo is two tests wearing
+one hat:
+
+| half | needs | where it runs now |
+|---|---|---|
+| does the NATIVE engine load, compile and produce frames? | a device/simulator, a staged bundle, minutes of CoreML/ANE compile | app repo, by hand via `run_all.sh` |
+| does DART hand the native side the right call, in the right order, with the right bytes? | nothing | **`test/e2e/engine_smoke_headless_test.dart`, every push** |
+
+The second half was split out 2026-09-16 and drives the SAME sequence with the
+same `synthPcm` bytes against `fake_avatar_platform.dart`. Before it, the
+verbs that sequence uses — `pushAudio`, `isReady`, `frameSize`,
+`refreshFrameSize`, `setSpeaking` — appeared in this package's tests ONLY
+inside the fake: the double ANSWERED them and no arm ever ASKED one.
+
+The first half genuinely cannot join the push gate (`integration_test` needs a
+running Flutter application on a device, and the engine needs its `.avatar` /
+`.elevatedir` bytes), and that is why `run_all.sh` still exists. Saying which
+half is which is the point — the alternative is a step that "passes" because
+it skipped.
 
 ```
 e2e/
@@ -65,6 +77,8 @@ e2e/
   e2e_session_flow_test.dart   ← Tier 2 core: full app vs mock voice (macOS)
   e2e_boot_smoke_test.dart     ← Tier 2: boot → avatar canvas (all targets)
   engine_smoke_test.dart       ← Tier 2: plugin-direct engine + injected PCM
+                                 (its DART half runs in CI — see
+                                 ../test/e2e/engine_smoke_headless_test.dart)
   e2e_idle_stability_test.dart ← GATE scn 1: mic-on idle (macOS + iOS sim)
   e2e_storm_lifecycle_test.dart← GATE scn 2: storm / barge / stuck gate
   e2e_drive_soak_test.dart     ← GATE scn 3/4/5: Android pacing/gate/governor
@@ -108,6 +122,7 @@ Pure Dart, no device, runs in seconds. The REAL realtime client
 |---|---|
 | `realtime_session_mock_test.dart` | connect contract (GA `session.update` shape, server-VAD config), **voice policy** (exactly one connect greeting today — see TODOs), audio deltas → unified speaker/lipsync, transcript stream, **pacing governor** (burst 1 s of deltas must release ≥ ~realtime), **barge-in** (`response.cancel` + `avatar.interrupt` + stale-delta drop), cancel-when-idle guard, mic mute = deaf, **clean stop** (interrupt + audioStop + socket closed + no late audio) |
 | `transport_state_machine_test.dart` | the exact `TransportStatus` sequence the UI chrome switches on: `connecting → listening → responseDone → userSpeaking → thinking → responseDone → closed` |
+| `engine_smoke_headless_test.dart` | the RENDER contract the device-only engine smoke test shares: `load` marshalling (`engine`, `chunk`, and the optional `apiSecret`/`motionDir` keys ABSENT when unset), the warm-up poll (`isReady` until the engine flips; `ready` completes), the frame size seeded at load + re-read on a HEAD/FULL switch + tolerated when the native side has no `frameSize`, **2 s of injected `synthPcm` arriving byte-exact in 20 chunks** (a `Uint8List` view sent without its offset ships 20x the audio and still looks fine on a device), the Android mouth gate's payload, and dispose (inert, idempotent, releases a `ready` waiter) |
 | `transport_pick_test.dart` | `pickTransport`'s routing contract: cloud default → `WebSocketTransport`, `BITHUMAN_TRANSPORT=webrtc` → `WebRTCTransport`, an unknown override falls back, and LOCAL wins over the override (that last case only on macOS/iOS — it is the factory's one platform branch) |
 
 `engine_config_test.dart` and `cloud_api_engine_names_test.dart` did NOT move:
@@ -295,6 +310,19 @@ finishers' uncommitted native edits were mid-flight in the main checkout):
 | Tier 2 Android engine smoke (emulator, le-bundle) | **pass** | le_core JNI in arm64 AVD; mouth gate TALKING/IDLE flips in logcat |
 | Tier 2 Android full-app boot smoke (elevate staged) | **pass** | 8 s; texture + idle mic UI |
 | Tier 2 iOS Simulator boot smoke (elevate staged, 2026-06-11 sim slices) | **pass** | iPhone 17 Pro sim; texture 720x1280 + idle mic UI + native `first frame` marker, no `be_essence2_create failed` (unified-log asserts) |
+
+## Validation record (2026-09-16, the engine smoke test's split)
+
+Run against `packages/flutter-plugin` at `fe44e83` (#75) + this change, Flutter
+3.47.4 stable / Dart 3.13.3, Linux x86_64 — no device, no simulator, no engine
+binary:
+
+| leg | result | notes |
+|---|---|---|
+| Tier 1, whole package (`flutter test`) | **46 pass, 1 skip, exit 0** | ~6 s; the 1 skip is `transport_pick`'s LOCAL case, which is a real macOS/iOS-only branch |
+| Tier 1 before this change | 40 pass, 1 skip | the six new arms are `engine_smoke_headless_test.dart` |
+| mutation control | **exact partition** | six mutations in `lib/bithuman.dart`, one per arm: renamed `chunk` key; deleted the 500 ms `_readyPoll`; crossed `width`/`height` at load; `pushAudio` sending the whole buffer instead of the view's window; `setSpeaking` hard-coded true; `dispose`'s idempotence guard removed. Each reddened **exactly one** arm (45 pass / 1 fail) and left all 40 pre-existing arms green. Every mutation asserted its target existed exactly once before applying. |
+| census control | **red by name** | `mv test/e2e/engine_smoke_headless_test.dart` away ⇒ the workflow's census step exits 1 naming the file |
 
 ## Known constraints
 

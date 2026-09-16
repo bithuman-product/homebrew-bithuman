@@ -13,6 +13,15 @@
 # on this runner. It graded nothing for months because it lived in bithuman-jarvis-app,
 # which has no .github/ directory.
 #
+# ★SINCE 2026-09-16 IT ALSO RUNS THE RENDER HALF (test/e2e/engine_smoke_headless_test.dart).
+# The app repo's integration_test/engine_smoke_test.dart is two tests in one hat: "does the
+# native engine load and produce frames" (a device, a bundle and a CoreML compile — it stays
+# a device leg) and "does Dart hand the native side the right call, in order, with the right
+# bytes" (needs nothing). The second half was split out and runs here: the injected-PCM path,
+# the warm-up poll, the frame-size report, the Android mouth gate and the dispose contract had
+# no CI arm on any host before it — those verbs appeared in this package's tests only as
+# answers inside the fake.
+#
 # ★A GATE MUST BE ABLE TO SAY "I COULD NOT LOOK": the test census runs first and refuses
 # an empty set. NOT a publish trigger: publish-pubdev.yml listens to tags flutter-v*;
 # this file listens to pushes and PRs and uploads nothing.
@@ -65,7 +74,8 @@ jobs:
             test/e2e/transport_pick_test.dart \
             test/e2e/recording_voice_host.dart \
             test/e2e/headless_voice_host_test.dart \
-            test/e2e/transport_registry_test.dart ; do
+            test/e2e/transport_registry_test.dart \
+            test/e2e/engine_smoke_headless_test.dart ; do
             [ -f "$f" ] || { echo "::error::$f is missing — the headless voice harness (a real BithumanRealtimeSession against a loopback mock, with NO engine and NO texture) is the one thing here that grades the voice layer end to end. If it genuinely moved, move this list with it; do not delete the line to make the step pass."; exit 1; }
           done
       # ★THE FORMAT RATCHET — a re-add is caught HERE, on every push, not at
