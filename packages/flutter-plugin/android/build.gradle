@@ -60,13 +60,28 @@ android {
 
 dependencies {
     implementation 'ai.bithuman:expression2-android:0.4.7'
-    // 0.5.8 (public on Central since 2026-09-16): the SDK's own motion thread — every frame
-    // of a reply comes out under THIS plugin's un-paced transport, where 0.5.7 (motion
-    // frontier advanced only behind feed()) delivered 72-77 % of a reply's frames on a
-    // Galaxy S25+ (bithuman-models #737) — and the driver-cursor fix (#738). 0.5.7 remains
-    // the first coordinate with `Essence2Avatar.idle` and a meter that refuses without a
-    // credential rather than rendering free.
-    implementation 'ai.bithuman:essence2-android:0.5.8'
+    // 0.5.9 (public on Central since 2026-09-16): the warp prior plays IN PLACE —
+    // `Identity::P(si)` is a cursor over `P_hevc.mov` instead of an offset into a
+    // 394,788,864 B `P.f16` the SDK expanded at activate and mmap'd (bithuman-models
+    // #747). On a Galaxy S25+: engine create 891.1 -> 164.1 ms, RSS after one lap
+    // 1,018,944 -> 683,268 kB, the mapping's 385,536 kB gone, 394,788,864 -> 0 B written
+    // to app storage, per-push 17.733 -> 16.454 ms, and 304/304 delivered frames identical
+    // si for si. 0.5.8 carries the SDK's own motion thread — every frame of a reply comes
+    // out under THIS plugin's un-paced transport, where 0.5.7 (motion frontier advanced
+    // only behind feed()) delivered 72-77 % of a reply's frames (#737) — and the
+    // driver-cursor fix (#738). 0.5.7 remains the first coordinate with
+    // `Essence2Avatar.idle` and a meter that refuses without a credential rather than
+    // rendering free.
+    //
+    // ★ THE PIN MOVES ONLY AFTER CENTRAL SERVES THE VERSION, NEVER AFTER A LOCAL PUBLISH.
+    // `mavenLocal()` is in the repository list below mavenCentral(), and measured
+    // 2026-09-16 it cannot SHADOW a version Central serves — a poisoned ~/.m2 holding a
+    // different artifact at 0.5.8 still resolved Central's bytes. What it CAN do is
+    // supply a version Central LACKS, which is how plugin 2.4.0 came to import a class
+    // Central's 0.4.6 did not have: `publishToMavenLocal` plus a pin bump compiles green
+    // while no customer can resolve it. This pin was moved only once
+    // repo1.maven.org served 0.5.9.
+    implementation 'ai.bithuman:essence2-android:0.5.9'
     implementation 'com.qualcomm.qti:qnn-litert-delegate:2.49.0'
     implementation 'com.qualcomm.qti:qnn-runtime:2.49.0'
 }
