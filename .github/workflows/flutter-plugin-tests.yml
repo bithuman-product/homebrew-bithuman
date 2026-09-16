@@ -66,7 +66,7 @@ jobs:
           echo "files parsing the container in lib/: $N (baseline $BASELINE)"
           grep -rl "_unpackImxContainer" lib/ 2>/dev/null || true
           if [ "$N" -gt "$BASELINE" ]; then
-            echo "::error::a NEW file parses the proprietary avatar container. The one implementation belongs in the engine's compiled bytes, not in this public repo — and not rewritten into ios/Classes or shared/Classes, which are in it too."
+            echo "::error::a NEW file parses the proprietary avatar container. This is a RATCHET: the one reader that exists today is expected and baselined, a SECOND one is not. The one implementation belongs in the engine's compiled bytes, not in this public repo — and not rewritten into ios/Classes or shared/Classes, which are in it too. Do not raise BASELINE to make this pass."
             exit 1
           fi
           if [ "$N" -lt "$BASELINE" ]; then

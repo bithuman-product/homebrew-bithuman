@@ -95,7 +95,24 @@ jobs:
           if [ -n "$hits" ]; then
             echo "::error::REFUSING TO PUBLISH. These files implement bitHuman's proprietary container format and pub.dev publishes lib/ as SOURCE, permanently:"
             echo "$hits" | sed 's/^/  /'
-            echo "The fix is to call the engine (which already reads the container inside the xcframework / AAR) and delete the Dart implementation — not to weaken this check, and not to re-implement it in ios/Classes or shared/Classes, which are in this same public repo."
+            echo ""
+            echo "★ THIS RED IS EXPECTED TODAY AND IT MEANS THE DOOR IS WORKING."
+            echo "  It is not a broken check and it is not a flaky job. As of 2026-09-16"
+            echo "  the Dart reader is still in lib/ on purpose — removing it needs an"
+            echo "  unpack entry point in the engine SDKs, which is tracked separately."
+            echo "  Until that lands, publishing this package would put the format on"
+            echo "  pub.dev, where a version can be retracted but NEVER withdrawn."
+            echo ""
+            echo "  THE ONLY CORRECT WAY TO MAKE THIS GREEN is to delete the Dart"
+            echo "  implementation and call the engine, which already reads the"
+            echo "  container inside the xcframework / AAR."
+            echo ""
+            echo "  DO NOT loosen the grep, raise a baseline, add a skip, or set"
+            echo "  continue-on-error. A red that says \"this door is correctly closed\""
+            echo "  is worth having; a red someone silences is worse than no gate."
+            echo "  DO NOT re-implement the reader in ios/Classes or shared/Classes"
+            echo "  either — those are in this same public repo, so that moves the"
+            echo "  disclosure rather than ending it."
             exit 1
           fi
           echo "no container reader in lib/ — safe to publish"
