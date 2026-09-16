@@ -47,6 +47,32 @@ class EchoProfile {
   final EchoDeviceClass device;
 
   /// OpenAI `turn_detection.server_vad.threshold` (0..1) sent by BOTH transports.
+  ///
+  /// ★ IT IS NOT ONLY A SENSITIVITY DIAL — IT MOVES THE INTERRUPT LATENCY, AND THAT
+  /// IS THE ONLY LATENCY LEVER THIS TRANSPORT HAS. homebrew-bithuman #58 stated the
+  /// opposite ("threshold tuning cannot touch it ... moves the sensitivity, not the
+  /// latency") and it was measured false on 2026-09-16, against the live Realtime API
+  /// with a KNOWN onset — N ms of digital silence, then an asset at full amplitude on
+  /// its first sample — so the origin is the sound, not the server's back-dated
+  /// `audio_start_ms`:
+  ///
+  ///     threshold   onset -> speech_started at the client   n   `audio_start_ms` bias
+  ///        0.3            139 ms  (138.4 … 139.1)           4          -256 ms
+  ///        0.5            192 ms  (141.8 … 244.8)           4          -232 ms
+  ///        0.7            261 ms  (143.8 … 275.6, one 2587) 4          -216 ms
+  ///
+  /// Every arm fired 4/4, so this is latency and not sensitivity. The bias column is
+  /// the control: it moved monotonically with the threshold too, which is independent
+  /// evidence the arms really differed. Same host, same signal, minutes apart — the
+  /// DIFFERENTIAL is what this table claims; the absolute values are one network's.
+  ///
+  /// WHAT THAT COSTS THE MAC. [mac] is the only row at 0.7, and it is there because
+  /// 0.5 let the agent re-trigger on its own tail — see that row's `source`. So the
+  /// trade is three-sided, not two: 0.7 buys quiet and costs BOTH barge-in
+  /// sensitivity AND roughly 70 ms of interrupt latency against 0.5. The arm that
+  /// would settle it has never been run: every 0.5 measurement in [mac]'s sweep was
+  /// taken with VP-IO AGC ON, and the row ships AGC OFF. `0.5 + AGC off` in an empty
+  /// room is the missing cell, and it is now worth more than it looked.
   final double serverVadThreshold;
 
   /// Apple VP-IO automatic gain on the uplink. `false` ⇒ the plugin sends what the
