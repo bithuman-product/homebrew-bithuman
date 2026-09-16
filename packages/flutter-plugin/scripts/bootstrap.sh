@@ -100,17 +100,20 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 
 # The bithuman-models revision whose engine ADAPTER SOURCE (models/*/sdk/Classes)
 # this pod compiles. A full 40-hex commit sha — never a branch.
-# 18e32a7e2 = 2026-09-16, the tree the essence2-v1.7.0 / v2.6.3 Apple builds ran on.
-BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-18e32a7e2ed523d87723a97d7dcc7a37b1f664ab}"
+# 6bed5ee7a = 2026-09-16, the tree the essence2-v1.8.0 / v2.6.4 Apple builds ran on
+# — bithuman-models #774, the commit that stops a barge-in rewinding the driver
+# video to frame 0, and the exact tree apple-xcframework.yml built the pinned
+# engine from.
+BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-6bed5ee7a8a4f0a674cdc47f00c93ee420d69b5d}"
 
 # The essence-2 Apple ENGINE + its runtime RESOURCES. One release carries both.
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
 # `libessence2.xcframework.zip` binaryTarget checksum and the release's own
 # resources sidecar. Passed to the engine SDK bootstrap explicitly below.
-LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.7.0}"
-LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-ee21342f611d94c7a8a3ef497d8dfc67f146ff6513403b2741d6f6011f805b1f}"
-LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.7.0}"
-LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-3274cf92ef211846cc62116c2aad1cd7015a8f2c9bf5b67677d4912a82e2c656}"
+LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.8.0}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-06be42fec2b194752214e7ae16fa2bbb5de75d358e5de977c8e2549a9ca58348}"
+LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.8.0}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-cc3a5150b059497f18fc0de5aa31c9b790a60090d2f6c6b7cf1c446f8e76a2b4}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so
