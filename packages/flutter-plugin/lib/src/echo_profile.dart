@@ -48,39 +48,45 @@ class EchoProfile {
 
   /// OpenAI `turn_detection.server_vad.threshold` (0..1) sent by BOTH transports.
   ///
-  /// ★ IT IS NOT ONLY A SENSITIVITY DIAL — IT MOVES THE INTERRUPT LATENCY, AND THAT
-  /// IS THE ONLY LATENCY LEVER THIS TRANSPORT HAS. homebrew-bithuman #58 stated the
-  /// opposite ("threshold tuning cannot touch it ... moves the sensitivity, not the
-  /// latency") and it was measured false on 2026-09-16, against the live Realtime API
-  /// with a KNOWN onset — N ms of digital silence, then an asset at full amplitude on
-  /// its first sample — so the origin is the sound, not the server's back-dated
-  /// `audio_start_ms`:
+  /// ★ RETRACTED, SAME DAY, BY ITS OWN CONFIRMATION ARM. This comment claimed for a
+  /// few hours that the threshold moves the interrupt LATENCY and not only the
+  /// sensitivity, from a 3-point sweep at n = 4 per arm that read 139 / 192 / 261 ms
+  /// for 0.3 / 0.5 / 0.7. Re-run at n = 8 on the arm that actually matters — 0.5 vs
+  /// 0.7, the choice this row faces — there is NO effect:
   ///
-  ///     threshold   onset -> speech_started at the client   n   `audio_start_ms` bias
-  ///        0.3            139 ms  (138.4 … 139.1)           4          -256 ms
-  ///        0.5            192 ms  (141.8 … 244.8)           4          -232 ms
-  ///        0.7            261 ms  (143.8 … 275.6, one 2587) 4          -216 ms
+  ///     threshold   onset -> speech_started   fired   per-trial (ms)
+  ///        0.5           152.2 ms median       8/8    146.5 148.4 149.4 151.8
+  ///                                                   152.5 246.2 254.0 3393.1
+  ///        0.7           146.6 ms median       8/8    143.3 144.5 145.4 146.3
+  ///                                                   146.8 149.1 241.4 242.7
   ///
-  /// All 12 trials fired, so this is latency and not sensitivity. The bias column is
-  /// the control: it moved monotonically with the threshold too, which is independent
-  /// evidence the arms really differed rather than the network drifting under them.
-  /// Same host, same signal, minutes apart — the DIFFERENTIAL is what this table
-  /// claims; the absolute values are one network's.
+  /// 5.6 ms apart, and the WRONG WAY. Both arms are the same bimodal mixture — a tight
+  /// cluster near 147 ms and a second near 245 ms — so the n = 4 "monotone" reading was
+  /// that mixture being sampled differently by chance, nothing more. The back-dating
+  /// bias, which had looked like an independent control when it moved -256/-232/-216
+  /// at n = 4, reads -244 vs -240 here: it was sampling noise too. Even the one huge
+  /// outlier is not a threshold property — 2587 ms at 0.7 in the first run, 3393 ms at
+  /// 0.5 in this one.
   ///
-  /// ★ THE DIRECTION IS SOLID, THE GAP BETWEEN ADJACENT ROWS IS THIN. The per-trial
-  /// values are bimodal about a ~100 ms quantum (0.5 read 142/143/240/245), which is
-  /// the packet cadence showing through the server's decision, so n = 4 pins the
-  /// ORDER but not the size of one step. Read 0.7 -> 0.3 (~120 ms) as measured and
-  /// 0.7 -> 0.5 (~70 ms) as indicative, and re-run before spending it.
+  /// So homebrew-bithuman #58 was RIGHT: "threshold tuning cannot touch it; it moves
+  /// the sensitivity, not the latency", for the 0.5/0.7 decision.
   ///
-  /// WHAT THAT COSTS THE MAC. [mac] is the only row at 0.7, and it is there because
-  /// 0.5 let the agent re-trigger on its own tail — see that row's `source`. So the
-  /// trade is three-sided, not two: 0.7 buys quiet and costs BOTH barge-in
-  /// sensitivity AND interrupt latency. The arm that would settle it has never been
-  /// run: every 0.5 measurement in [mac]'s sweep was taken with VP-IO AGC ON, and the
-  /// row ships AGC OFF. `0.5 + AGC off` in an empty room is the missing cell, and it
-  /// is now worth more than it looked — it is the only lever on this leg that moved
-  /// at all.
+  /// 0.3 is still untested at n = 8 and is the only part that stayed suggestive (4
+  /// trials, 138.4-139.1, no bimodality at all). It is not worth running: its n = 4
+  /// median sits 8 ms under 0.7's n = 8 median, so even if every bit of that is real it
+  /// is 8 ms of a ~400 ms leg, bought by halving the threshold on the one row that
+  /// raised it to stop the agent interrupting itself. The question is closed on size,
+  /// not on evidence — which is a different sentence from "someone should measure it",
+  /// and the honest one here.
+  ///
+  /// ★ WHAT THE EPISODE IS WORTH KEEPING FOR: a 4-sample median of a BIMODAL
+  /// distribution is not a measurement, and it read as a clean monotone result across
+  /// three arms with a control that appeared to agree. The confirmation arm was already
+  /// running when the claim was merged. Run it first.
+  ///
+  /// The mac row's trade is therefore two-sided as it always was — 0.7 buys quiet and
+  /// costs barge-in sensitivity — and `0.5 + AGC off` in an empty room is still the
+  /// missing cell, on the sensitivity question alone.
   final double serverVadThreshold;
 
   /// Apple VP-IO automatic gain on the uplink. `false` ⇒ the plugin sends what the
