@@ -19,6 +19,14 @@ class FakeAvatarPlatform {
   /// What `isReady` reports (elevate warm-up simulation).
   bool ready;
 
+  /// What `frameSize` reports. Mutable so a test can move the native stream's
+  /// dims (the Essence2 HEAD/FULL switch) and grade [BithumanAvatar
+  /// .refreshFrameSize]. **null ⇒ the call FAILS**, the way a native side
+  /// without the method does — that is the branch `load` swallows so an older
+  /// plugin still resolves; on a device it is unreachable without shipping an
+  /// old binary.
+  Map<String, int>? frameSize = const <String, int>{'width': 720, 'height': 1280};
+
   static const _channel = MethodChannel('ai.bithuman.avatar');
 
   /// Every method invocation, in order.
@@ -44,7 +52,14 @@ class FakeAvatarPlatform {
         case 'load':
           return textureId;
         case 'frameSize':
-          return <String, int>{'width': 720, 'height': 1280};
+          final fs = frameSize;
+          if (fs == null) {
+            throw PlatformException(
+              code: 'unimplemented',
+              message: 'this native side has no frameSize',
+            );
+          }
+          return fs;
         case 'isReady':
           return ready;
         case 'playSpeakerPCM':
