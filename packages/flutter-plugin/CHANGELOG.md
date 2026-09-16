@@ -48,6 +48,40 @@ and the Android engine pin moves to the AAR that carries the class this plugin i
   one file, `AvatarEngine.kt`. Before this the Android half refused every engine but
   expression-2 by name. minSdk is 29 (essence2-android declares 29).
 
+* **macOS presents at 20 fps again, hears itself less, and can open essence-2.** Four
+  measured defects on an iMac (M4, macOS 26.6.2), the first macOS run of the conversation
+  contract (`conversation_duplex`, bithuman-models #729), each with its fix:
+  * *The picture ran at 8.5 fps with 60 frames waiting.* The 50 ms display tick is a
+    `DispatchSourceTimer`, and macOS coalesces an unflagged timer for a process it does
+    not consider interactive: gaps of 135-190 ms between presented frames, 2143 of them
+    in 400 s, median 8.5 fps during speech, 24 mid-reply holds. `.strict` on both drive
+    timers (expression-2's 50 ms display clock, essence-2's 40 ms slot clock): 20.0 fps,
+    0 holds, 45 gaps in 420 s, all of them between replies. iOS never coalesced them and
+    is unchanged by the flag.
+  * *The agent interrupted itself on its own echo.* The iMac's canceller leaves the far
+    end at -46..-56 dBFS RMS (peaks -34) where the iPhone's leaves -70..-90; at the
+    proven 0.5 the server's VAD read that as the user 3 times in 357 s and 3 in 370 s of
+    monologue. Two changes: VP-IO's automatic gain on the uplink is off on macOS (it
+    amplifies the residual between the user's words; residual max -46 -> -54 dBFS,
+    onset median -60 -> -73), and the server_vad threshold on macOS is 0.7 (the dial the
+    transport already names for exactly this). 0 self-interruptions in 354 s / 35 turns,
+    10/10 injected cut-ins detected, attenuation still 0 dB (captured == sent).
+  * *A release build linked no CConverse on macOS.* `flutter build macos --release`
+    targets arm64 + x86_64, the vendored xcframework has only `macos-arm64`, and
+    CocoaPods emitted nothing for it. `EXCLUDED_ARCHS[sdk=macosx*] = x86_64` on the pod
+    and the app target.
+  * *essence-2 could not open on Apple.* The podspec's resource glob `a2x_w2v.*.onnx`
+    matched none of the release's loose ONNX files (`w2v_ess_fp16_v1.onnx`,
+    `audio_encoder_fp16_window_{trunk,head}.onnx`), so `be_essence2_create` returned -2
+    ("no shared audio frontend"); every `*.onnx` under the engine's resources is shipped
+    now. And the `apiSecret` `load` was handed was dropped on the floor on Apple
+    ("accepted for API compatibility but unused"): essence-2 bills the session it serves
+    and refused (-3) on an iPhone whose Keychain held the key. It now rides the
+    `AvatarRef` to `be_essence2_set_api_secret` before the engine is created.
+  Measured on the fixed build, expression-2 on macOS: TTFA 674 ms (n=45), delivery
+  ratio 10.9, holds 0, 0 self-interruptions / 354 s, 10/10 cuts with 0 leaks, cut ->
+  idle 35 ms, idle 199 -> 0 x14.
+
 ## 2.4.0 — 2026-09-16
 
 The first tagged plugin release (`flutter-plugin-v2.4.0`). Everything below shipped to

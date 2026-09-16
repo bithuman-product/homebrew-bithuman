@@ -91,13 +91,20 @@ Pod::Spec.new do |s|
   # safe-empty when the dir is absent, but gate it on essence2_lib for clarity so
   # the embody-only install lists zero extra resources.
   pod_resources << 'Engines/*/Vendor/*-resources/*.bundle' if essence2_lib
-  # PLUS the shared a2x wav2vec2 frontend (a2x_w2v.fp32.onnx / .int8.onnx) — a
-  # LOOSE file under the engine's *-resources dir, NOT a .bundle, so the glob
-  # above misses it. DirectorRuntime.resolveA2XW2VPath() locates it in
-  # Bundle.main.resourcePath at runtime; CocoaPods copies these straight into the
-  # app Resources/. Gated on the file actually being present.
-  if essence2_lib && !Dir.glob(File.join(__dir__, 'Engines/*/Vendor/*-resources/a2x_w2v.*.onnx')).empty?
-    pod_resources << 'Engines/*/Vendor/*-resources/a2x_w2v.*.onnx'
+  # PLUS the shared audio frontend — LOOSE .onnx files under the engine's
+  # *-resources dir, NOT a .bundle, so the glob above misses them. The engine
+  # (Essence2Session.resolveA2XW2VPath) looks for the encoder by NAME in
+  # Bundle.main.resourcePath — `w2v_ess_fp16_v1.onnx` since essence2-v1.5.x, the
+  # `a2x_w2v.*.onnx` names before it — and le_a2x then wants the short-window pair
+  # `audio_encoder_fp16_window_{trunk,head}.onnx` BESIDE it (legacy 8 s hop without
+  # them). CocoaPods copies these straight into the app Resources/, flat, so the
+  # three are siblings there. Every loose .onnx the release ships is taken: the
+  # old `a2x_w2v.*.onnx` glob matched none of the current names, so the app
+  # carried the .bundles and no encoder, and be_essence2_create returned -2
+  # ("no shared audio frontend") on the first macOS run (2026-09-16). Gated on a
+  # file actually being present.
+  if essence2_lib && !Dir.glob(File.join(__dir__, 'Engines/*/Vendor/*-resources/*.onnx')).empty?
+    pod_resources << 'Engines/*/Vendor/*-resources/*.onnx'
   end
   s.resources = pod_resources
   s.dependency 'FlutterMacOS'
@@ -194,9 +201,25 @@ Pod::Spec.new do |s|
   conds << 'CONVERSE_AVAILABLE'  if converse_fw
   pod_xcconfig['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = conds.join(' ')
   pod_xcconfig['GCC_PREPROCESSOR_DEFINITIONS'] = '$(inherited) BH_ENGINE_AUTH_HOOKS=1' if auth_hooks
+  # APPLE SILICON ONLY — declared from the vendored bytes. Every native binary this
+  # pod links on macOS is a single arm64 slice: libconverse.xcframework carries
+  # `macos-arm64` alone, and every engine's libessence2.a is arm64. A Flutter
+  # RELEASE build (`flutter build macos --release`) targets the generic macOS
+  # destination = arm64 + x86_64, so without this CocoaPods' slice selector finds
+  # no `macos-arm64_x86_64` slice, emits nothing for CConverse, and the pod's
+  # Swift fails with "Unable to find module dependency: 'CConverse'" (measured
+  # 2026-09-16; the DEBUG build only ever passed because ONLY_ACTIVE_ARCH=YES
+  # made it arm64-only). Excluding x86_64 on BOTH the pod and the app target is
+  # what flutter_tools reads back (EXCLUDED_ARCHS from the Runner's build
+  # settings) and passes to xcodebuild, so the release build is arm64 like the
+  # debug one. There is no Intel Mac this pod could run on: nothing it vendors
+  # has an x86_64 slice.
+  pod_xcconfig['EXCLUDED_ARCHS[sdk=macosx*]'] = 'x86_64'
   s.pod_target_xcconfig = pod_xcconfig
 
   s.user_target_xcconfig = {
+    # See EXCLUDED_ARCHS on the pod target above: the app links arm64-only bytes.
+    'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64',
     # libconverse.a comes from the vendored xcframework (CocoaPods links it
     # automatically); the Runner target needs the Homebrew C++ deps + system
     # frameworks here.

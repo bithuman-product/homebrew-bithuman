@@ -99,14 +99,21 @@ Pod::Spec.new do |s|
   # mlx-swift_Cmlx.bundle/default.metallib + the iOS Expression bundle. Gated on
   # essence2_lib so the embody-only install lists zero extra resources.
   pod_resources << 'Engines/*/Vendor/*-resources/*.bundle' if essence2_lib
-  # PLUS the shared a2x wav2vec2 frontend (a2x_w2v.fp32.onnx / .int8.onnx) — a
-  # LOOSE file under the engine's *-resources dir, NOT a .bundle, so the glob
-  # above misses it. DirectorRuntime.resolveA2XW2VPath() locates it in
-  # Bundle.main.resourcePath at runtime; CocoaPods copies these straight into the
-  # app Resources/. Gated on the file actually being present.
+  # PLUS the shared audio frontend — LOOSE .onnx files under the engine's
+  # *-resources dir, NOT a .bundle, so the glob above misses them. The engine
+  # (Essence2Session.resolveA2XW2VPath) looks for the encoder by NAME in
+  # Bundle.main.resourcePath — `w2v_ess_fp16_v1.onnx` since essence2-v1.5.x, the
+  # `a2x_w2v.*.onnx` names before it — and le_a2x then wants the short-window pair
+  # `audio_encoder_fp16_window_{trunk,head}.onnx` BESIDE it (legacy 8 s hop without
+  # them). CocoaPods copies these straight into the app Resources/, flat, so the
+  # three are siblings there. Every loose .onnx the release ships is taken: the
+  # old `a2x_w2v.*.onnx` glob matched none of the current names, so the app
+  # carried the .bundles and no encoder, and be_essence2_create returned -2
+  # ("no shared audio frontend") on the first macOS run (2026-09-16). Gated on a
+  # file actually being present.
   # (essence2 now runs on iOS too, so the a2x w2v frontend is live there.)
-  if essence2_lib && !Dir.glob(File.join(__dir__, 'Engines/*/Vendor/*-resources/a2x_w2v.*.onnx')).empty?
-    pod_resources << 'Engines/*/Vendor/*-resources/a2x_w2v.*.onnx'
+  if essence2_lib && !Dir.glob(File.join(__dir__, 'Engines/*/Vendor/*-resources/*.onnx')).empty?
+    pod_resources << 'Engines/*/Vendor/*-resources/*.onnx'
   end
   s.resources = pod_resources
   s.dependency 'Flutter'

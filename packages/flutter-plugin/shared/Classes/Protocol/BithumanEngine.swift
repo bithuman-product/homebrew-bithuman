@@ -128,10 +128,16 @@ public struct AvatarRef {
     public var path: String          // ".elevatedir" / "embody://CODE" marker / model dir
     public var motionDir: String?    // essence2 actor .bhx; nil = default cache path
     public var manifestEngineAbi: Int?
-    public init(path: String, motionDir: String? = nil, manifestEngineAbi: Int? = nil) {
+    /// The developer's bitHuman api-secret, when the host app gave `load` one. An
+    /// engine that bills the session it serves (essence-2's self-host meter) is
+    /// handed it before it is created; an engine that does not meter ignores it.
+    public var apiSecret: String?
+    public init(path: String, motionDir: String? = nil, manifestEngineAbi: Int? = nil,
+                apiSecret: String? = nil) {
         self.path = path
         self.motionDir = motionDir
         self.manifestEngineAbi = manifestEngineAbi
+        self.apiSecret = apiSecret
     }
 }
 
