@@ -98,7 +98,9 @@ class AvatarPlayer(
 
     /** A complete unit, already admitted to the device. */
     private class AvUnit(val ptsSamples: Long, val frame: Bitmap, val epoch: Int,
-                         val speech: Boolean, val turnGen: Int, val audio: ByteArray, val seq: Long = 0)
+                         val speech: Boolean, val turnGen: Int, val audio: ByteArray, val seq: Long = 0,
+                         /** S = a frame with its own audio, C = catch-up, H = held frame + silence, T = tail, I = idle. */
+                         val kind: Char = 'S')
 
     private val inbox = LinkedBlockingQueue<Any>()
     private val toWrite = ArrayBlockingQueue<AvUnit>(LEAD)     // producer -> writer
@@ -129,6 +131,9 @@ class AvatarPlayer(
      *    of its own (a joined segment) goes out under the frame that follows it.
      *  - TAIL. A chunk's frames stop up to 0.4 s short of the audio. When the engine
      *    says the utterance is closed, what is left plays under the last frame.
+     *  - LATE. Between chunks the audio in hand plays under the last frame rather than
+     *    waiting for its frame (see the hold in [produce]); a frame that arrives after
+     *    its audio has gone out is dropped, counted as `stale`.
      */
     private val audioLock = Any()
     private var audio = ByteArray(1 shl 20)
@@ -139,6 +144,11 @@ class AvatarPlayer(
     private var carry = ByteArray(0)
     /** Stream offsets where the session said a reply's audio stopped; bounds the final drain. */
     private val replyEnds = ArrayDeque<Long>()
+    /** How many reply ends `head` has passed — which reply the next byte belongs to. */
+    private var replySeq = 0
+    /** [replySeq] when the held frame was admitted: audio may ride under it only within that reply. */
+    private var heldFrameReply = -1
+    @Volatile private var nStale = 0
     @Volatile private var nTailUnits = 0
     @Volatile private var nCatchUp = 0
     @Volatile private var nBackwards = 0
@@ -146,7 +156,21 @@ class AvatarPlayer(
     @Volatile private var nHold = 0
     @Volatile private var nRingOverrun = 0L
     @Volatile private var nStarve = 0
+    private var starveAt = 0L
+    private var holdAtStarve = 0
     @Volatile private var resetGen = 0
+    /**
+     * A barge-in's Reset is queued behind whatever the feed thread is doing; until it
+     * lands, nothing pulled from the engine is admitted. Without this the producer
+     * pulled the OLD reply's frames under the NEW epoch for as long as the engine took
+     * to reach the reset — its whole unrendered backlog, now that the plugin holds a
+     * reply as it arrives rather than at 1x.
+     */
+    @Volatile private var resetPending = false
+    /** Speech units admitted while a Reset was pending — the old reply leaking past a barge-in. */
+    @Volatile private var nLeak = 0
+    @Volatile private var nBarge = 0
+    @Volatile private var cutAtMs = 0L
 
     /** Session sample count: monotonic, never reset — contract 1. */
     @Volatile private var sessionSamples = 0L
@@ -245,6 +269,9 @@ class AvatarPlayer(
      * against the old epoch's tail. `pts` does not reset.
      */
     fun bargeIn() {
+        val t0 = System.currentTimeMillis()
+        val headBefore = track.playbackHeadPosition
+        resetPending = true             // before the epoch moves: see `pending` in produce()
         epoch++
         inbox.clear()
         toWrite.clear()
@@ -252,6 +279,9 @@ class AvatarPlayer(
         track.pause()
         track.flush()
         track.play()
+        nBarge++; cutAtMs = t0
+        Log.i("bhbarge", "CUT $nBarge hostMs=$t0 epoch=$epoch headBefore=$headBefore flushedInMs=${System.currentTimeMillis() - t0} " +
+            "q=${avatar.queuedFrames} pendingSlices=${runCatching { avatar.pendingAudioSlices }.getOrDefault(-1)}")
         pBase = sessionSamples          // the device counter restarts; the session does not
         tsValid = false; tsReadAt = 0L  // and so does its timestamp
         inbox.offer(Reset)
@@ -335,6 +365,12 @@ class AvatarPlayer(
         return out
     }
 
+    /** The reply `head` is in, retiring every reply end it has passed. Caller holds audioLock. */
+    private fun replyOfHead(): Int {
+        while (replyEnds.isNotEmpty() && replyEnds.first() <= head) { replyEnds.removeFirst(); replySeq++ }
+        return replySeq
+    }
+
     private fun produce() {
         var slot = 0
         var lastSpeechSlot = -1
@@ -345,8 +381,18 @@ class AvatarPlayer(
 
         while (running) {
             if (resetGen != seenReset) { seenReset = resetGen; heldFrom = -1L; lastSpeechSlot = -1 }
+            // ★ A unit belongs to the epoch that was current when its content was
+            // obtained, not when it is admitted: `e` is read first, `pending` second,
+            // and bargeIn() raises `pending` before it moves the epoch — so a cut at
+            // any point of this iteration leaves the unit stamped with the OLD epoch
+            // (dropped whole by the writer and presenter) or the iteration skipped.
+            // Measured without this: 0-2 old-reply units per cut-in slipped through
+            // under the new epoch, 50-100 ms of the old voice after the flush.
+            // Between a barge-in and its Reset landing: no pull, no drain — idle only.
+            val e = epoch
+            val pending = resetPending
 
-            if (heldFrom < 0) {
+            if (heldFrom < 0 && !pending) {
                 if (slotSeq[slot] > presentedSeq) nRingOverrun++
                 val t0 = System.nanoTime()
                 val f = avatar.pull(speechFrames[slot])
@@ -358,14 +404,30 @@ class AvatarPlayer(
                     nullPulls++
                     // STARVATION: the ready-frame depth reached zero while the engine
                     // still had an utterance to finish. Counted as episodes, not pulls.
-                    if (lastPullOk && avatar.hasPendingTail) nStarve++
-                } else heldFrom = f.audioSample * BYTES_PER_SAMPLE16
+                    if (lastPullOk && avatar.hasPendingTail) {
+                        nStarve++; starveAt = System.currentTimeMillis(); holdAtStarve = nHold
+                        val st = runCatching { avatar.stats() }.getOrNull()
+                        val (h, fed) = synchronized(audioLock) { head to audioLen }
+                        Log.i("bhstarve", "STARVE $nStarve hostMs=$starveAt headUnits=${h / BYTES_PER_FRAME} inHandUnits=${(fed - h) / BYTES_PER_FRAME} " +
+                            "toWrite=${toWrite.size} chunks=${st?.chunks} frames=${st?.frames} wallMs=${"%.0f".format(st?.wallMs ?: -1.0)}")
+                    }
+                } else {
+                    heldFrom = f.audioSample * BYTES_PER_SAMPLE16
+                    if (starveAt > 0) {
+                        val st = runCatching { avatar.stats() }.getOrNull()
+                        val h = synchronized(audioLock) { head }
+                        Log.i("bhstarve", "REFILL $nStarve after ${System.currentTimeMillis() - starveAt}ms frameAt=${heldFrom / BYTES_PER_FRAME} headUnits=${h / BYTES_PER_FRAME} " +
+                            "toWrite=${toWrite.size} holdsSince=${nHold - holdAtStarve} chunks=${st?.chunks} frames=${st?.frames} wallMs=${"%.0f".format(st?.wallMs ?: -1.0)}")
+                        starveAt = 0L
+                    }
+                }
                 lastPullOk = f != null
             }
 
-            if (heldFrom >= 0) {
+            if (heldFrom >= 0 && !pending) {
                 var body: ByteArray? = null
                 var underLast = false
+                var stale = false
                 synchronized(audioLock) {
                     // Every frame the SDK delivers has audio behind it (0.4.6, tail 0),
                     // so there is no "invented frame" arm here any more. There were two
@@ -381,17 +443,25 @@ class AvatarPlayer(
                         lastSpeechSlot >= 0 && head + BYTES_PER_FRAME <= heldFrom -> {
                             body = take(head + BYTES_PER_FRAME); underLast = true; nCatchUp++
                         }
-                        else -> body = take(heldFrom + BYTES_PER_FRAME)      // its own samples, plus any short remainder before them
+                        // Its audio already went out under the held frame (below): the
+                        // frame is late, not the voice. Dropped, so the picture rejoins in
+                        // sync at the first frame whose audio is still ahead.
+                        heldFrom + BYTES_PER_FRAME <= head -> { stale = true; nStale++ }
+                        else -> {
+                            heldFrameReply = replyOfHead()
+                            body = take(heldFrom + BYTES_PER_FRAME)      // its own samples, plus any short remainder before them
+                        }
                     }
                 }
+                if (stale) { heldFrom = -1L; continue }
                 nSpeech++; stats.speechUnits = nSpeech; stats.markFirstAudio()
                 if (underLast) {
                     where = "catch-up"
-                    admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, body!!)
+                    admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, body!!, 'C', e)
                     continue                                   // the frame itself is still held
                 }
                 where = "speech-admit"
-                admitSpeech(speechFrames[slot], slot, body!!)
+                admitSpeech(speechFrames[slot], slot, body!!, 'S', e)
                 where = "speech-done"
                 heldFrom = -1L
                 lastSpeechSlot = slot
@@ -399,7 +469,7 @@ class AvatarPlayer(
                 continue
             }
 
-            if (drainTail(lastSpeechSlot)) continue
+            if (!pending && drainTail(lastSpeechSlot, e)) continue
 
             // ★ IDLE IS FOR WHEN THERE IS NOTHING TO SAY — NOT FOR A GAP IN THE RENDER.
             // An idle unit carries a frame's worth of SILENCE, so admitting one while a
@@ -419,18 +489,45 @@ class AvatarPlayer(
             // engine, and only when the device is genuinely about to run dry does it
             // spend a frame of silence. That is the least silence that keeps the stream
             // continuous, and 0 under-runs says it was enough.
-            val speaking = avatar.hasPendingTail || synchronized(audioLock) { head < audioLen }
+            val speaking = !pending && (avatar.hasPendingTail || synchronized(audioLock) { head < audioLen })
             if (speaking && toWrite.size > IDLE_FLOOR) {
                 where = "await-frames"; nAwait++; Thread.sleep(2); continue
             }
             // Mid-reply the sink is fed by HOLDING THE LAST FRAME, never by the idle clip:
             // the engine is between chunks, not between turns, and cutting to an idle pose
             // for a single frame — 76 times in 75 s, measured — is a visible flick of the
-            // mouth. Holding it reads as the pause it is. The idle clip is for a turn with
-            // nothing in it.
+            // mouth. The idle clip is for a turn with nothing in it.
+            //
+            // ★ AND THE VOICE DOES NOT STOP FOR A LATE FRAME. What rides under the held
+            // frame is the reply's own audio when it is in hand, and silence only when it
+            // is not. Until 2026-09-15 it was always silence, and that silence was the
+            // owner's "brief pause after the first second": the Dart transport handed the
+            // reply over at 1x, chunk 0 is 21 frames (1.05 s), chunk 1 cannot start until
+            // 1.15 s more audio has arrived and then takes ~0.8 s to render, so every
+            // reply ran out of frames 1.05 s in with 2 s of its audio waiting — and paused
+            // for 300-500 ms (10 of 10 scripted replies, `hold` +6..8, under-runs 0: the
+            // device was fed, with silence). Now the audio goes out a frame's worth at a
+            // time, the late frames are dropped as stale above, and the picture rejoins in
+            // sync. ★ This is a jitter net, not the fix: measured with the transport still
+            // at 1x it turned the pause into a 300 ms freeze at EVERY chunk boundary and
+            // dropped 23% of the frames, because at 1x the first boundary's deficit is
+            // structural and playing through it leaves the voice permanently ahead of the
+            // engine. The fix is the transport handing the reply over as it arrives
+            // (bithuman_realtime.dart), after which no reply starved at all: 11 of 11 as
+            // one continuous run, stale 0, and the first word 900 ms sooner.
+            // Only THIS reply's audio: a frame held over from the previous reply must not
+            // carry the next reply's opening — that is the start-up run-ahead 4a forbids.
             if (speaking && lastSpeechSlot >= 0) {
-                where = "hold"; nHold++
-                admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, silence)
+                val body = synchronized(audioLock) {
+                    if (heldFrameReply == replyOfHead() && head + BYTES_PER_FRAME <= audioLen) take(head + BYTES_PER_FRAME) else null
+                }
+                if (body != null) {
+                    where = "catch-up"; nCatchUp++
+                    admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, body, 'C', e)
+                } else {
+                    where = "hold"; nHold++
+                    admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, silence, 'H', e)
+                }
                 continue
             }
             if (idleClip.isEmpty()) { where = "no-idle-clip"; Thread.sleep(4); continue }
@@ -439,7 +536,7 @@ class AvatarPlayer(
             if (toWrite.remainingCapacity() == 0) { Thread.sleep(2); continue }
             where = "idle-admit"
             nIdle++; stats.idleUnits = nIdle
-            admit(AvUnit(sessionSamples, idleClip[idleAt], epoch, false, stats.turnGen, silence))
+            admit(AvUnit(sessionSamples, idleClip[idleAt], e, false, stats.turnGen, silence, 0, 'I'))
             where = "idle-done"
             sessionSamples += SAMPLES_PER_FRAME
             idleAt = (idleAt + 1) % idleClip.size     // forward-only wrap, never ping-pong
@@ -452,7 +549,8 @@ class AvatarPlayer(
         // calls close — BithumanPlugin, in dispose(), here.
     }
 
-    private fun admitSpeech(frame: Bitmap, slot: Int, body: ByteArray) {
+    private fun admitSpeech(frame: Bitmap, slot: Int, body: ByteArray, kind: Char, e: Int) {
+        if (resetPending && e == epoch) nLeak++      // a unit of the new epoch admitted before the reset landed
         val seq = ++admittedSeq
         if (slot >= 0) slotSeq[slot] = seq
         var f = frame
@@ -462,7 +560,7 @@ class AvatarPlayer(
             nMarkers++
             Log.i("bhmark", "MARKER $nMarkers ADMIT seq=$seq pts=$sessionSamples hostMs=${System.currentTimeMillis()}")
         }
-        admit(AvUnit(sessionSamples, f, epoch, true, stats.turnGen, body, seq))
+        admit(AvUnit(sessionSamples, f, e, true, stats.turnGen, body, seq, kind))
         sessionSamples += (body.size / 2).toLong()
     }
 
@@ -493,7 +591,7 @@ class AvatarPlayer(
      * reply's opening under the previous reply's mouth. A wrong bound costs at most this
      * 0.4 s of placement; nothing else in the player depends on it.
      */
-    private fun drainTail(lastSpeechSlot: Int): Boolean {
+    private fun drainTail(lastSpeechSlot: Int, e: Int): Boolean {
         if (lastSpeechSlot < 0) return false
         var body: ByteArray? = null
         synchronized(audioLock) {
@@ -501,13 +599,12 @@ class AvatarPlayer(
             if (end != null && head < end && !avatar.hasPendingTail && avatar.queuedFrames == 0) {
                 body = take(minOf(head + BYTES_PER_FRAME, end))
                 nTailUnits++
-                if (head >= end) replyEnds.removeFirst()
             }
-            while (replyEnds.isNotEmpty() && replyEnds.first() <= head) replyEnds.removeFirst()
+            replyOfHead()
         }
         val b = body ?: return false
         where = "tail"
-        admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, b)
+        admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, b, 'T', e)
         return true
     }
 
@@ -525,8 +622,11 @@ class AvatarPlayer(
                     synchronized(audioLock) {
                         audioHead = 0L; audioLen = 0L; head = 0L; carry = ByteArray(0); replyEnds.clear()
                     }
+                    val t0 = System.currentTimeMillis()
                     avatar.resetState(true)      // also restarts the engine's audioSample count
                     resetGen++
+                    resetPending = false
+                    if (cutAtMs > 0) Log.i("bhbarge", "RESET landed sinceCutMs=${t0 - cutAtMs} resetMs=${System.currentTimeMillis() - t0} leaks=$nLeak")
                 }
                 is Tail -> {
                     // Where this reply's audio stops. Used for one thing only: bounding the
@@ -623,8 +723,9 @@ class AvatarPlayer(
     private var writeUs = 0L
     private var writeMaxUs = 0L
     private var lastWriteMs = 0L
-    private var runIsSpeech = false
+    private var runKind = 'I'
     private var runStartMs = 0L
+    private var runStartHead = 0L
     private var runUnits = 0
     private var turnGenSeen = -1
     private var turnUnderrunStart = 0
@@ -660,14 +761,20 @@ class AvatarPlayer(
                             "toWrite=${toWrite.size}")
                     }
                     lastWriteMs = nowMs
-                    if (u.speech != runIsSpeech) {
+                    val ur = runCatching { track.underrunCount }.getOrDefault(0)
+                    if (ur != lastUnderrunSeen)
+                        Log.i("bhur", "UNDERRUN +${ur - lastUnderrunSeen} total=$ur hostMs=$nowMs head=${track.playbackHeadPosition} kind=${u.kind} toWrite=${toWrite.size}")
+                    if (u.kind != runKind) {
+                        val headNow = track.playbackHeadPosition.toLong()
                         if (runStartMs > 0) {
                             val dur = nowMs - runStartMs
-                            if (dur >= 100)
-                                Log.i("bhrun", "RUN ${if (runIsSpeech) "SPEECH" else "IDLE  "} ${dur}ms " +
-                                    "units=$runUnits underruns=${runCatching { track.underrunCount }.getOrDefault(0)}")
+                            // Every run of held or caught-up units is logged whole; idle and
+                            // speech only when they are long enough to mean something.
+                            if (dur >= 100 || runKind == 'H' || runKind == 'C' || runKind == 'T')
+                                Log.i("bhrun", "RUN ${runKind} ${dur}ms units=$runUnits head=$runStartHead..$headNow " +
+                                    "endHostMs=$nowMs next=${u.kind} underruns=$ur")
                         }
-                        runIsSpeech = u.speech; runStartMs = nowMs; runUnits = 0
+                        runKind = u.kind; runStartMs = nowMs; runStartHead = headNow; runUnits = 0
                     }
                     runUnits++
                     stats.onAudioWrite()
@@ -701,15 +808,14 @@ class AvatarPlayer(
                             turnSpeechWrites = 0
                         }
                         turnSpeechWrites++
-                        val now = runCatching { track.underrunCount }.getOrDefault(0)
-                        val step = now - lastUnderrunSeen
-                        lastUnderrunSeen = now
+                        val step = ur - lastUnderrunSeen
                         if (step > 0) urByIndex[minOf(turnSpeechWrites - 1, urByIndex.size - 1)] += step
                     }
                     if (++writes % 200 == 0L)
                         Log.i("bhwrite", ("writes=%d inWriteAvg=%.1fms max=%.1fms | toWrite=%d toPresent=%d underruns=%d")
                             .format(writes, writeUs / 1000.0 / writes, writeMaxUs / 1000.0,
                                 toWrite.size, toPresent.size, stats.underruns))
+                    lastUnderrunSeen = ur
                     while (running && !toPresent.offer(u)) Thread.sleep(1)
                 }
                 u = toWrite.poll()
@@ -744,10 +850,11 @@ class AvatarPlayer(
         val now = System.currentTimeMillis()
         if (now - beat > 1000) {
             beat = now
+            sampleUnderruns()
             stats.refresh()
             val avg = if (pullCalls > 0) pullNanos / pullCalls / 1_000_000.0 else 0.0
             Log.i("bhav", "PROD where=$where idle=$nIdle speech=$nSpeech tailUnits=$nTailUnits " +
-                "catchUp=$nCatchUp await=$nAwait hold=$nHold back=$nBackwards ringOverrun=$nRingOverrun starve=$nStarve " +
+                "catchUp=$nCatchUp await=$nAwait hold=$nHold stale=$nStale back=$nBackwards ringOverrun=$nRingOverrun starve=$nStarve barges=$nBarge leaks=$nLeak " +
                 "coalesced=$nCoalesced markers=$nMarkers q=${avatar.queuedFrames} inFlight=${toPresent.size} | " +
                 String.format("pull avg %.1fms max %dms over50=%d null=%d calls=%d", avg, pullMaxMs, pullOver50, nullPulls, pullCalls) +
                 " | " + stats.line().replace("\n", " "))
@@ -770,6 +877,10 @@ class AvatarPlayer(
         if (u == null) return
         presentedSeq = maxOf(presentedSeq, u.seq)
         if (u.speech) nPresSpeech++
+        if (cutAtMs > 0 && u.speech && u.kind != 'H') {
+            Log.i("bhbarge", "NEW-MOUTH sinceCutMs=${now - cutAtMs} epoch=${u.epoch} kind=${u.kind} leaks=$nLeak")
+            cutAtMs = 0L
+        }
         if (++shown % 100 == 1L)
             Log.i("bhav", "AV shown=$shown pts=${u.ptsSamples} P=$pos lateSamples=${pos - u.ptsSamples}")
         val wasFirst = u.speech && stats.ttffMs < 0 && u.turnGen == stats.turnGen
