@@ -349,6 +349,16 @@ class BithumanRealtimeSession {
     _wsSub = _ws!.stream.listen(_handleMessage,
         onError: _handleError,
         onDone: _handleDone);
+    // The echo row this session will run on, stated in the log BEFORE the config that
+    // carries it. The native half of the same `[bhaec]` line says what the platform
+    // canceller actually is; this half says what threshold the server was asked for.
+    // Together they are what clause 11 grades: no build can buy `echo_self_interruptions
+    // = 0` by raising the threshold, because the threshold is in the record beside it.
+    final echo = EchoProfile.current;
+    _log('[bhaec] serverVadThreshold=${echo.serverVadThreshold} '
+        'vpioAgcRequested=${echo.vpioAgc ? 1 : 0} '
+        'echoRow=${echo.device.name} residualMaxDbfs=${echo.residualDbfsMax} '
+        'measuredUtc=${echo.measuredUtc}');
     // Configure the session — GA shape. Audio I/O is nested under
     // `audio.input` / `audio.output`; turn_detection lives inside
     // `audio.input`. PCM16 mono @ 24 kHz both directions.

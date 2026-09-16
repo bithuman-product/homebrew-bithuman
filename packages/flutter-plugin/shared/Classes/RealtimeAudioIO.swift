@@ -888,6 +888,10 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     if wasPlaying { _ = bh_tryRun { self.player.play() } }   // resume only if it was playing (paused bot stays paused)
     NSLog("[audio-swap] recovered (mic=%@ out_sr=%.0f)",
           startedWithMic ? "on" : "off", playerFormat?.sampleRate ?? 0)
+    // A swap can legitimately land with VP-IO OFF (the bringUp(vpio:) fallback above).
+    // Re-attest so the log says which canceller the REST of this session ran with,
+    // rather than leaving the start-time line standing for a graph that no longer matches.
+    logAecAttestation(at: "swap")
   }
   #endif
 
@@ -906,6 +910,60 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   /// the device hot-swap path (a re-enabled VP-IO would otherwise come back with AGC).
   private func applyUplinkGain(_ input: AVAudioInputNode) {
     if !vpioAgc { input.isVoiceProcessingAGCEnabled = false }
+  }
+
+  /// ★THE AEC ATTESTATION. One line, emitted after the engine is RUNNING, carrying what
+  /// the OS says is engaged — `isVoiceProcessingEnabled` / `isVoiceProcessingAGCEnabled`
+  /// READ BACK off the nodes, never the value we asked for.
+  ///
+  /// Why a readback and not the call site: `setVoiceProcessingEnabled(true)` is called in
+  /// exactly two places and both have a path that legitimately ends with VP-IO OFF — the
+  /// `BITHUMAN_NO_VPIO` lever, and the device-swap `bringUp(vpio:)` fallback that retries
+  /// with the canceller off after a failed start. After either, the session runs with no
+  /// echo cancellation at all and every other line in the log looks identical. macOS has
+  /// no AVAudioSession, so on that platform this line is the ONLY evidence the platform
+  /// canceller is on: before it existed, the published macOS session log (2026-09-16,
+  /// mac_run_e2p170macpub.log) contained ZERO lines about VP-IO, and no one could say
+  /// whether the canceller or the raised server_vad threshold was carrying the load.
+  ///
+  /// `agc` is read back for the same reason: `isVoiceProcessingAGCEnabled` is a no-op
+  /// while voice processing is off, so "AGC off" as a call site proves nothing either.
+  ///
+  /// Clause 11 of the conformance contract grades `native_aec` from this line.
+  private func logAecAttestation(at where_: String) {
+    guard micActive else {
+      NSLog("[bhaec] vpioIn=0 vpioOut=0 agc=0 mic=off at=%@ platform=%@",
+            where_, Self.platformName)
+      return
+    }
+    let input = engine.inputNode
+    let output = engine.outputNode
+    var extra = ""
+    #if os(iOS)
+    let session = AVAudioSession.sharedInstance()
+    extra = String(format: " category=%@ mode=%@ route=%@",
+                   session.category.rawValue, session.mode.rawValue,
+                   session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: "+"))
+    #endif
+    NSLog("[bhaec] vpioIn=%d vpioOut=%d agc=%d mic=on at=%@ platform=%@ inSr=%.0f outSr=%.0f inCh=%d%@",
+          input.isVoiceProcessingEnabled ? 1 : 0,
+          output.isVoiceProcessingEnabled ? 1 : 0,
+          input.isVoiceProcessingAGCEnabled ? 1 : 0,
+          where_, Self.platformName,
+          input.outputFormat(forBus: 0).sampleRate,
+          output.inputFormat(forBus: 0).sampleRate,
+          Int(input.outputFormat(forBus: 0).channelCount),
+          extra)
+  }
+
+  private static var platformName: String {
+    #if os(iOS)
+    return "ios"
+    #elseif os(macOS)
+    return "macos"
+    #else
+    return "?"
+    #endif
   }
 
   func start(vadThreshold: Int32? = nil, mic: Bool = true, vpioAgc: Bool = true) throws {
@@ -955,6 +1013,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     #endif
     NSLog("[RealtimeAudioIO] up: mic=%@ player sr=%.0f Hz",
           mic ? "on" : "off(text)", self.playerFormat?.sampleRate ?? 0)
+    logAecAttestation(at: "start")
   }
 
   func stop() {
