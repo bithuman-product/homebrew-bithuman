@@ -454,9 +454,15 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // Stand up the VP-IO audio engine for this texture's session.
       // Also installs a Flutter EventChannel at
       // ai.bithuman.avatar.mic/<textureId> for 24 kHz PCM16 mic chunks.
+      // ★NO TEXTURE REQUIRED. `textureId` names the SESSION; a registered texture
+      // is optional. It used to be bound in this guard and the handler refused
+      // BAD_ARGS without one — which is what made RealtimeAudioIO's no-avatar
+      // branch (speaker scheduled directly, no lipsync work) unreachable: there
+      // was no way to construct the audio unit with a nil sink. Voice is now
+      // standable with no render at all; with a texture registered under this id
+      // the behaviour is byte-for-byte what it was.
       guard let args = call.arguments as? [String: Any],
-            let textureId = args["textureId"] as? Int64,
-            let texture = textures[textureId] else {
+            let textureId = args["textureId"] as? Int64 else {
         result(FlutterError(code: "BAD_ARGS",
                             message: "audioStart requires textureId",
                             details: nil))
@@ -464,7 +470,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       }
       if audioIOs[textureId] == nil {
         let io = RealtimeAudioIO()
-        io.avatarTextureForLipsync = texture
+        io.lipsyncSink = textures[textureId]   // nil = headless voice session
         audioIOs[textureId] = io
         if let messenger = registrarMessenger {
           // Unique per-session name (textureId/micGen) so the previous
@@ -630,9 +636,10 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // LOCAL mode: the on-device brain (Apple ASR → Qwen → Supertonic via
       // converse) drives the SAME RealtimeAudioIO (mic/speaker/avatar) and the
       // SAME avatar Texture the cloud path uses — only the brain differs.
+      // ★NO TEXTURE REQUIRED — same cut as `audioStart` above. The on-device
+      // brain drives the same RealtimeAudioIO; the avatar is optional there too.
       guard let args = call.arguments as? [String: Any],
             let textureId = args["textureId"] as? Int64,
-            let texture = textures[textureId],
             let gguf = args["ggufPath"] as? String else {
         result(FlutterError(code: "BAD_ARGS",
                             message: "localAudioStart requires textureId + ggufPath", details: nil))
@@ -645,7 +652,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       }
       if audioIOs[textureId] == nil {
         let io = RealtimeAudioIO()
-        io.avatarTextureForLipsync = texture
+        io.lipsyncSink = textures[textureId]   // nil = headless local voice session
         audioIOs[textureId] = io
       }
       guard let io = audioIOs[textureId] else {
@@ -783,7 +790,11 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
   }
 }
 
-final class AvatarTexture: NSObject, FlutterTexture {
+/// Conforms to `LipsyncSink` (Protocol/LipsyncSink.swift) — the twelve members
+/// the voice unit uses, and the ONLY surface `RealtimeAudioIO` may touch here.
+/// Adding a member to this class does NOT widen that edge; widening it means
+/// editing the protocol, in a file whose whole job is to be read.
+final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
   /// The avatar engine is selected at load time (see `engineKind`). The path
   /// arg is just a non-empty marker (e.g. "embody://A42CQW8788") — the embody
   /// runtime loads its CoreML graphs from the app bundle / dev dir, not from
