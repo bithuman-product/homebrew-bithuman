@@ -1,4 +1,23 @@
-## Unreleased
+## 2.6.2 — 2026-09-16
+
+**A measurement build says so on screen, and the echo canceller is attested rather
+than assumed.** Twice on 2026-09-16 the owner watched our own instrumentation and
+filed it as a product defect — an iPhone FLOORS probe that paints black by
+construction ("black screen"), and a macOS arm running the stress driver, which
+by design requests the next monologue after every response ("it keeps self
+talking on and on"). Both builds were doing exactly what they were told and
+neither said so, and no instrument could settle it after the fact: a `strings`
+scan of the Mach-O cannot see a Flutter dart-define. `MeasurementBanner` in
+`lib/ui_kit.dart` now names every lever that makes the app BEHAVE unlike the
+product — self-driving, injected microphone, unprompted greeting, a non-default
+transport, a mock server — in a band that never fades and never hides. It costs a
+release build nothing: each lever is `DevLevers.enabled && …` with
+`enabled = !kReleaseMode`, so the widget folds away at compile time. Alongside it,
+both platforms write a `[bhaec]` line AFTER the audio graph is running, read back
+off the OS (Apple: `AVAudioEngine.isVoiceProcessingEnabled` on both IO ends;
+Android: `AcousticEchoCanceler.enabled` with the audio mode), re-attested on the
+device hot-swap path — so a session that ran without the platform canceller can
+no longer look identical to one that ran with it.
 
 **A tag names an engine.** The Apple engine edge had no pin. `locate_engine_sdk`
 took a ref and both call sites omitted it, so the engine adapter Swift compiled
