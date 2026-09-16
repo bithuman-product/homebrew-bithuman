@@ -60,15 +60,26 @@ android {
 
 dependencies {
     implementation 'ai.bithuman:expression2-android:0.4.7'
-    // 0.5.9 (public on Central since 2026-09-16): the warp prior plays IN PLACE —
-    // `Identity::P(si)` is a cursor over `P_hevc.mov` instead of an offset into a
-    // 394,788,864 B `P.f16` the SDK expanded at activate and mmap'd (bithuman-models
-    // #747). On a Galaxy S25+: engine create 891.1 -> 164.1 ms, RSS after one lap
-    // 1,018,944 -> 683,268 kB, the mapping's 385,536 kB gone, 394,788,864 -> 0 B written
-    // to app storage, per-push 17.733 -> 16.454 ms, and 304/304 delivered frames identical
-    // si for si. 0.5.8 carries the SDK's own motion thread — every frame of a reply comes
-    // out under THIS plugin's un-paced transport, where 0.5.7 (motion frontier advanced
-    // only behind feed()) delivered 72-77 % of a reply's frames (#737) — and the
+    // 0.5.10 (public on Central since 2026-09-16, lastUpdated 20260916205927): A BARGE-IN
+    // NO LONGER REWINDS THE DRIVER VIDEO TO ITS FIRST FRAME. Interrupt the agent mid-reply
+    // and the video behind the avatar used to snap back to the start of its clip — every
+    // cut and every new utterance seeded the next walk at driver frame 0 and the
+    // composited face followed it there. It rides on the frame it was on now
+    // (bithuman-models #774). ★ It is ONE default value —
+    // `Essence2Avatar.resetAudio(startFrame: Int = 0 -> -1)` — and a Kotlin default lives
+    // in `resetAudio$default`, not in a signature, so `api/essence2-android.api` is
+    // byte-identical between 0.5.9 and 0.5.10 and NO api check could have caught it:
+    // published 0.5.9 loads `iconst_0`, published 0.5.10 loads `iconst_m1`, and the
+    // bytecode is the only place that says which behaviour shipped. AAR sha256
+    // 4074a827835a534d… == Central's own .sha256 sidecar; lible_jni.so 59ddea6a3a64cbb4….
+    //
+    // 0.5.9 carries the warp prior played IN PLACE — `Identity::P(si)` a cursor over
+    // `P_hevc.mov` instead of an offset into a 394,788,864 B `P.f16` the SDK expanded at
+    // activate and mmap'd (#747): on a Galaxy S25+ engine create 891.1 -> 164.1 ms, RSS
+    // after one lap 1,018,944 -> 683,268 kB, 394,788,864 -> 0 B written to app storage,
+    // per-push 17.733 -> 16.454 ms, 304/304 delivered frames identical si for si. 0.5.8
+    // carries the SDK's own motion thread — every frame of a reply comes out under THIS
+    // plugin's un-paced transport, where 0.5.7 delivered 72-77 % (#737) — and the
     // driver-cursor fix (#738). 0.5.7 remains the first coordinate with
     // `Essence2Avatar.idle` and a meter that refuses without a credential rather than
     // rendering free.
@@ -79,9 +90,9 @@ dependencies {
     // different artifact at 0.5.8 still resolved Central's bytes. What it CAN do is
     // supply a version Central LACKS, which is how plugin 2.4.0 came to import a class
     // Central's 0.4.6 did not have: `publishToMavenLocal` plus a pin bump compiles green
-    // while no customer can resolve it. This pin was moved only once
-    // repo1.maven.org served 0.5.9.
-    implementation 'ai.bithuman:essence2-android:0.5.9'
+    // while no customer can resolve it. This pin was moved only once repo1.maven.org
+    // served 0.5.10.
+    implementation 'ai.bithuman:essence2-android:0.5.10'
     implementation 'com.qualcomm.qti:qnn-litert-delegate:2.49.0'
     implementation 'com.qualcomm.qti:qnn-runtime:2.49.0'
 }
