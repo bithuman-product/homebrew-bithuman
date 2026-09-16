@@ -123,7 +123,6 @@ private final class _MockEngine: BithumanEngine {
     func warmUp(warmSpeech: [Float]?) {}
     var isReady = true
     var idle: [UInt8]? = [1, 2, 3, 4, 5, 6]
-    var idleLoop: [[UInt8]] = []
     var fed: [Float] = []
     func feed(_ samples: [Float]) { fed.append(contentsOf: samples) }
     private var q: [[UInt8]] = [[10, 11, 12, 13, 14, 15]]

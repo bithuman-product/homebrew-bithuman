@@ -34,6 +34,7 @@
 // Apache-2.0; (c) bitHuman.
 
 import Foundation
+import CoreVideo
 
 /// Identity + frozen aliases of an engine, used for routing/registration.
 /// The aliases are the FROZEN dual-accept slugs (`embody` for expression2,
@@ -160,8 +161,15 @@ public protocol BithumanEngine: AnyObject {
     func shutdown()                                     // drain native worker before host exit
 
     // ---- idle ----
-    var idle: [UInt8]? { get }                          // one BGR w*h*3 idle frame
-    var idleLoop: [[UInt8]] { get }                     // pre-rendered BGR idle loop, may be []
+    // ★THE IDLE LOOP IS A CURSOR, NOT A LIST. Until 2026-09-15 this surface carried
+    // `idleLoop: [[UInt8]]` and the expression-2 engine filled it with the first 48
+    // frames of a 200-frame clip authored with its seam at the END — so every
+    // presenter wrapped at 2.4 s, a cut the trainer never made, and the Android
+    // SDK and the Flutter plugin each copied the 48 from here. A list invites a
+    // cap (200 frames is 180 MB); a cursor over a hardware decoder costs the
+    // decoder's pipeline whatever the clip's length. `idle(into:)` below is that
+    // cursor; `idle` is its frame 0.
+    var idle: [UInt8]? { get }                          // frame 0 of the idle clip (or the one static idle frame), BGR w*h*3
 
     // ---- audio in (16 kHz mono Float[-1,1], non-blocking) ----
     func feed(_ samples: [Float])
@@ -195,8 +203,17 @@ public protocol BithumanEngine: AnyObject {
     /// frame is GENERATED speech (gates audio release) or an idle/warmup
     /// passthrough. Subsumes pull() AND the essence2 pulledSpeechFrames() delta.
     func pull(into buffer: inout [UInt8]) -> (bytes: Int, speech: Bool)
-    /// Next idle frame into a caller buffer; bytes written (0 = none).
+    /// NEXT idle frame into a caller buffer, BGR w*h*3; bytes written (0 = none).
+    /// Forward only, every frame of the clip in order, wrapping at the clip's
+    /// authored last frame — never earlier, never ping-pong. The default copies
+    /// the one `idle` frame; an engine with an idle clip overrides it.
     func idle(into buffer: inout [UInt8]) -> Int
+    /// The same next frame as the decoder's own IOSurface-backed BGRA pixel
+    /// buffer, for a texture that can sample it directly — no CPU touches an
+    /// idle pixel. Advances the same cursor as `idle(into:)`. Default nil: the
+    /// caller then takes `idle(into:)`. An engine returns nil for "no clip" or
+    /// "nothing ready this tick", never a stale buffer.
+    func idleNextPixelBuffer() -> CVPixelBuffer?
     /// DEV-only peak-generation throughput bench (default no-op). expression2
     /// implements it so the EMBODY_BENCH hook runs via the existential with no
     /// concrete downcast.
@@ -255,6 +272,7 @@ public extension BithumanEngine {
         }
         return n
     }
+    func idleNextPixelBuffer() -> CVPixelBuffer? { nil }
     func benchSync(_ secs: Int) {}
 }
 

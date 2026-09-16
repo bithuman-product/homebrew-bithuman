@@ -1,5 +1,25 @@
 ## Unreleased
 
+* **The idle clip plays from its first frame to its last and wraps there, on every
+  platform, and nothing holds it.** The owner: *"I only see the 1 s or so of the idle
+  video and then it loops back"* — and then: *"it shouldn't cut at all as it should just
+  play from beginning to end and then loop to beginning because the idle video is
+  designed in such the first frame is visually identical to the last frame."* He was
+  right on both counts. `idle.mp4` is 10 s / 200 frames with its seam at the END, and
+  three players capped it — the Apple SDK at 48 frames, the Android SDK at 48 "as Apple
+  caps its own", the plugin's `IdleClip.kt` at 40 "the Apple SDK caps its own at 48" —
+  each justifying its constant by the next one's. The caps existed because a held frame
+  is 0.9-1.2 MB (180-240 MB for the clip; essence-2's 1248x704 clip would be 527 MB), and
+  the fix is not a bigger list: both SDKs now decode the clip IN PLACE from one hardware
+  decoder (`AVAssetReader` / `MediaCodec`) and wrap where the file ends. Apple: the
+  engine's `idleNextPixelBuffer()` hands the decoder's own IOSurface buffer to the Flutter
+  texture untouched (`publishPixelBufferToTexture`), so an idle tick costs no pixel copy;
+  the protocol's `idleLoop: [[UInt8]]` — the list that invited the cap — is gone, and
+  `idle(into:)` is the one idle-motion surface. Android: `Expression2IdleLoop.next(bitmap)`
+  fills a slot of the same bitmap ring speech uses, so the player holds no idle frames at
+  all; `IdleClip.kt` (the stopgap download, "delete this when the SDK exposes the loop")
+  is deleted. The SDK logs every wrap with its index; the player's `bhav PROD` line
+  carries `idleAt=i/N idleWraps=k idleStall=0`.
 * **Android half of the plugin.** `android/` implements the SAME `ai.bithuman.avatar`
   MethodChannel and `ai.bithuman.avatar.mic/<textureId>/<gen>` EventChannel the Apple
   halves serve, so ONE Flutter app runs on a Galaxy with byte-for-byte the widgets it
@@ -11,8 +31,9 @@
   the metered door into the SDK's own store. Presentation is `AvatarPlayer.kt` — the
   audited one-unit A/V player from the Android chat example (a frame and its 50 ms of
   sound are one object, presented against the device's own sample counter; idle is the
-  same machinery, from the SDK's `idleLoop` member with the example's download as the
-  fallback) — adopted as a file behind a SurfaceTexture sink, not re-implemented.
+  same machinery, from the SDK's `idleLoop` — its cursor over the identity's clip,
+  decoded in place, every frame of it) — adopted as a file behind a SurfaceTexture
+  sink, not re-implemented.
   `MicCapture.kt` carries the echo-cancelled, HALF-DUPLEX microphone (silence is sent
   while the agent is audible, never a hole). The Dart transport's Android→WebRTC detour
   and its canned-mouth `setSpeaking` branch are deleted: every platform takes the
