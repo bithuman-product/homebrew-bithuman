@@ -61,18 +61,26 @@ class EchoProfile {
   ///        0.5            192 ms  (141.8 … 244.8)           4          -232 ms
   ///        0.7            261 ms  (143.8 … 275.6, one 2587) 4          -216 ms
   ///
-  /// Every arm fired 4/4, so this is latency and not sensitivity. The bias column is
+  /// All 12 trials fired, so this is latency and not sensitivity. The bias column is
   /// the control: it moved monotonically with the threshold too, which is independent
-  /// evidence the arms really differed. Same host, same signal, minutes apart — the
-  /// DIFFERENTIAL is what this table claims; the absolute values are one network's.
+  /// evidence the arms really differed rather than the network drifting under them.
+  /// Same host, same signal, minutes apart — the DIFFERENTIAL is what this table
+  /// claims; the absolute values are one network's.
+  ///
+  /// ★ THE DIRECTION IS SOLID, THE GAP BETWEEN ADJACENT ROWS IS THIN. The per-trial
+  /// values are bimodal about a ~100 ms quantum (0.5 read 142/143/240/245), which is
+  /// the packet cadence showing through the server's decision, so n = 4 pins the
+  /// ORDER but not the size of one step. Read 0.7 -> 0.3 (~120 ms) as measured and
+  /// 0.7 -> 0.5 (~70 ms) as indicative, and re-run before spending it.
   ///
   /// WHAT THAT COSTS THE MAC. [mac] is the only row at 0.7, and it is there because
   /// 0.5 let the agent re-trigger on its own tail — see that row's `source`. So the
   /// trade is three-sided, not two: 0.7 buys quiet and costs BOTH barge-in
-  /// sensitivity AND roughly 70 ms of interrupt latency against 0.5. The arm that
-  /// would settle it has never been run: every 0.5 measurement in [mac]'s sweep was
-  /// taken with VP-IO AGC ON, and the row ships AGC OFF. `0.5 + AGC off` in an empty
-  /// room is the missing cell, and it is now worth more than it looked.
+  /// sensitivity AND interrupt latency. The arm that would settle it has never been
+  /// run: every 0.5 measurement in [mac]'s sweep was taken with VP-IO AGC ON, and the
+  /// row ships AGC OFF. `0.5 + AGC off` in an empty room is the missing cell, and it
+  /// is now worth more than it looked — it is the only lever on this leg that moved
+  /// at all.
   final double serverVadThreshold;
 
   /// Apple VP-IO automatic gain on the uplink. `false` ⇒ the plugin sends what the
