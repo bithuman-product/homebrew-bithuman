@@ -30,7 +30,7 @@ and the Android engine pin moves to the AAR that carries the class this plugin i
   console `devicectl` attaches, so every Apple arm reported only its native half.
   `BithumanAvatar.nativeLog` carries the transport's lines (`bhmic`, `bhfar`, `bhfeed`,
   `bhrun`, `bhfifo`, `bhbarge`, `bhdeliver`) into the same stream as the presenter's,
-  the same names on Apple and Android, read by the cross-plane conformance suite.
+  the same names on Apple and Android, read by the cross-platform conformance suite.
 * **Android engine pin → `ai.bithuman:expression2-android:0.4.7`.** 2.4.0 pinned 0.4.6
   while importing `Expression2IdleLoop`, a class Central's 0.4.6 does not have (that
   artifact was built before the in-place idle loop landed; it holds 48 frames as a
