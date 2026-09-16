@@ -1,5 +1,44 @@
 ## Unreleased
 
+## 2.5.0 — 2026-09-16
+
+Tag `flutter-plugin-v2.5.0`. Four user-visible changes on iOS and macOS (#47) — the
+conversation the owner accepted on Android in 2.4.0, made true on the Apple halves —
+and the Android engine pin moves to the AAR that carries the class this plugin imports.
+
+* **Duplex on Apple: the microphone is never gated while the agent talks.**
+  `RealtimeAudioIO` soft-limited the uplink to room level whenever the agent was audible
+  (iOS: a 3 s mic-start grace, an AEC warm-up squelch of 5–30 s per session, a 0.3 s
+  sustained-speech gate; macOS: the 0.3 s gate) — by its own comment, "no barge-in
+  during the first ~10 s of agent speech". Deleted. Voice-processing I/O on both nodes
+  carries the echo; measured on an iPhone 15: a −18 dBFS far end cancels to −70…−90 dBFS
+  steady, only the onset transient reaches ~−35 dBFS. The attenuation the contract
+  forbids is 0 by construction — nothing between capture and the EventChannel touches
+  the samples — and `bhmic` logs captured and sent levels side by side.
+* **No pacer.** The Dart transport metered reply deltas to ~1× (+180 ms) on every
+  platform but Android. Deleted everywhere: the reply reaches the plugin as fast as the
+  server sends it and the ENGINE bounds the backlog (expression-2 parks its producer at
+  `maxQueuedFrames = 64`; essence-2's ring is 8 deep). On iOS this is time-to-first-audio
+  and parity, not a pause fix — the pause was Android's.
+* **No drop-oldest cap; a cut leaves no old frame.** `AvatarTexture.audioQueue` was capped
+  (96k samples expression-2, 32k essence-2) and dropped its OLDEST on overflow — a
+  silent lipsync loss the pacer hid. Deleted. `barge()` resets the texture first (epoch
+  + engine) and drops the speaker FIFO second; the display tick reads the epoch at the
+  top and fences any frame pulled across the cut. `bhbarge` counts LEAK / FENCED /
+  OLD-SLICE so 0 is proven, not assumed.
+* **The conversation instrument.** A release iOS build's Dart `print` never reaches the
+  console `devicectl` attaches, so every Apple arm reported only its native half.
+  `BithumanAvatar.nativeLog` carries the transport's lines (`bhmic`, `bhfar`, `bhfeed`,
+  `bhrun`, `bhfifo`, `bhbarge`, `bhdeliver`) into the same stream as the presenter's,
+  the same names on Apple and Android, read by the cross-plane conformance suite.
+* **Android engine pin → `ai.bithuman:expression2-android:0.4.7`.** 2.4.0 pinned 0.4.6
+  while importing `Expression2IdleLoop`, a class Central's 0.4.6 does not have (that
+  artifact was built before the in-place idle loop landed; it holds 48 frames as a
+  `List<Bitmap>`). 2.4.0 compiled only against a mavenLocal 0.4.6 built from a later
+  main; against Central it does not build. 0.4.7 is the first Central artifact with the
+  class. Until 0.4.7 is public, this half resolves from mavenLocal only — stated here
+  and in `android/build.gradle`.
+
 ## 2.4.0 — 2026-09-16
 
 The first tagged plugin release (`flutter-plugin-v2.4.0`). Everything below shipped to

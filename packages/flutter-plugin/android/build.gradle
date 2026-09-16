@@ -6,10 +6,14 @@
 // Qualcomm coordinates are the Hexagon NPU delegate the SDK loads when the SoC has one
 // (Snapdragon); elsewhere they are inert.
 //
-// ★ The pin is 0.4.6, which the presenter needs (Expression2Frame.audioSample since
-// 0.4.5; the idle-loop member since 0.4.6). Maven Central carries 0.4.1 at the time of
-// writing, so until 0.4.6 is published there this half resolves from mavenLocal only —
-// a stranger's clone builds the Apple halves and NOT this one. Stated, not hidden.
+// ★ The pin is 0.4.7, which the presenter needs: `Expression2IdleLoop` (the idle clip
+// decoded in place, `next(bitmap)`) exists from 0.4.7 ONLY. Central's 0.4.6 — built
+// before that change — ships `idleLoop` as a `List<Bitmap>` of 48 frames and has no
+// `Expression2IdleLoop` class, so plugin 2.4.0's `implementation ...:0.4.6` did not
+// compile against Central at all: it compiled only against a mavenLocal 0.4.6 built
+// from a later main. Until 0.4.7 is public on Central this half resolves from
+// mavenLocal only — a stranger's clone builds the Apple halves and NOT this one.
+// Stated, not hidden.
 group = 'ai.bithuman.flutter'
 version = '0.1.0'
 
@@ -55,7 +59,7 @@ android {
 }
 
 dependencies {
-    implementation 'ai.bithuman:expression2-android:0.4.6'
+    implementation 'ai.bithuman:expression2-android:0.4.7'
     implementation 'com.qualcomm.qti:qnn-litert-delegate:2.49.0'
     implementation 'com.qualcomm.qti:qnn-runtime:2.49.0'
 }
