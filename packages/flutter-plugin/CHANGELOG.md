@@ -1,5 +1,19 @@
 ## Unreleased
 
+## 2.4.0 — 2026-09-16
+
+The first tagged plugin release (`flutter-plugin-v2.4.0`). Everything below shipped to
+main between the 2.3.3 engine bump and this tag; a developer consuming the plugin by git
+URL with no ref has been getting it as it landed. Accepted by the owner on his own phone,
+in his words: *"Now android works! The interaction turns out nicely."*
+
+Four user-visible behaviour changes since 2.3.3, each landed as its own squash on main:
+the avatar FILLS a phone screen under one rule for both models (#41); the voice no longer
+pauses for a late frame and the transport no longer paces the sink — about 900 ms off
+time-to-first-audio (#42); the idle clip plays whole, first frame to last, and wraps at
+the authored end (#43); the microphone stays open while the agent talks, so a cut-in
+interrupts — duplex, VAD unified with iOS (#44).
+
 * **The idle clip plays from its first frame to its last and wraps there, on every
   platform, and nothing holds it.** The owner: *"I only see the 1 s or so of the idle
   video and then it loops back"* — and then: *"it shouldn't cut at all as it should just
