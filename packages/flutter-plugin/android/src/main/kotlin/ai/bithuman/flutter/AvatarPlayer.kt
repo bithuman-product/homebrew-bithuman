@@ -61,7 +61,7 @@ class AvatarPlayer(
      * shipped a WHITE frame and a 12 ms 2 kHz click every 40th speech unit (2.0 s)
      * while the agent talked. The owner reported it as "a screen flash at every chunk
      * and a weird 'do' sound every second". A dev lever that a release build honours
-     * is not a dev lever; it is a latent customer defect armed by whoever last held
+     * is not a dev lever; it is a latent customer defect switched on by whoever last held
      * the phone.
      */
     private val debuggable: Boolean = false,
