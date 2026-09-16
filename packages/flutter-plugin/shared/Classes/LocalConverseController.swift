@@ -14,8 +14,8 @@ import FlutterMacOS
 #endif
 
 /// LOCAL-mode orchestrator for one avatar session. Reuses the plugin's existing
-/// RealtimeAudioIO (VP-IO mic + AEC + speaker + the avatar-lipsync path) and
-/// AvatarTexture (idle driver-video + 25fps compose); only the BRAIN is new:
+/// RealtimeAudioIO (VP-IO mic + AEC + speaker + the avatar-lipsync path) and its
+/// `LipsyncSink` (idle driver-video + 25fps compose); only the BRAIN is new:
 ///   mic (AEC'd) → Apple SpeechAnalyzer → converse push_text
 ///   converse TTS (24k) → RealtimeAudioIO.playSpeakerPCM24k (speaker + avatar)
 ///   barge-in: HOLD → CONFIRM (RealtimeAudioIO.duplexTick). The bot goes quiet
@@ -123,7 +123,7 @@ final class LocalConverseController: @unchecked Sendable {
         // `response.done → defer until _audioBufferedUntil drains, gated by
         // _audioGen`. macOS-gated inside onTurnEnd() (embody runtime is macOS-only);
         // iOS compiles to a no-op.
-        converse.onTurnEnd   = { [weak self] in self?.io?.lipsyncTexture?.onTurnEnd() }
+        converse.onTurnEnd   = { [weak self] in self?.io?.lipsyncSink?.onTurnEnd() }
 
         // ENERGY-driven barge: the native VP-IO VAD (RealtimeAudioIO, driven by
         // vad_threshold) fires io.barge() the moment the user's voice crosses the

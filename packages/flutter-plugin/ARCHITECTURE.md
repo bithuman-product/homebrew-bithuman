@@ -302,6 +302,60 @@ brain, or the audio IO.
 
 ---
 
+## The `ai.bithuman.avatar` channel — which half is voice
+
+One method channel carries two modules. This is the **measured** split (2026-09-16,
+from `BithumanAvatarPlugin.swift`'s `handle(_:result:)`): **28 `case` labels, 29 verb
+names** — `setExpression2AgentDir`/`setEmbodyAgentDir` share a label. Each verb is
+classed by the native state its handler actually touches (`textures` /
+`registrarTextures` / PiP ⇒ render; `audioIOs` / `micChannels` / `converseControllers`
+/ `AVCaptureDevice` ⇒ voice), not by its name.
+
+**This list is the boundary.** Anyone splitting the channel moves exactly these rows;
+anyone adding a verb decides which column it lands in before writing it.
+
+| column | n | verbs |
+|---|---|---|
+| **voice only** | 11 | `audioStart` · `audioStop` · `interrupt` · `playSpeakerPCM` · `micPermissionStatus` · `requestMicPermission` · `isLocalModeSupported` · `localAudioStart` · `localAudioStop` · `localPushText` · `localSetMuted` |
+| **render only** | 12 | `load` · `frameSize` · `isReady` · `setDisplayMode` · `setIdleHold` · `engineVersion` · `setExpression2AgentDir` · `setEmbodyAgentDir` · `pushAudio` · `pipAvailable` · `pipStart` · `pipStop` |
+| **both** | 4 | `dispose` (tears down a texture *and* its audio IO) · `notifyTurnEnd` (a voice event that flushes the render tail) · `attachWebrtcRemoteAudio` · `detachWebrtcRemoteAudio` (remote audio → the render lipsync queue) |
+| **neither** | 2 | `fitWindowToCanvas` (window chrome — belongs with the UI module) · `log` |
+
+`audioStart` is in the voice column *because the texture read is now optional*: it
+resolves `textures[textureId]` into a nil-legal `LipsyncSink` and no longer refuses
+without one. Before 2026-09-16 it, and `localAudioStart`, **bound** the texture in
+their guard — which is what made the voice unit's no-avatar path unreachable.
+
+Two asymmetries fell out of the census and are recorded here rather than fixed:
+
+- **`frameSize` has no caller.** It is implemented natively and invoked by nothing in
+  `lib/` or in the app (the app reads native dims from the `frameDimsChanged`
+  callback instead). Dead surface.
+- **`setSpeaking` is Dart-side only on Apple.** `bithuman.dart` invokes it; the Apple
+  plugin has no `case` for it, so it lands on `FlutterMethodNotImplemented`. It is an
+  Android verb (the Kotlin plugin answers `success(true)`), and its own doc comment
+  says call sites must gate on `Platform.isAndroid` — so this is asymmetry by design,
+  written down so the next reader does not have to re-derive it.
+
+### The one edge the voice unit has on render
+
+`RealtimeAudioIO` reaches render through **one `weak var lipsyncSink: LipsyncSink?`**
+and nothing else. `Protocol/LipsyncSink.swift` names the twelve members it uses — four
+pacing reads, three A/V-lock hooks, and five calls — and `AvatarTexture` conforms with
+no new code. **`nil` is a supported state**, not a degraded one: a voice session with
+no avatar schedules bot audio straight to the speaker and does no lipsync work at all.
+`scripts/check_voice_render_edge.sh` holds the edge (run by *plugin platform guards*,
+with a four-way mutation control); `scripts/prove_lipsync_sink_headless.sh` compiles
+the protocol against a conformer that has no render in it.
+
+★**Nothing in CI compiles this package's Swift** (measured 2026-09-16). `swift-package.yml`
+builds a *different* package; `prove_dev_levers_release.sh` and
+`prove_lipsync_sink_headless.sh` each compile one standalone file. `RealtimeAudioIO.swift`
+and `BithumanAvatarPlugin.swift` need the Flutter modules, so they are graded only by a
+real pod build on a Mac — `flutter build macos` / `flutter build ios` in the app.
+
+---
+
 ## Frozen contracts (never change across migrations)
 
 - **Engine slugs** (dual-accept): `expression2`/`embody`, `essence2`/`elevate`.

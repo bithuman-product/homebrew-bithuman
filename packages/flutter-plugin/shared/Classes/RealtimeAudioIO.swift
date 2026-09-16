@@ -112,10 +112,18 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   // Event channel sink — set when Dart subscribes.
   private var micEventSink: FlutterEventSink?
 
-  // Forward each resampled chunk to the AvatarTexture so it lands in the
+  // Forward each resampled chunk to the render side so it lands in the
   // avatar's compose buffer at the same moment we hand it to the player.
-  // The texture owns the runtime + audio queue; we just push bytes.
-  weak var avatarTextureForLipsync: AvatarTexture?
+  // The sink owns the runtime + audio queue; we just push bytes.
+  //
+  // ★A PROTOCOL, NOT THE RENDER CLASS. This is the ONLY edge this audio unit
+  // has on render. It is nil-legal: nil = a voice session with no avatar, and
+  // playSpeakerPCM24k then schedules the bot audio straight to the speaker
+  // (the `else` branch at the bottom of the speaker block). Every reference to
+  // it below was already `?.`-guarded — what made "voice with no render"
+  // untypeable was the concrete class in THIS declaration, nothing else.
+  // Protocol/LipsyncSink.swift states the twelve members actually used.
+  weak var lipsyncSink: LipsyncSink?
 
   // A/V sync for the Elevate engine (macOS + iOS). Essence is frame-locked
   // (video produced in the same tick the audio is pushed → already aligned)
@@ -124,7 +132,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   // the lipsync push runs IMMEDIATELY (it DRIVES video production) but the
   // SPEAKER is gated at the START of each utterance: chunks buffer until the
   // texture publishes the utterance's first composited frame (polled via
-  // AvatarTexture.speechFramesPublished), then everything schedules and audio
+  // LipsyncSink.speechFramesPublished), then everything schedules and audio
   // + mouth begin together. Bounded by elevateGateMaxWaitSec so a stalled
   // engine can never mute the agent. Mid-utterance chunks schedule
   // immediately — the per-tick backlog pacing in composeTickElevate keeps the
@@ -163,8 +171,6 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   // are paired 1:1 by construction — no hold-then-flush gate, no cushion magic.
   private var embodyPaced: [Float] = []
   private let embodyPacedLock = NSLock()
-  /// The texture this IO drives lipsync for (used to forward the brain turn-end).
-  var lipsyncTexture: AvatarTexture? { avatarTextureForLipsync }
 
   // Graph-mutation gate. Set true ONLY while the macOS performDeviceSwap is
   // rebuilding the engine graph; read by every OFF-MAIN scheduleBuffer/play
@@ -263,14 +269,14 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   func pausePlayback() {
     playbackPaused = true
     if started { _ = bh_tryRun { self.player.pause() } }   // pause can raise if a swap is rebuilding the graph
-    avatarTextureForLipsync?.setLipsyncPaused(true)
+    lipsyncSink?.setLipsyncPaused(true)
     NSLog("[Barge] PAUSE (user speaking — bot held)")
   }
 
   /// Resume after a pausePlayback() (false-alarm interruption).
   func resumePlayback() {
     playbackPaused = false
-    avatarTextureForLipsync?.setLipsyncPaused(false)
+    lipsyncSink?.setLipsyncPaused(false)
     if started { _ = bh_tryRun { self.player.play() } }   // play can raise if a swap is rebuilding the graph
     NSLog("[Barge] RESUME (false alarm — bot continues)")
   }
@@ -1304,8 +1310,8 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     // tick. Only THEN is the unreleased audio dropped and the player flushed. The
     // reverse order let a frame publish against an already-empty FIFO in the window
     // between the two — the Apple form of Android's old 199-unit leak.
-    avatarTextureForLipsync?.setLipsyncPaused(false)  // clear any pause hold
-    avatarTextureForLipsync?.clearAudioQueue()
+    lipsyncSink?.setLipsyncPaused(false)  // clear any pause hold
+    lipsyncSink?.clearAudioQueue()
     // Invalidate the Elevate utterance gate: bump the generation (terminates
     // the poll chain), drop any chunks still held for the first frame, and
     // re-arm the gate so the agent's NEXT response is treated as a fresh
@@ -1477,8 +1483,8 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   ///      Realtime WebSocket as `input_audio_buffer.append`.
   ///   2. The local VAD trigger that calls `barge()` on sustained speech.
   ///
-  /// Mic bytes MUST NEVER reach `avatarTextureForLipsync.enqueuePCM` — the
-  /// bithuman runtime is fed ONLY by `playSpeakerPCM24k` (the bot's PCM). The
+  /// Mic bytes MUST NEVER reach `lipsyncSink.enqueuePCM` — the bithuman
+  /// runtime is fed ONLY by `playSpeakerPCM24k` (the bot's PCM). The
   /// avatar must lipsync the AGENT, never the USER.
   private func handleMicBuffer(_ buffer: AVAudioPCMBuffer) {
     // LOCAL mode: hand the raw AEC'd buffer to the on-device ASR. (SpeechPipeline
@@ -1696,11 +1702,11 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     // at release time, so it is allowed to fall through.
     // macOS-only: guards the HAL device-swap graph rebuild, which cannot happen on iOS
     #if os(macOS)
-    if graphIsMutating(), (avatarTextureForLipsync?.usesStartGate ?? false) || avatarTextureForLipsync == nil {
+    if graphIsMutating(), (lipsyncSink?.usesStartGate ?? false) || lipsyncSink == nil {
       return
     }
     #endif
-    let useGate = (avatarTextureForLipsync?.usesStartGate ?? false)
+    let useGate = (lipsyncSink?.usesStartGate ?? false)
     if useGate {
       let now = CACurrentMediaTime()
       speakerGenLock.lock()
@@ -1731,7 +1737,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       case .idle:
         // Engine still warming → no frames will come; play immediately over
         // the idle loop instead of pointlessly holding to the bound.
-        if avatarTextureForLipsync?.startGateEngineReady != true {
+        if lipsyncSink?.startGateEngineReady != true {
           elevateGate = .open
           speakerGenLock.unlock()
           NSLog("[av-gate] utterance start: engine warming — speaker plays ungated")
@@ -1748,12 +1754,12 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
         elevateGate = .holding
         gateHeldBuffers = [inBuf]
         gateUtteranceStart = now
-        gateBaseFrames = avatarTextureForLipsync?.speechFramesPublished ?? 0
+        gateBaseFrames = lipsyncSink?.speechFramesPublished ?? 0
         speakerGenLock.unlock()
         NSLog("[elevate-av] utterance start: holding speaker for first frame")
         pollElevateGate(gen: gen)
       }
-    } else if avatarTextureForLipsync != nil {
+    } else if lipsyncSink != nil {
       // embody: do NOT schedule now. Buffer the bot audio; it's released 50 ms
       // per published lip-frame by releaseEmbodyAudioFrame() so audio is paired
       // 1:1 with the mouth (principled A/V lock that absorbs the ~1.6 s pipeline
@@ -1762,8 +1768,8 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       // NEW RealtimeAudioIO is created; a stale closure capturing the old
       // (deallocated) one would silently stop releasing audio — the "no sound
       // after reconnect" bug.
-      avatarTextureForLipsync?.onSpeechFramePublished = { [weak self] in self?.releaseEmbodyAudioFrame() }
-      avatarTextureForLipsync?.canReleaseSpeechAudio = { [weak self] in self?.canReleaseEmbodyAudioFrame() ?? true }
+      lipsyncSink?.onSpeechFramePublished = { [weak self] in self?.releaseEmbodyAudioFrame() }
+      lipsyncSink?.canReleaseSpeechAudio = { [weak self] in self?.canReleaseEmbodyAudioFrame() ?? true }
       if let s = inBuf.floatChannelData?[0] {
         embodyPacedLock.lock()
         embodyPaced.append(contentsOf: UnsafeBufferPointer(start: s, count: Int(frameCount)))
@@ -1801,7 +1807,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   /// construction"; it held only while the FIFO was never short, and said nothing about
   /// the case where it is.
   func canReleaseEmbodyAudioFrame() -> Bool {
-    let secs = avatarTextureForLipsync?.audioReleaseSeconds ?? 0.05
+    let secs = lipsyncSink?.audioReleaseSeconds ?? 0.05
     let need = Int(serverTtsFormat.sampleRate * secs)
     embodyPacedLock.lock(); let have = embodyPaced.count; embodyPacedLock.unlock()
     return have >= need
@@ -1818,8 +1824,8 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     if graphIsMutating() { return }
     #endif
     // Per-fps release quantum = 1/displayFps: embody 0.05 (20 fps), essence2 0.04
-    // (25 fps). A constant 0.05 over-demands at 25 fps. Defaults to 0.05 if no texture.
-    let secs = avatarTextureForLipsync?.audioReleaseSeconds ?? 0.05
+    // (25 fps). A constant 0.05 over-demands at 25 fps. Defaults to 0.05 if no sink.
+    let secs = lipsyncSink?.audioReleaseSeconds ?? 0.05
     let need = Int(serverTtsFormat.sampleRate * secs)   // 1200 @ 24 kHz embody; 960 essence2
     embodyPacedLock.lock()
     guard embodyPaced.count >= need else {
@@ -1842,10 +1848,10 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     buf.frameLength = AVAudioFrameCount(need)
     if let dst = buf.floatChannelData?[0] {
       chunk.withUnsafeBufferPointer { dst.update(from: $0.baseAddress!, count: need) }
-      if let tex = avatarTextureForLipsync, tex.markerOnNextRelease {
+      if let sink = lipsyncSink, sink.markerOnNextRelease {
         // ★SYNC MARKER: 12 ms of 2 kHz at -6 dBFS, Hann-shaped, MIXED INTO this frame's own slice
         // so it takes the same scheduling path as every other sample (visual-proof lane's design).
-        tex.markerOnNextRelease = false
+        sink.markerOnNextRelease = false
         let sr = serverTtsFormat.sampleRate
         let n = min(need, Int(sr * 0.012))
         for i in 0..<n {
@@ -1927,7 +1933,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
         return
       }
       #endif
-      let frames = self.avatarTextureForLipsync?.speechFramesPublished ?? 0
+      let frames = self.lipsyncSink?.speechFramesPublished ?? 0
       let waited = CACurrentMediaTime() - self.gateUtteranceStart
       let frameLanded = frames > self.gateBaseFrames
       if frameLanded || waited >= Self.elevateGateMaxWaitSec {
@@ -1948,7 +1954,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
           self.gateHeldBuffers = []
           self.elevateGate = .open
           self.speakerGenLock.unlock()
-          self.avatarTextureForLipsync?.noteUtteranceAudioStarted()
+          self.lipsyncSink?.noteUtteranceAudioStarted()
           self.notePlayoutScheduled(heldSecs)
           NSLog("[elevate-av] speaker START after %.0f ms (firstFrame=%@, held %d chunks)",
                 waited * 1000, frameLanded ? "yes" : "TIMEOUT", held.count)
@@ -1960,9 +1966,9 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
         self.gateHeldBuffers = []
         self.elevateGate = .open
         self.speakerGenLock.unlock()
-        // Stamp the texture's speaker clock FIRST so frame pacing references
+        // Stamp the sink's speaker clock FIRST so frame pacing references
         // the true playback start, then flush the held chunks in order.
-        self.avatarTextureForLipsync?.noteUtteranceAudioStarted()
+        self.lipsyncSink?.noteUtteranceAudioStarted()
         self.notePlayoutScheduled(heldSecs)
         for b in held { self.player.scheduleBuffer(b, completionHandler: nil) }
         if !self.player.isPlaying && !self.playbackPaused { self.player.play() }
@@ -1979,6 +1985,9 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   /// Lipsync push shared by both speaker paths: resample 24 → 16 kHz and
   /// hand the bytes to the avatar runtime.
   private func pushLipsync(from inBuf: AVAudioPCMBuffer, frameCount: AVAudioFrameCount) {
+    // No sink = a voice session with no avatar. Don't resample 24 -> 16 kHz for
+    // nobody: the only consumer of this work is `sink.enqueuePCM` below.
+    guard lipsyncSink != nil else { return }
     let outCap = AVAudioFrameCount(Double(frameCount) * 16_000.0 / 24_000.0 + 16)
     if let outBuf = AVAudioPCMBuffer(pcmFormat: lipsyncTarget, frameCapacity: outCap) {
       var delivered = false
@@ -1993,7 +2002,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
          let i16Ptr = outBuf.int16ChannelData?[0] {
         let bytes = Int(outBuf.frameLength) * 2
         let pushData = Data(bytes: i16Ptr, count: bytes)
-        avatarTextureForLipsync?.enqueuePCM(pushData)
+        lipsyncSink?.enqueuePCM(pushData)
       }
     }
   }

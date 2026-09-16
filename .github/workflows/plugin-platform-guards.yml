@@ -16,6 +16,8 @@ on:
       - 'scripts/check_platform_guards.sh'
       - 'scripts/check_dev_levers.sh'
       - 'scripts/prove_dev_levers_release.sh'
+      - 'scripts/check_voice_render_edge.sh'
+      - 'scripts/prove_lipsync_sink_headless.sh'
       - '.github/workflows/plugin-platform-guards.yml'
   push:
     branches: [main]
@@ -28,6 +30,8 @@ on:
       - 'scripts/check_platform_guards.sh'
       - 'scripts/check_dev_levers.sh'
       - 'scripts/prove_dev_levers_release.sh'
+      - 'scripts/check_voice_render_edge.sh'
+      - 'scripts/prove_lipsync_sink_headless.sh'
       - '.github/workflows/plugin-platform-guards.yml'
   workflow_dispatch:
 
@@ -101,3 +105,46 @@ jobs:
           echo "control fires: door without #if DEBUG"
           cp /tmp/door.bak "$F"
           ./scripts/prove_dev_levers_release.sh
+
+  # ── THE VOICE↔RENDER EDGE: voice must be standable with no render at all ────────────
+  # 2026-09-16: RealtimeAudioIO (mic + speaker + VP-IO AEC) needs twelve things from the
+  # render side and nothing else, and every reference was already `?.`-guarded —
+  # playSpeakerPCM24k has always carried a no-avatar branch. It was UNREACHABLE anyway,
+  # for exactly two reasons: the sink was typed as the concrete AvatarTexture, and
+  # audioStart/localAudioStart bound textures[textureId] in their guard and refused
+  # BAD_ARGS without one. Both are cut. An unreachable branch is silent, so this is the
+  # gate that stops them growing back.
+  voice-render-edge:
+    # macOS because the compiled half needs swiftc. The source half runs anywhere.
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: the voice unit names no render class, and neither voice entry point requires a texture
+        run: ./scripts/check_voice_render_edge.sh
+      - name: the protocol compiles, is weak-holdable, and a NON-RENDER type satisfies all of it
+        run: ./scripts/prove_lipsync_sink_headless.sh
+      - name: Negative controls — an EXACT PARTITION, each mutation reddens only the rules that test it
+        run: |
+          set -u
+          C=packages/flutter-plugin/shared/Classes
+          cp $C/RealtimeAudioIO.swift /tmp/a.bak; cp $C/BithumanAvatarPlugin.swift /tmp/b.bak
+          restore() { cp /tmp/a.bak $C/RealtimeAudioIO.swift; cp /tmp/b.bak $C/BithumanAvatarPlugin.swift; }
+          mutate() { python3 scripts/ci/mutate_voice_render_edge.py "$1"; }
+          grade() {
+            label="$1"; shift
+            out=$(./scripts/check_voice_render_edge.sh 2>&1) || true
+            echo "$out"
+            for want in "$@"; do
+              echo "$out" | grep -q "FAIL  $want " || { echo "::error::$label — $want was expected to go RED and did not; the rule is not looking"; restore; exit 1; }
+            done
+            reds=$(echo "$out" | grep -c "FAIL  " || true)
+            [ "$reds" -eq "$#" ] || { echo "::error::$label — $reds rules went red, expected exactly $# ($*). The partition is not exact."; restore; exit 1; }
+            echo "control fires exactly: $label -> $*"
+            restore
+          }
+          mutate M1; grade "M1 the sink typed as the render class again" R1a R1b
+          mutate M2; grade "M2 audioStart binds a texture in its guard again" R2
+          mutate M3; grade "M3 AvatarTexture stops declaring the conformance" R3a
+          mutate M4; grade "M4 a protocol member vanishes from the texture" R3b
+          ./scripts/check_voice_render_edge.sh
