@@ -450,7 +450,7 @@ let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/release
 // tag the consumer's `from:` picks and then reads absolute URLs out of the
 // manifest it finds there — the asset does not have to live on the resolved tag.
 // ---------------------------------------------------------------------------
-let expression2Tag = "v2.6.1"
+let expression2Tag = "v2.6.2"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 
@@ -701,17 +701,17 @@ let package = Package(
         .binaryTarget(
             name: "Expression2Binary",
             url: "\(expression2Base)/Expression2.xcframework.zip",
-            checksum: "d4ce14b6b9c463aa7310ca8200f59ded20931cc33f40b6c530eef13b5a40d326"
+            checksum: "a09b1a434484f27e26cf4c99a99cb8b15ac865bbdeb80389cc5b99b3923b4848"
         ),
         .binaryTarget(
             name: "BithumanEngineProtocolBinary",
             url: "\(expression2Base)/BithumanEngineProtocol.xcframework.zip",
-            checksum: "97c81d74e3d583b5dc94d85e11d27c32586af325ab04389bbb1809a5608d8013"
+            checksum: "4bc4346cf9db33071770a466294514186c5b98e4e48910d05b0cf79ff1c52e61"
         ),
         .binaryTarget(
             name: "UnifiedModelHeaderBinary",
             url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
-            checksum: "60a3a1dce241d182e14b3d18607dddc01f129248899097490240b4262f5cae22"
+            checksum: "f13540723e551621990fe2ce3d1e13a4874ae2cb3038fc60034bb3e5be2ca1c6"
         ),
         // The essence-2 engine itself. The target name matches the xcframework
         // inside the archive; the MODULES it vends are `CLibEssence2` and, since
