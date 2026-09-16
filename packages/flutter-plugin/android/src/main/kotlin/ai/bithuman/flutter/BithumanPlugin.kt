@@ -5,11 +5,13 @@
 // a Galaxy with byte-for-byte the widgets it runs on an iPhone. Nothing here draws
 // chrome; the kit does.
 //
-// Engine: expression-2 through the published `ai.bithuman:expression2-android` AAR
-// (Maven Central — a stranger's clone needs no private SDK). The identity is fetched
-// by CODE through the metered door with the app's credential, into the SDK's own
-// store; `load(path)` therefore takes the agent code on Android where the Apple half
-// takes a staged container directory.
+// Engines: expression-2 through the published `ai.bithuman:expression2-android` AAR and
+// essence-2 through the published `ai.bithuman:essence2-android` AAR (both Maven
+// Central — a stranger's clone needs no private SDK). `load(engine:)` picks one by name,
+// and the player runs the same rules on either through [AvatarEngine]. The identity is
+// fetched by CODE through the metered door with the app's credential, into the SDK's
+// own store; `load(path)` therefore takes the agent code on Android where the Apple
+// half takes a staged container directory.
 //
 // Presentation: AvatarPlayer — the audited one-unit A/V player from the Android chat
 // example (a frame and its 50 ms of sound are ONE object, admitted whole, presented
@@ -23,8 +25,10 @@
 
 package ai.bithuman.flutter
 
+import ai.bithuman.elevate.Essence2Avatar
+import ai.bithuman.elevate.Essence2Metering
+import ai.bithuman.elevate.Essence2ModelStore
 import ai.bithuman.expression2.Expression2Avatar
-import ai.bithuman.expression2.Expression2IdleLoop
 import ai.bithuman.expression2.Expression2ModelStore
 import android.Manifest
 import android.app.Activity
@@ -68,15 +72,13 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     /** One loaded identity: engine + player + the texture its frames land on. */
     private inner class AvatarSession(
         val code: String,
-        val avatar: Expression2Avatar,
+        val avatar: AvatarEngine,
         val entry: TextureRegistry.SurfaceTextureEntry,
         val surface: Surface,
     ) {
         val ready = AtomicBoolean(false)
         val stopped = AtomicBoolean(false)
         var player: AvatarPlayer? = null
-        /** The identity's idle loop — the SDK's cursor over its clip — kept so a held session can start a fresh player. */
-        var idle: Expression2IdleLoop? = null
         var mic: MicCapture? = null
         var micSink: EventChannel.EventSink? = null
         var micChannel: EventChannel? = null
@@ -132,7 +134,9 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 result.success(mapOf("width" to s.avatar.width, "height" to s.avatar.height))
             }
             "isReady" -> result.success(session(call)?.ready?.get() ?: false)
-            "engineVersion" -> result.success("expression2-android (AvatarPlayer one-unit presenter)")
+            "engineVersion" -> result.success(
+                (sessions.values.firstOrNull()?.avatar?.name ?: "expression2-android|essence2-android") +
+                    " (AvatarPlayer one-unit presenter)")
 
             // --- the agent's voice in: play it AND lipsync from it, one unit ---
             "playSpeakerPCM" -> {
@@ -142,7 +146,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 result.success(null)
             }
             "notifyTurnEnd" -> { session(call)?.player?.endOfReply(); result.success(null) }
-            "interrupt" -> { session(call)?.player?.bargeIn(); result.success(null) }
+            "interrupt" -> { session(call)?.player?.bargeIn(call.argument<String>("reason") ?: "app"); result.success(null) }
             // The transport's instrument lines, into logcat beside the player's own.
             "log" -> { Log.i("bhdart", call.argument<String>("line") ?: ""); result.success(null) }
             // The mouth is driven by the real audio here; nothing to gate.
@@ -168,7 +172,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     Log.i(TAG, "held: player stopped (app off screen)")
                 } else if (s.player == null && !s.stopped.get()) {
                     val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-                    val p = AvatarPlayer(s.avatar, s.idle, debuggable = debuggable, capturable = false) { bmp -> s.draw(bmp) }
+                    val p = AvatarPlayer(s.avatar, debuggable = debuggable, capturable = false) { bmp -> s.draw(bmp) }
                     s.player = p; p.start()
                     Log.i(TAG, "released: fresh player started")
                 }
@@ -194,9 +198,10 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val code = call.argument<String>("path")
         val engine = call.argument<String>("engine") ?: "expression2"
         val secret = call.argument<String>("apiSecret")
-        if (code.isNullOrBlank() || (engine != "expression2" && engine != "embody")) {
+        val essence2 = engine == "essence2" || engine == "elevate"
+        if (code.isNullOrBlank() || !(essence2 || engine == "expression2" || engine == "embody")) {
             return result.error("unsupported",
-                "Android runs engine='expression2'; 'path' is the agent code (e.g. A02HCY0444)", null)
+                "Android runs engine='expression2' or 'essence2'; 'path' is the agent code (e.g. A02HCY0444)", null)
         }
         // Texture registration must happen on the platform thread; the fetch and the
         // engine warm-up must not (a first run downloads ~158 MB).
@@ -204,25 +209,11 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val t0 = System.nanoTime()
         Thread({
             try {
-                val store = if (secret.isNullOrBlank()) Expression2ModelStore(context)
-                    else Expression2ModelStore(context, java.io.File(context.filesDir, "expression2"),
-                        3L * 1024 * 1024 * 1024, Expression2ModelStore.MeteredDoorResolver(secret))
-                val model = store.fetch(code, false, null) { member, done, total ->
-                    if (total > 0 && done == total) Log.i(TAG, "fetched $member")
-                }
-                val avatar = Expression2Avatar.create(context, model)
-                // The idle loop the agent plays between turns is the SDK's: the identity's own
-                // clip from the same store as the weights, decoded in place, every frame of it.
-                // No clip is a logged reason and a still face, never a second download.
-                val idle = avatar.idleLoop
-                if (idle == null) Log.w(TAG, "idle loop unavailable: ${avatar.idleLoopUnavailableReason}")
-                Log.i(TAG, "avatar ready ${avatar.width}x${avatar.height} (${avatar.accelerator}${avatar.acceleratorNote.let { if (it.isBlank()) "" else " — $it" }}, " +
-                    "overlap=${avatar.overlapActive}, idle ${idle?.frameCount ?: 0}f in place) +${(System.nanoTime() - t0) / 1_000_000} ms")
+                val avatar: AvatarEngine = if (essence2) loadEssence2(code, secret, t0) else loadExpression2(code, secret, t0)
                 entry.surfaceTexture().setDefaultBufferSize(avatar.width, avatar.height)
                 val s = AvatarSession(code, avatar, entry, Surface(entry.surfaceTexture()))
-                s.idle = idle
                 val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-                val p = AvatarPlayer(avatar, idle, debuggable = debuggable, capturable = false) { bmp -> s.draw(bmp) }
+                val p = AvatarPlayer(avatar, debuggable = debuggable, capturable = false) { bmp -> s.draw(bmp) }
                 s.player = p
                 main.post {
                     sessions[entry.id()] = s
@@ -234,6 +225,47 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 main.post { entry.release(); result.error("load_failed", e.message ?: e.toString(), null) }
             }
         }, "bh-load").start()
+    }
+
+    /** Fetch by code into the SDK's store and open the engine — expression-2. Off the platform thread. */
+    private fun loadExpression2(code: String, secret: String?, t0: Long): AvatarEngine {
+        val store = if (secret.isNullOrBlank()) Expression2ModelStore(context)
+            else Expression2ModelStore(context, java.io.File(context.filesDir, "expression2"),
+                3L * 1024 * 1024 * 1024, Expression2ModelStore.MeteredDoorResolver(secret))
+        val model = store.fetch(code, false, null) { member, done, total ->
+            if (total > 0 && done == total) Log.i(TAG, "fetched $member")
+        }
+        val avatar = Expression2Avatar.create(context, model)
+        // The idle loop the agent plays between turns is the SDK's: the identity's own
+        // clip from the same store as the weights, decoded in place, every frame of it.
+        // No clip is a logged reason and a still face, never a second download.
+        val idle = avatar.idleLoop
+        if (idle == null) Log.w(TAG, "idle loop unavailable: ${avatar.idleLoopUnavailableReason}")
+        Log.i(TAG, "avatar ready ${avatar.width}x${avatar.height} (${avatar.accelerator}${avatar.acceleratorNote.let { if (it.isBlank()) "" else " — $it" }}, " +
+            "overlap=${avatar.overlapActive}, idle ${idle?.frameCount ?: 0}f in place) +${(System.nanoTime() - t0) / 1_000_000} ms")
+        return Expression2Engine(avatar)
+    }
+
+    /**
+     * The same for essence-2. The identity's members come through the metered door into
+     * the SDK's store — the shared audio frontend among them — and the credential also
+     * arms the engine's own meter, which refuses every frame without one (0.5.7).
+     */
+    private fun loadEssence2(code: String, secret: String?, t0: Long): AvatarEngine {
+        if (secret.isNullOrBlank()) throw IllegalArgumentException(
+            "essence-2 on Android needs the app's credential: members are served through the metered door and every frame is metered")
+        Essence2Metering.apiSecret = secret
+        val store = Essence2ModelStore(context, java.io.File(context.filesDir, "essence2"),
+            3L * 1024 * 1024 * 1024, Essence2ModelStore.MeteredDoorResolver(secret))
+        val bundle = store.fetch(code, false, null) { member, done, total ->
+            if (total > 0 && done == total) Log.i(TAG, "fetched $member")
+        }
+        val w2v = java.io.File(bundle.dir, Essence2Avatar.W2V_MEMBER)
+        val avatar = Essence2Avatar.create(bundle.dir, w2v, 0)
+        val e = Essence2Engine(avatar)
+        Log.i(TAG, "avatar ready ${avatar.width}x${avatar.height} (essence-2, ${e.fps} fps, driver ${avatar.targetFrames} frames" +
+            " in place) +${(System.nanoTime() - t0) / 1_000_000} ms")
+        return e
     }
 
     private fun destroy(id: Long) {
