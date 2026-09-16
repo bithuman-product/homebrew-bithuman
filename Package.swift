@@ -595,7 +595,35 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // byte-identical to v1.1.0 and its checksum below does not move. Re-fetched
 // anonymously after upload and re-hashed; the sidecars are again 65 bytes.
 // ---------------------------------------------------------------------------
-let essence2Tag = "essence2-v1.7.0"
+// ★ ROLLED 2026-09-16 (evening) ONTO essence2-v1.8.0 — THE BARGE-IN THAT STOPS
+// REWINDING THE DRIVER VIDEO. The owner reported it twice: "for essence-2 the
+// interruption shouldn't rewind driver video to start — it should ride on the
+// current frame and continue playing video continuously for continuity."
+// bithuman-models #774 (main 6bed5ee7a) is the fix; essence2-v1.7.0 was cut
+// about seven hours before that commit and carries the defect on every slice.
+//
+// `LeCoreSession.idleAdvance` used to copy `idleBGR` — driver frame 0, cached
+// once at init — whenever the ring was empty, and `le_utt_interrupt` PURGES
+// that ring by design, so a barge-in landed there every single time (measured:
+// delivered si `55 56 57 [0] 58 59 60`, 3 frames / 150 ms per cut and up to 19
+// frames / ~1 s at an utterance onset). It now returns 0 and the presenter
+// rides on the frame it has; the plugin's own tick already reads
+// `idle(into:) > 0` and holds otherwise.
+//
+// GRADED ON THE PUBLISHED SLICES, BOTH DIRECTIONS, before this line was
+// written — the archive re-downloaded anonymously from the tap, re-hashed to
+// 06be42fe… against its sidecar AND the checksum below, then read with `nm` +
+// `objdump`; the same commands on essence2-v1.7.0 as the control:
+//
+//     read off the slice                             v1.7.0   v1.8.0
+//     everDelivered ivar-offset symbol (Apple half)       0        2
+//     idleBGR symbol  ← the reader's own control           2        2
+//     le_a2x_reset sign test on si0 (tbz w1,#0x1f)         0        1
+//     idleAdvance instruction count                       79       85
+//
+// The onnxruntime archive is carried forward BYTE-IDENTICAL (same release
+// asset, digest re-measured after upload), so its checksum does not move.
+let essence2Tag = "essence2-v1.8.0"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -725,7 +753,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "ee21342f611d94c7a8a3ef497d8dfc67f146ff6513403b2741d6f6011f805b1f"
+            checksum: "06be42fec2b194752214e7ae16fa2bbb5de75d358e5de977c8e2549a9ca58348"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see

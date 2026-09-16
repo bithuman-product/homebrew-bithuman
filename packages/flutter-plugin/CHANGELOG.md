@@ -1,3 +1,57 @@
+## 2.6.4 — 2026-09-16
+
+Tag `flutter-plugin-v2.6.4`. One change: the Apple essence-2 engine pin moves
+`essence2-v1.7.0 → essence2-v1.8.0` on **both** Apple paths in one commit (`Package.swift`'s
+`essence2Tag` + `libessence2` binaryTarget checksum, and this package's own
+`LIBESSENCE2_*` block), with `BITHUMAN_MODELS_REF` moved to `6bed5ee7a` — the tree that
+engine was built from.
+
+**An interruption stops rewinding the driver video** (bithuman-models #774). The owner
+reported it twice: *"for essence-2 the interruption shouldn't rewind driver video to start
+— it should ride on the current frame and continue playing video continuously for
+continuity. Right now sometimes especially during talking interruption I can see obvious
+discontinuities there."*
+
+`LeCoreSession.idleAdvance` copied `idleBGR` — the driver video's frame 0, read once at
+init — whenever the engine's ring was empty, and `le_utt_interrupt` **purges that ring by
+design**, so a barge-in landed there every single time. Measured on the engine's own bytes
+at a 50 ms display tick across three real cuts: the delivered si read `55 56 57 [0] 58 59
+60` — the driver's first frame spliced into the middle of the walk — **exactly 3 frames
+(150 ms) per cut, and up to 19 frames (~1 s) at an utterance onset**, which is the same
+defect the moment the user starts talking. The fix is a deletion: `idleAdvance` returns 0
+and the presenter keeps the frame it has, which IS the current frame. The shared core
+learns the same answer — `le_a2x_reset` with `si0 < 0` continues the walk it is on.
+
+No plugin source changes were needed: `composeTickEssence2` and `publishIdleLoopFrame`
+already read `rt.idle(into:) > 0` and hold the texture otherwise, and the one caller that
+takes the adapter's `rt.idle` property (with its flat-grey `fallbackIdle`) is
+`setupAtomicSlotClock`, which runs before any frame has been delivered — exactly the case
+where the engine still answers with frame 0, because that is genuinely where the walk is.
+
+★ **Proved from the published bytes, not from a changelog and not from a version string.**
+The `libessence2.xcframework.zip` of `essence2-v1.8.0` was re-downloaded **anonymously**
+from the tap (`curl`, no credential), re-hashed to `06be42fe…` against both its own sidecar
+and the checksum pinned here, unzipped, and read with `nm` + `llvm-objdump` on all three
+slices — then the same commands on `essence2-v1.7.0`, the engine shipping in 2.6.3, as the
+control:
+
+| read off the slice | essence2-v1.7.0 | **essence2-v1.8.0** |
+|---|---|---|
+| `everDelivered` ivar-offset symbol — the Apple half | 0 | **2** |
+| `idleBGR` symbol — the reader's own control | 2 | 2 |
+| `le_a2x_reset` sign test on `si0` (`tbz w1, #0x1f`) | 0 | **1** |
+| `idleAdvance` instruction count | 79 | **85** |
+
+macos-arm64, ios-arm64 and ios-arm64-simulator read identically. In 1.8.0 `idleAdvance`
+reads `ldrb w24, [x20, #0x78]` (the `everDelivered` flag) under the lock and
+`tbnz w24, #0x0, <mov x0, #0>` — hold — before it can reach the `idleBGR` copy at
+`[x20, #0x70]`; in 1.7.0 that copy is unconditional.
+
+**Android is NOT covered by this tag.** `ai.bithuman:essence2-android:0.5.9`, pinned in
+`android/build.gradle`, was staged from a commit four before #774, so the Android half of
+the same defect (`Essence2Avatar.resetAudio(startFrame: Int = 0)`) is still live there. That
+coordinate is a Maven Central publish and stays the owner's click.
+
 ## 2.6.3 — 2026-09-16
 
 Tag `flutter-plugin-v2.6.3`. One change: the Android essence-2 pin moves
