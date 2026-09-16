@@ -572,13 +572,20 @@ def _mut_dirty_archive(src: str) -> str:
     archive's own -- so R1 stays GREEN and only R6 can turn red. An arm that
     broke the checksum too would prove nothing about R6.
     """
-    return src.replace(
-        '            url: "\\(expression2Base)/UnifiedModelHeader.xcframework.zip",\n'
-        '            checksum: "60a3a1dce241d182e14b3d18607dddc01f129248899097490240b4262f5cae22"',
-        '            url: "https://github.com/bithuman-product/homebrew-bithuman/releases/'
-        'download/v2.6.0/UnifiedModelHeader.xcframework.zip",\n'
-        '            checksum: "33b7d575ec90055a4894fb1fbbb507b9264694752c6a2a5e35c7bf8c069e180e"',
-        1,
+    # ★ WHATEVER checksum the pin carries today, not a literal. This arm used to
+    # name v2.6.1's UnifiedModelHeader checksum (60a3a1dc…) as the text to replace,
+    # so the first pin move after it — v2.6.2, 2026-09-16 02:15Z — made the
+    # replacement match nothing, the harness reported "the mutation changed
+    # NOTHING — this arm tests air", and the workflow was red on main for every
+    # commit from that pin move on (7c73c70, 65d0f02). A mutation arm that is
+    # keyed to one release's bytes proves the guard for exactly one release.
+    return re.sub(
+        r'(            url: "\\\(expression2Base\)/UnifiedModelHeader\.xcframework\.zip",\n'
+        r'            checksum: ")[0-9a-f]{64}(")',
+        lambda m: ('            url: "https://github.com/bithuman-product/homebrew-bithuman/releases/'
+                   'download/v2.6.0/UnifiedModelHeader.xcframework.zip",\n'
+                   '            checksum: "33b7d575ec90055a4894fb1fbbb507b9264694752c6a2a5e35c7bf8c069e180e"'),
+        src, count=1,
     )
 
 
