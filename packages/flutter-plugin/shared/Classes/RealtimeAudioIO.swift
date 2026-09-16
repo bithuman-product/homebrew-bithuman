@@ -16,9 +16,10 @@
 //     WS transport carrying PCM both ways. (The earlier iOS failures came
 //     from running TWO audio units: WebRTC's VP-IO plus a side-channel
 //     engine → ducking + echo outside the AEC reference.)
-//   - The opt-in energy-VAD barge uses a ~0.3 s sustain gate (+ gap tolerance)
-//     on BOTH platforms (rejects coughs/clicks; the bare peak detector was
-//     hair-trigger). LOCAL only — cloud paths use OpenAI server_vad.
+//   - The LOCAL duplex gate HOLDS the agent losslessly on an echo-aware floor,
+//     then re-reads the mic with the far end silent and either CONFIRMS a cut or
+//     RELEASES back into the same reply (`duplexTick`). LOCAL only — cloud paths
+//     use OpenAI server_vad, which is faster and better informed there.
 //
 // Why this exists: Flutter's `record` and `audioplayers` packages are
 // independent CoreAudio clients with no shared APM, so:
@@ -53,8 +54,9 @@ import CoreAudio   // HAL default-device listeners for audio hot-swap (no AVAudi
 private let kVerboseAudioLog: Bool = DevLevers.debugAudio
 
 /// Barge-calibration logging gate (`BITHUMAN_DEBUG_BARGE=1`): logs the post-AEC
-/// mic peak vs the effective (echo-margined) threshold and the bot-audible flag,
-/// so the energy `vad_threshold` + `voicePeakThresholdDuringBot` can be tuned per device.
+/// mic peak, the quiet-mode threshold, the far end the canceller is removing and
+/// the duplex phase, every 10th chunk — the per-packet view the 1 s `[bhmic]` line
+/// cannot give. Debug builds only (DevLevers).
 private let kDebugBarge: Bool = DevLevers.debugBarge
 
 @inline(__always)
@@ -235,26 +237,23 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   // LOCAL mode hooks (nil in cloud mode). `onMicTap` receives each raw AEC'd
   // mic buffer so the local brain (Apple SpeechAnalyzer) can transcribe it
   // instead of shipping it to the OpenAI WebSocket. `onBarge` fires when the
-  // energy VAD detects sustained speech, so the local brain cancels its turn
-  // (hard cut, lossy) — this is the unified, energy-driven barge that replaced
-  // the old ASR-word-count turn-over.
+  // duplex gate CONFIRMS a person — after the agent has already been held and
+  // the microphone re-read with the far end silent — so the local brain cancels
+  // its turn. A hold on its own never reaches here: it is not a decision.
   var onMicTap: ((AVAudioPCMBuffer) -> Void)?
   var onBarge: (() -> Void)?
   // LOCAL-mode mic mute. When true the mic→brain (STT) forward (`onMicTap`) is
   // skipped so the user can mute themselves; the speaker + avatar paths are
   // untouched. Default false. Cloud mode doesn't set this (onMicTap is nil).
   var micMuted = false
-  // Lossless PAUSE/RESUME edges, fired only when `lipsyncPauseControl` is true.
-  // The current LOCAL path keeps lipsyncPauseControl = false (hard cut via
-  // onBarge), so these are not installed — retained for a future opt-in
-  // pause-instead-of-cut mode. Turn-over is energy-driven, not word-count.
-  var onUserSpeechStart: (() -> Void)?
-  var onUserSpeechEnd: (() -> Void)?
-  // When true, playSpeakerPCM24k does NOT drop chunks while the user is active —
-  // pause is lossless via pausePlayback() instead. The shipped LOCAL path leaves
-  // this false (hard cut).
-  var lipsyncPauseControl = false
-  private var wasUserVoiceActive = false
+  /// THE DUPLEX GATE IS ON — which is the same question as "is this LOCAL mode",
+  /// and used to be a second flag a caller had to remember to set alongside the
+  /// threshold. It says two things at once, and they are the same thing: this
+  /// session has no server VAD so the energy gate is its barge, AND the agent can
+  /// be HELD and resumed, so `playSpeakerPCM24k` must buffer a chunk that arrives
+  /// during a hold instead of dropping it. Cloud passes 0 and gets neither: there
+  /// the server has already cancelled the response and the chunks in flight are dead.
+  private var duplexGateOn: Bool { voicePeakThreshold > 0 }
   // True between pausePlayback() and resumePlayback(): incoming chunks still
   // SCHEDULE (buffer for lossless resume) but must NOT re-start the player.
   private var playbackPaused = false
@@ -309,11 +308,36 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   private var micLineAt = Date.distantPast
   private var farSumSq = 0.0, farN = 0, farPeak: Float = 0
   private var farLineAt = Date.distantPast
+  // ---- the far end, at the resolution the barge decision needs ----
+  // `[bhfar]` above is a 1 s line for a reader. The duplex gate needs the SAME
+  // quantity per chunk, because "how loud is the thing the canceller has to
+  // remove, right now" is what turns an absolute floor into an echo-aware one.
+  // A tiny ring of (hostTime, peak) per scheduled chunk; `farRecentPeak()` takes
+  // the max over a window wide enough to cover the player queue + the speaker's
+  // output latency + the acoustic flight, so the gate never has to know the
+  // alignment exactly — only an upper bound on what could be echoing right now.
+  private let farRingCap = 64
+  private var farRing: [(t: Date, peak: Float)] = []
+  private let farRingLock = NSLock()
+  /// Max far-end chunk peak scheduled within the last `secs` (Int16 units, 0…32767).
+  /// 0 ⇒ nothing was scheduled in that window, so nothing can be echoing.
+  private func farRecentPeak(_ secs: TimeInterval = 0.6) -> Int32 {
+    let cutoff = Date().addingTimeInterval(-secs)
+    farRingLock.lock(); defer { farRingLock.unlock() }
+    var pk: Float = 0
+    for e in farRing where e.t >= cutoff { if e.peak > pk { pk = e.peak } }
+    return Int32(pk * 32768)
+  }
   @inline(__always) private func noteFarEnd(_ p: UnsafePointer<Float>, _ n: Int) {
     var sq = 0.0; var pk = farPeak
-    for i in 0..<n { let v = p[i]; let a = v < 0 ? -v : v; if a > pk { pk = a }; sq += Double(v * v) }
+    var chunkPk: Float = 0
+    for i in 0..<n { let v = p[i]; let a = v < 0 ? -v : v; if a > pk { pk = a }; if a > chunkPk { chunkPk = a }; sq += Double(v * v) }
     farSumSq += sq; farN += n; farPeak = pk
     let now = Date()
+    farRingLock.lock()
+    farRing.append((now, chunkPk))
+    if farRing.count > farRingCap { farRing.removeFirst(farRing.count - farRingCap) }
+    farRingLock.unlock()
     if now.timeIntervalSince(farLineAt) >= 1.0 {
       let rms = (farSumSq / Double(max(1, farN))).squareRoot()
       NSLog("[bhfar] speechSamples=%d peak1s=%d rms1s=%d dbfs=%.1f hostMs=%lld",
@@ -351,14 +375,14 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   // LOCAL mode, where this is the barge trigger.
   private var voicePeakThreshold: Int32 = 0
   private let voiceQuietTimeoutSecs: TimeInterval = 0.5
-  // ANTI-SELF-INTERRUPTION: while the bot is audible, the post-AEC mic peak must
-  // clear this ABSOLUTE Int16 floor (not base×margin) to count as the user
-  // barging in. Set from measurement: converged VP-IO AEC leaves the bot's own
-  // voice at a post-AEC peak of only ~150–200, while a normal-volume interrupting
-  // voice lands ~5000+. A 4000 floor sits far above the echo residual (no
-  // self-barge) yet below normal speech, so conversational interruption registers
-  // immediately. (The previous base×echoMargin = 2500×3 = 7500 floor was ~45× the
-  // echo residual and silently ate normal-volume barge-ins — you had to shout.)
+  // ★ THE AGENT'S OWN VOICE IS THE CONFOUNDER. STOP GUESSING AT IT — REMOVE IT
+  //   AND MEASURE AGAIN. (2026-09-16, homebrew-bithuman #61.)
+  //
+  // What stood here until now was a single absolute floor, 4000, applied to the
+  // post-AEC mic peak while the bot was audible. LOCAL mode has no server VAD
+  // behind it, so that floor was the ONLY thing that could interrupt the agent,
+  // and the table below says it cannot do the job: the two distributions it has
+  // to separate OVERLAP, and no value of the constant separates them.
   //
   // ★ THOSE TWO NUMBERS ARE MEDIANS, AND THE DISTRIBUTIONS OVERLAP (measured
   // 2026-09-16 on the iMac, from the two graded macOS conversation runs' own
@@ -387,12 +411,96 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   // on this hardware. (aecB's room was not certified empty, so part of its tail may
   // be room sound; aecA's 4049 already crosses aecA's weakest barge-in at 2059.)
   //
-  // WHAT THAT MEANS PER MODE. CLOUD ignores this entirely — `voicePeakThreshold` is
-  // 0 there and `server_vad` + far_field noise reduction is the barge (see the ruling
-  // at bithuman_realtime.dart's audioStart call). LOCAL mode has no server VAD, so
-  // this gate IS the only interruption trigger, and the table above says an
-  // interruption can be missed. Fixing that needs a detector, not a better constant.
-  private let voicePeakThresholdDuringBot: Int32 = 4000
+  // ── WHAT REPLACED IT ──────────────────────────────────────────────────────────
+  //
+  // HOLD → (far end silent) → CONFIRM or RELEASE. Two stages, and the second one
+  // does not need to tell the two voices apart at all, because by the time it runs
+  // only one of them can still be there.
+  //
+  //   HOLD     cheap, fast, deliberately over-sensitive. `pausePlayback()` — the
+  //            LOSSLESS hold that has been written and switched off in this file
+  //            since the word-count days. Speaker and lipsync stop; the bot's
+  //            audio keeps buffering, so nothing is lost and nothing is decided.
+  //            This is the instant the person hears the agent stop, so THIS is
+  //            what the interrupt latency measures.
+  //   CONFIRM  the player is paused, so after the device buffer drains the far end
+  //            is PHYSICALLY SILENT and the echo residual with it. Mic energy that
+  //            is still there is a person, and it is graded against the SAME floor
+  //            the gate uses when the agent was never talking — no echo margin, no
+  //            device constant, nothing to tune. Sustained ⇒ `barge()`: the turn dies.
+  //   RELEASE  otherwise `resumePlayback()`, and the turn continues from the sample
+  //            it stopped on. A false alarm costs a ~0.2 s hiccup, not a turn.
+  //
+  // That is why a self-interruption is not a matter of picking a lucky constant
+  // here: it takes speech-level mic energy WHILE NOTHING IS PLAYING, which is not
+  // something the agent's own echo can produce.
+  //
+  // ── MEASURED, 2026-09-16, iMac M4 (echelon), macOS 26.6.2, essence-2, speaker 40 %,
+  //    VP-IO on + AGC off (`[bhaec] vpioIn=1 vpioOut=1 agc=0`), gate attested on by
+  //    `[bhduplex] GATE on thr=2500` ──
+  //
+  //   SELF-INTERRUPTION: 0 turn-killing cuts over 195 s of agent speech with the room
+  //   quiet. "Quiet" is marked by the SERVER's VAD, a detector not under test, not by
+  //   this gate: every one of the run's 6 holds and 4 cuts fell inside the single 30 s
+  //   window in which the server independently reported speech 5 times, and one of
+  //   those holds fired with the far end at ZERO — which echo cannot do. The control
+  //   (main, same vehicle, different run) read 0 over 93 s, in a room that stayed
+  //   quiet throughout, so the two runs are NOT a fair comparison of rooms and are not
+  //   offered as one.
+  //
+  //   THE COMPARISON THAT IS FAIR runs both rules over the SAME measured seconds. Over
+  //   the 195 quiet agent-audible seconds, exactly ONE second's residual crossed the
+  //   shipped floor — peak 5546 against a far end of 20897, a ratio of 0.265. The
+  //   shipped rule's only move there is to destroy the turn. This one's is a hold that
+  //   costs ~0.3 s and resumes unless the energy survives the far end going away. The
+  //   whole change is in that sentence.
+  //
+  //   WHAT IS NOT MEASURED YET: the interrupt latency from a CONTROLLED acoustic onset.
+  //   The 6 holds above were real room sound, so the gate's threshold-crossing-to-
+  //   silence reads 104-198 ms (1-2 mic chunks at this device's ~93 ms capture
+  //   cadence), but the run carries no independent mark of when that sound began, and
+  //   the room's own floor (p95 peak 767) sits close to the onset floor this file uses
+  //   for `preMs`, so `preMs` there (302-1301 ms) is an over-estimate of the distance
+  //   back to onset and must not be quoted as the interrupt time. That number needs a
+  //   stimulus with a known emission instant. It is NOT 643 ms either way: that figure
+  //   is the cloud path's and carries ~156 ms of back-dated `audio_start_ms`.
+  //
+  // WHAT THAT MEANS PER MODE. CLOUD ignores all of it — `voicePeakThreshold` is 0
+  // there and `server_vad` + far_field noise reduction is the barge (see the ruling
+  // at bithuman_realtime.dart's audioStart call), and #58/#60 measured that the
+  // energy path is 153 ms SLOWER than server_vad, so cloud must not adopt this.
+  // LOCAL mode has no server VAD; this is its whole duplex story.
+  //
+  /// HOLD floor while the bot is audible, as a FRACTION of the far end the canceller
+  /// has to remove (`farRecentPeak()`), floored at the quiet-mode `voicePeakThreshold`.
+  /// A ratio and not a level because the residual scales with what is playing, which
+  /// an absolute number cannot know: over the two runs above the residual second's
+  /// mic/far ratio reads p90 0.031 / p95 0.038 on the clean run (worst 0.30), while
+  /// the real barge-in seconds read a 0.34 median. 0.25 sits ~7× over the clean run's
+  /// p95 and under the barge-in median — and it only gates the LOSSLESS hold, so
+  /// being wrong here costs a hiccup. The cut is decided later, with the far end off.
+  private let holdEchoGuard: Float = 0.25
+  /// Sustain for the HOLD. Shorter than `voiceSustainSecs` (0.30) because a false
+  /// hold is now recoverable: the cost of being early is a pause that resumes.
+  private let holdSustainSecs: TimeInterval = 0.10
+  /// After `pausePlayback()`, how long before the mic is believed to be echo-free:
+  /// the player stops rendering immediately, but samples already handed to the
+  /// device still play out. Nothing is decided during this window.
+  ///
+  /// ★ THIS WINDOW IS NOT WHAT CARRIES THE GUARANTEE, and it is worth being exact
+  /// about why, because on this hardware a mic chunk arrives only about every
+  /// 93 ms — LONGER than the window, so most holds see no chunk inside it at all.
+  /// What carries the guarantee is `confirmSustainSecs`: a CONFIRM needs a RUN of
+  /// above-threshold chunks spanning that long, which at any chunk cadence means
+  /// at least one chunk that BEGAN after the pause. A chunk that straddles the
+  /// pause instant can still carry echo; the one after it cannot.
+  private let confirmGuardSecs: TimeInterval = 0.08
+  /// How long the confirm stage listens with the far end silent before giving up
+  /// and releasing. Long enough for a syllable, short enough that a false hold is
+  /// a hiccup: guard + window is the whole cost of being wrong.
+  private let confirmWindowSecs: TimeInterval = 0.22
+  /// Of that window, how much must be above the quiet floor to call it a person.
+  private let confirmSustainSecs: TimeInterval = 0.08
   // Wall-clock until which the bot's TTS is still playing out; extended by each
   // chunk in playSpeakerPCM24k. The during-bot floor applies only while `botAudible`.
   private var botAudibleUntil = Date.distantPast
@@ -430,6 +538,52 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   // True once we've fired a barge for the current run — prevents refiring on
   // every subsequent loud tap. Reset when a fresh run starts.
   private var bargedForCurrentRun: Bool = false
+
+  // ── the duplex hold/confirm state (LOCAL mode; off whenever voicePeakThreshold is 0) ──
+  private enum DuplexPhase { case idle, holding }
+  private var duplexPhase: DuplexPhase = .idle
+  /// When `pausePlayback()` was called for the current hold.
+  private var holdAt = Date.distantPast
+  /// Start of the above-floor run INSIDE the confirm window, and the last tap in it.
+  private var confirmFirstLoudAt: Date?
+  private var confirmLastLoudAt: Date?
+  /// Loudest mic peak seen since the hold began, and the loudest seen after the
+  /// guard expired — the two numbers the `[bhduplex]` verdict line carries, so a
+  /// reader can grade a RELEASE without re-running anything.
+  private var holdPeakAll: Int32 = 0
+  private var holdPeakAfterGuard: Int32 = 0
+  private var holdFarAtTrigger: Int32 = 0
+  private var duplexHoldN = 0
+  /// Whether the far end really goes quiet when we pause — logged once per hold as
+  /// `COLLAPSE`, which is the measurement `confirmGuardSecs` is set from.
+  private var holdPeakInGuard: Int32 = 0
+  /// How many mic chunks actually landed inside the drain window. Without it
+  /// `inGuard=0` is ambiguous — on this hardware a chunk arrives about every
+  /// 93 ms, which is LONGER than the window, so "0" usually means "no chunk
+  /// was looked at", not "the microphone was silent". An instrument that cannot
+  /// tell those apart reports its own blind spot as a measurement.
+  private var holdChunksInGuard = 0
+
+  // ★ THE CLOCK HAS TO START AT THE SOUND, NOT AT THE TRIGGER. A gate that times
+  // itself from its own threshold crossing reports its sustain window back as its
+  // latency and hides everything the ramp cost. This ring keeps the last ~2 s of
+  // post-AEC mic peaks so a HOLD can say how long the sound had ALREADY been
+  // arriving when it fired: `preMs` is measured back to the last chunk quiet enough
+  // that nothing was going on (a quarter of the floor that ended up firing), which
+  // is the acoustic onset as this microphone saw it. onset→silence is preMs+0 by
+  // construction — the hold IS the silence — and onset→cut is preMs + heldMs.
+  private let micRingCap = 128
+  private var micRing: [(t: Date, peak: Int32)] = []
+  /// Time from the last sub-`floor` mic chunk to `from`. nil ⇒ the ring never went
+  /// that quiet, so the burst is older than the ring and the number would be a lie.
+  private func micQuietRunBefore(_ from: Date, floor: Int32) -> TimeInterval? {
+    var last: Date?
+    for e in micRing where e.t <= from {
+      if e.peak <= floor { last = e.t }
+    }
+    guard let l = last else { return nil }
+    return from.timeIntervalSince(l)
+  }
 
   private var isUserVoiceActive: Bool {
     guard let t = lastVoiceActivityAt else { return false }
@@ -989,6 +1143,29 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
           extra)
   }
 
+  /// ★THE DUPLEX ATTESTATION, the twin of `[bhaec]`. One line saying whether this
+  /// session can be interrupted at all and on what terms — read off the state the
+  /// gate will actually use, not off the call site that was supposed to set it.
+  ///
+  /// Why it exists: on 2026-09-16 a measurement of this gate read ZERO holds over
+  /// 390 s and looked like a clean result. The gate had never run — the transport
+  /// in front of it passes `vadThreshold: 0` by ruling, so `voicePeakThreshold` was
+  /// 0 and every branch below was dead. Nothing in the log said so. An absent
+  /// detector and a silent one are the same log, and that is the estate's signature
+  /// defect: the fix is a line that says which one you have.
+  private func logDuplexAttestation() {
+    guard voicePeakThreshold > 0 else {
+      NSLog("[bhduplex] GATE off (vad_threshold=0) — this session cannot be interrupted "
+            + "by the microphone; its barge, if any, comes from the transport")
+      return
+    }
+    NSLog("[bhduplex] GATE on thr=%d holdEchoGuard=%.2f holdSustainMs=%.0f guardMs=%.0f "
+          + "windowMs=%.0f confirmSustainMs=%.0f quietSustainMs=%.0f gapMs=%.0f",
+          voicePeakThreshold, holdEchoGuard, holdSustainSecs * 1000,
+          confirmGuardSecs * 1000, confirmWindowSecs * 1000, confirmSustainSecs * 1000,
+          voiceSustainSecs * 1000, voiceGapToleranceSecs * 1000)
+  }
+
   private static var platformName: String {
     #if os(iOS)
     return "ios"
@@ -1047,6 +1224,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     NSLog("[RealtimeAudioIO] up: mic=%@ player sr=%.0f Hz",
           mic ? "on" : "off(text)", self.playerFormat?.sampleRate ?? 0)
     logAecAttestation(at: "start")
+    logDuplexAttestation()
   }
 
   func stop() {
@@ -1168,6 +1346,127 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     NSLog("[bhbarge] CUT %d reason=%@ hostMs=%lld flushedInMs=%.1f unreleasedSamples=%d oldSlicesAfterCut=%d",
           bargeN, reason, Int64(t0.timeIntervalSince1970 * 1000),
           Date().timeIntervalSince(t0) * 1000, pacedDropped, oldSlicesAfterCut)
+  }
+
+  // MARK: - The LOCAL-mode duplex gate
+
+  /// One mic chunk through HOLD → CONFIRM / RELEASE. See the constants block for
+  /// why it is shaped this way; the short version is that the only statistic that
+  /// reliably tells the user's voice from the agent's is one taken while the agent
+  /// is not playing, so the gate stops the agent FIRST (losslessly) and grades the
+  /// microphone afterwards.
+  ///
+  /// Runs on the realtime audio thread. NEVER touch AVAudioEngine / AVAudioPlayerNode
+  /// from here — `player.stop()` dispatch_syncs onto this queue and traps with "BUG IN
+  /// CLIENT OF LIBDISPATCH". Every one of the three actions below hops to main.
+  private func duplexTick(micPeak: Int32) {
+    let now = Date()
+    micRing.append((now, micPeak))
+    if micRing.count > micRingCap { micRing.removeFirst(micRing.count - micRingCap) }
+    switch duplexPhase {
+    case .idle:
+      // The floor: the quiet-mode threshold when nothing is playing, raised in
+      // proportion to what IS playing while the agent talks.
+      let far = botAudible ? farRecentPeak() : 0
+      let floor = max(voicePeakThreshold, Int32(Float(far) * holdEchoGuard))
+      guard micPeak > floor else {
+        if let l = lastLoudAt, now.timeIntervalSince(l) > voiceGapToleranceSecs {
+          firstLoudAt = nil
+          bargedForCurrentRun = false
+        }
+        return
+      }
+      if firstLoudAt == nil ||
+         (lastLoudAt.map { now.timeIntervalSince($0) > voiceGapToleranceSecs } ?? true) {
+        firstLoudAt = now
+        bargedForCurrentRun = false
+      }
+      lastLoudAt = now
+
+      // NOTHING IS PLAYING. There is no second voice to rule out, so there is
+      // nothing for a hold to learn: sustain and cut, exactly as before.
+      if !botAudible {
+        guard now.timeIntervalSince(firstLoudAt!) >= voiceSustainSecs,
+              !bargedForCurrentRun else { return }
+        bargedForCurrentRun = true
+        lastVoiceActivityAt = now
+        NSLog("[bhduplex] CUT reason=quiet peak=%d floor=%d hostMs=%lld",
+              micPeak, floor, Int64(now.timeIntervalSince1970 * 1000))
+        DispatchQueue.main.async { [weak self] in self?.barge(reason: "energy_vad") }
+        return
+      }
+
+      // THE AGENT IS TALKING → HOLD. Lossless: the turn is not cancelled, the
+      // audio is not dropped, and this is the instant the person hears it stop.
+      guard now.timeIntervalSince(firstLoudAt!) >= holdSustainSecs else { return }
+      duplexPhase = .holding
+      holdAt = now
+      holdFarAtTrigger = far
+      holdPeakAll = micPeak
+      holdPeakAfterGuard = 0
+      holdPeakInGuard = 0
+      holdChunksInGuard = 0
+      confirmFirstLoudAt = nil
+      confirmLastLoudAt = nil
+      duplexHoldN += 1
+      lastVoiceActivityAt = now
+      let pre = micQuietRunBefore(now, floor: max(1, floor / 4))
+      NSLog("[bhduplex] HOLD %d peak=%d floor=%d far=%d sustainMs=%.0f preMs=%@ hostMs=%lld",
+            duplexHoldN, micPeak, floor, far,
+            now.timeIntervalSince(firstLoudAt!) * 1000,
+            pre.map { String(format: "%.0f", $0 * 1000) } ?? "over",
+            Int64(now.timeIntervalSince1970 * 1000))
+      DispatchQueue.main.async { [weak self] in self?.pausePlayback() }
+
+    case .holding:
+      if micPeak > holdPeakAll { holdPeakAll = micPeak }
+      let since = now.timeIntervalSince(holdAt)
+
+      // DRAIN. player.pause() stops rendering at once, but samples already handed
+      // to the device still reach the speaker. Decide nothing here; just record the
+      // loudest tap, which is what `COLLAPSE` reports and what sizes this window.
+      if since < confirmGuardSecs {
+        holdChunksInGuard += 1
+        if micPeak > holdPeakInGuard { holdPeakInGuard = micPeak }
+        return
+      }
+      if micPeak > holdPeakAfterGuard { holdPeakAfterGuard = micPeak }
+
+      // CONFIRM. The far end is silent, so the echo residual is too, and the floor
+      // is the plain quiet-mode threshold — no echo margin, no per-device constant.
+      if micPeak > voicePeakThreshold {
+        if confirmFirstLoudAt == nil ||
+           (confirmLastLoudAt.map { now.timeIntervalSince($0) > voiceGapToleranceSecs } ?? true) {
+          confirmFirstLoudAt = now
+        }
+        confirmLastLoudAt = now
+        lastVoiceActivityAt = now
+        if now.timeIntervalSince(confirmFirstLoudAt!) >= confirmSustainSecs {
+          NSLog("[bhduplex] COLLAPSE %d inGuard=%d guardChunks=%d afterGuard=%d far=%d",
+                duplexHoldN, holdPeakInGuard, holdChunksInGuard, holdPeakAfterGuard, holdFarAtTrigger)
+          NSLog("[bhduplex] CONFIRM %d peak=%d thr=%d heldMs=%.0f hostMs=%lld",
+                duplexHoldN, holdPeakAfterGuard, voicePeakThreshold,
+                since * 1000, Int64(now.timeIntervalSince1970 * 1000))
+          duplexPhase = .idle
+          firstLoudAt = nil; lastLoudAt = nil; bargedForCurrentRun = true
+          DispatchQueue.main.async { [weak self] in self?.barge(reason: "duplex_confirmed") }
+          return
+        }
+      }
+
+      // RELEASE. Whatever tripped the hold could not survive the far end going
+      // away, so it was the far end. Resume from the sample we stopped on.
+      if since >= confirmGuardSecs + confirmWindowSecs {
+        NSLog("[bhduplex] COLLAPSE %d inGuard=%d guardChunks=%d afterGuard=%d far=%d",
+              duplexHoldN, holdPeakInGuard, holdChunksInGuard, holdPeakAfterGuard, holdFarAtTrigger)
+        NSLog("[bhduplex] RELEASE %d peak=%d thr=%d heldMs=%.0f hostMs=%lld",
+              duplexHoldN, holdPeakAfterGuard, voicePeakThreshold,
+              since * 1000, Int64(now.timeIntervalSince1970 * 1000))
+        duplexPhase = .idle
+        firstLoudAt = nil; lastLoudAt = nil; bargedForCurrentRun = false
+        DispatchQueue.main.async { [weak self] in self?.resumePlayback() }
+      }
+    }
   }
 
   // MARK: - Mic tap → resample → event channel
@@ -1295,61 +1594,15 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
 
     let n = Int(out.frameLength) * 2
 
-    // The LOCAL-mode energy barge on the post-AEC mic signal (enabled whenever
-    // voicePeakThreshold > 0 — cloud paths pass 0). The user counts as "talking"
-    // — muting the bot AND firing the one-shot barge — ONLY after the peak has
-    // stayed above the EFFECTIVE threshold for voiceSustainSecs within a single
-    // run (sub-threshold dips up to voiceGapToleranceSecs don't break the run).
-    // Until that sustain is met NOTHING happens, so a brief transient can't
-    // interrupt. The effective threshold carries the echo margin while the bot
-    // is audible so the bot can't barge itself on AEC residual. macOS + iOS.
-    // (`maxAbs` is the post-AEC peak hoisted above, measured pre-squelch.)
-    let effThreshold = botAudible ? voicePeakThresholdDuringBot : voicePeakThreshold
+    // The LOCAL-mode duplex gate on the post-AEC mic signal (enabled whenever
+    // voicePeakThreshold > 0 — cloud paths pass 0 and take none of it; their barge
+    // is server_vad). `maxAbs` is the post-AEC peak hoisted above. macOS + iOS.
     if kDebugBarge && voicePeakThreshold > 0 && micChunkCount % 10 == 0 {
-      NSLog("[barge-dbg] peak=%d eff=%d botAudible=%@ thr=%d",
-            maxAbs, effThreshold, botAudible ? "Y" : "n", voicePeakThreshold)
+      NSLog("[barge-dbg] peak=%d thr=%d far=%d botAudible=%@ phase=%@",
+            maxAbs, voicePeakThreshold, botAudible ? farRecentPeak() : 0,
+            botAudible ? "Y" : "n", duplexPhase == .holding ? "hold" : "idle")
     }
-    if voicePeakThreshold > 0 && maxAbs > effThreshold {
-      let now = Date()
-      // Start a fresh run on the first loud tap, or when the gap since the last
-      // loud tap exceeded the tolerance (the previous run lapsed into silence).
-      // Brief inter-syllable dips stay within tolerance → one continuous run.
-      if firstLoudAt == nil ||
-         (lastLoudAt.map { now.timeIntervalSince($0) > voiceGapToleranceSecs } ?? true) {
-        firstLoudAt = now
-        bargedForCurrentRun = false
-      }
-      lastLoudAt = now
-      if now.timeIntervalSince(firstLoudAt!) >= voiceSustainSecs {
-        // Sustained → NOW mute the agent (lastVoiceActivityAt → the
-        // playSpeakerPCM24k drop gate) and fire the one-shot barge. In LOCAL
-        // mode onBarge cancels the brain turn + barge() flushes speaker+lipsync.
-        lastVoiceActivityAt = now
-        if !bargedForCurrentRun {
-          bargedForCurrentRun = true
-          NSLog("[RealtimeAudioIO] energy VAD: sustained speech (peak=%d eff=%d) → barge",
-                maxAbs, effThreshold)
-          // CRITICAL: NEVER touch AVAudioEngine/PlayerNode state from inside an
-          // installed tap callback — the tap runs on the realtime audio thread
-          // and AVAudioPlayerNode.stop() dispatch_syncs on that queue → "BUG IN
-          // CLIENT OF LIBDISPATCH" SIGTRAP. Hop to the main queue.
-          DispatchQueue.main.async { [weak self] in self?.barge(reason: "energy_vad") }
-        }
-      }
-    }
-    // No quiet-tap reset: the gap-tolerance restart above ends a run, and a
-    // brief dip between syllables keeps it alive. The bot-mute (lastVoiceActivityAt)
-    // decays on its own via voiceQuietTimeoutSecs.
-    // LOCAL mode: debounced voice-activity edges (isUserVoiceActive carries the
-    // ~0.5 s quiet timeout) drive lossless PAUSE on rising / RESUME on falling.
-    if lipsyncPauseControl {
-      let active = isUserVoiceActive
-      if active != wasUserVoiceActive {
-        wasUserVoiceActive = active
-        let cb = active ? onUserSpeechStart : onUserSpeechEnd
-        DispatchQueue.main.async { cb?() }
-      }
-    }
+    if voicePeakThreshold > 0 { duplexTick(micPeak: maxAbs) }
 
     let data = Data(bytes: int16Ptr, count: n)
     micChunkCount += 1
@@ -1395,9 +1648,10 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     // Hard gate: if the local VAD heard the user within the last
     // voiceQuietTimeoutSecs, drop this bot chunk entirely (speaker silent +
     // lipsync gets no input) so the cancelled response can't keep playing
-    // before OpenAI's server-VAD notifies us. CLOUD mode only: LOCAL mode keeps
-    // buffering (lipsyncPauseControl) so a paused turn resumes losslessly.
-    if isUserVoiceActive && !lipsyncPauseControl {
+    // before OpenAI's server-VAD notifies us. CLOUD ONLY — when the duplex gate is
+    // on, a chunk arriving during a HOLD is part of a reply that may still be
+    // resumed, so it must BUFFER into the paused player, never be thrown away.
+    if isUserVoiceActive && !duplexGateOn {
       return
     }
     // Track how long the bot stays audible so the VAD applies the echo margin
