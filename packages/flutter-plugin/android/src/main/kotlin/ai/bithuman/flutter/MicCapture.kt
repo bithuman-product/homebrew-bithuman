@@ -78,6 +78,17 @@ class MicCapture(
         live = true
         Log.i("bhmic", "OPEN source=VOICE_COMMUNICATION mode=${am.mode} device=${r.routedDevice?.type} " +
             "aec=${aec?.enabled} rateIn=$RATE_IN chunkMs=100 hostMs=${System.currentTimeMillis()}")
+        // The SAME attestation the Apple planes emit from RealtimeAudioIO, in the same
+        // vocabulary, so ONE reader grades the platform canceller on every plane. Every
+        // value is READ BACK from the framework, never the value asked for: `mode` is what
+        // AudioManager reports (MODE_IN_COMMUNICATION == 3 is what makes the platform AEC
+        // reference the playout), `aec` is AcousticEchoCanceler.enabled. Both can legitimately
+        // end up off — no canceller on the device, or the communication device not selected —
+        // and before this line the log said so only in an unnamed shape nothing graded.
+        Log.i("bhaec", "[bhaec] vpioIn=${if (aec?.enabled == true) 1 else 0} " +
+            "vpioOut=${if (am.mode == AudioManager.MODE_IN_COMMUNICATION) 1 else 0} " +
+            "agc=0 mic=on at=start platform=android " +
+            "mode=${am.mode} device=${r.routedDevice?.type} inSr=$RATE_IN")
         thread = Thread({ loop(r) }, "bh-mic").also { it.start() }
         return true
     }
