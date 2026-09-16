@@ -1,9 +1,38 @@
-# bitHuman app e2e harness — simulator-first, automated, hermetic
+# bitHuman e2e harness — simulator-first, automated, hermetic
 
 The validation backbone for app changes across macOS / iOS / Android (one
 codebase, three targets). **Policy: every change is first proven logically
 sound, end to end, on simulators — automatically (audio and events are
 injected; no human clicking) — before any on-device pass.**
+
+## ★ Where each tier actually lives (corrected 2026-09-16)
+
+This file used to describe every path as `example/…`. **There is no `example/`
+directory in this repository and there never was** — the tests it described
+lived in `bithuman-product/bithuman-jarvis-app`, which has no `.github/`
+directory, so nothing ran them on any push. The split as it is today:
+
+| tier | where | needs | runs |
+|---|---|---|---|
+| **Tier 1 — headless** | `packages/flutter-plugin/test/` (incl. `test/e2e/`) | nothing: no device, no engine binary, no network past `127.0.0.1` | **every push and PR**, `.github/workflows/flutter-plugin-tests.yml` |
+| **Tier 2 — app on a simulator** | the product app repo (`integration_test/`) | a macOS host, a booted sim/emulator, a staged engine bundle | by hand: `BITHUMAN_APP_DIR=<app checkout> e2e/run_all.sh` |
+
+Tier 1 is the owner's acceptance test made literal — *"to test voice chat we
+do not even need visuals"*. `test/e2e/realtime_session_mock_test.dart` runs a
+REAL `BithumanRealtimeSession` against a REAL loopback socket served by
+`e2e/mock_realtime`, with the entire `ai.bithuman.avatar` method channel
+replaced by `test/e2e/fake_avatar_platform.dart`. No engine, no texture, no
+GPU, no key.
+
+### What does NOT run here, and why
+
+`integration_test/engine_smoke_test.dart` in the app repo loads a real engine
+from a staged bundle and pushes synthesized PCM through it. It cannot join the
+push gate: `integration_test` needs a running Flutter application on a device
+or simulator, and the engine needs its `.avatar` / `.elevatedir` bytes and (on
+Apple) a CoreML compile that costs minutes. It is the reason `run_all.sh`
+still exists. It is a device leg, not a CI leg, and saying so is the point —
+the alternative is a step that "passes" because it skipped.
 
 ```
 e2e/
@@ -17,8 +46,9 @@ e2e/
                           gate_metrics.py (log → JSON measurements →
                           threshold verdicts) — see e2e/scenarios/README.md
   baselines/            ← archived gate-metrics.json snapshots (trend record)
-example/test/e2e/       ← Tier 1 (no device, ~5 s)
-example/integration_test/
+../test/e2e/            ← Tier 1 (no device, ~5 s) — IN THIS PACKAGE,
+                          run by flutter-plugin-tests.yml on every push
+<app repo>/integration_test/   ← Tier 2 (device/simulator only)
   e2e_session_flow_test.dart   ← Tier 2 core: full app vs mock voice (macOS)
   e2e_boot_smoke_test.dart     ← Tier 2: boot → avatar canvas (all targets)
   engine_smoke_test.dart       ← Tier 2: plugin-direct engine + injected PCM
@@ -32,10 +62,16 @@ example/integration_test/
 ## Quick start (what an agent runs)
 
 ```bash
-flutter/bithuman/e2e/run_all.sh                    # tier1 + macOS + iOS sim
-E2E_TARGETS=gate        flutter/bithuman/e2e/run_all.sh   # the FULL gate
-E2E_TARGETS=tier1,macos flutter/bithuman/e2e/run_all.sh
-E2E_TARGETS=android     flutter/bithuman/e2e/run_all.sh
+# Tier 1 alone — works anywhere flutter does, including Linux. This is what CI runs.
+cd packages/flutter-plugin && flutter test            # or: E2E_TARGETS=tier1 e2e/run_all.sh
+
+# Tier 2 needs the product app checkout named explicitly; without
+# BITHUMAN_APP_DIR every Tier 2 leg records a LOUD skip instead of pretending.
+export BITHUMAN_APP_DIR=~/src/bithuman-jarvis-app
+e2e/run_all.sh                            # tier1 + macOS + iOS sim
+E2E_TARGETS=gate        e2e/run_all.sh    # the FULL gate
+E2E_TARGETS=tier1,macos e2e/run_all.sh
+E2E_TARGETS=android     e2e/run_all.sh
 ```
 
 Output ends with a summary table; exit 0 ⇔ every selected target passed
@@ -44,13 +80,11 @@ Output ends with a summary table; exit 0 ⇔ every selected target passed
 
 **Hot-file churn:** if other agents have uncommitted edits to the native
 plugins in your checkout, build from a clean worktree
-(`git worktree add /tmp/bh-e2e-wt HEAD`), copy `e2e/`, `example/test/e2e/`,
-the three `integration_test/e2e_*`/`engine_smoke_test.dart` files,
-`example/pubspec.yaml` and `lib/bithuman_realtime.dart` over, and run there
-— the harness only depends on those paths.
+(`git worktree add /tmp/bh-e2e-wt HEAD`) and run there — Tier 1 depends only
+on `e2e/mock_realtime/`, `test/e2e/` and `lib/`, all of which come with the
+worktree.
 
-## Tier 1 — widget/unit (`example/test/e2e/`, plus the pre-existing
-`avatar_canvas_fit_test.dart`)
+## Tier 1 — widget/unit (`test/e2e/`, plus the pre-existing `test/*_test.dart`)
 
 Pure Dart, no device, runs in seconds. The REAL realtime client
 (`lib/bithuman_realtime.dart`) talks to a REAL loopback WebSocket served by
@@ -61,9 +95,13 @@ Pure Dart, no device, runs in seconds. The REAL realtime client
 |---|---|
 | `realtime_session_mock_test.dart` | connect contract (GA `session.update` shape, server-VAD config), **voice policy** (exactly one connect greeting today — see TODOs), audio deltas → unified speaker/lipsync, transcript stream, **pacing governor** (burst 1 s of deltas must release ≥ ~realtime), **barge-in** (`response.cancel` + `avatar.interrupt` + stale-delta drop), cancel-when-idle guard, mic mute = deaf, **clean stop** (interrupt + audioStop + socket closed + no late audio) |
 | `transport_state_machine_test.dart` | the exact `TransportStatus` sequence the UI chrome switches on: `connecting → listening → responseDone → userSpeaking → thinking → responseDone → closed` |
-| `engine_config_test.dart` | engine-default logic (host = essence; Android's elevate default is asserted on-emulator), download-host allow-lists, voice/VAD defaults |
+| `transport_pick_test.dart` | `pickTransport`'s routing contract: cloud default → `WebSocketTransport`, `BITHUMAN_TRANSPORT=webrtc` → `WebRTCTransport`, an unknown override falls back, and LOCAL wins over the override (that last case only on macOS/iOS — it is the factory's one platform branch) |
 
-## Tier 2 — real app on simulators (`example/integration_test/`)
+`engine_config_test.dart` and `cloud_api_engine_names_test.dart` did NOT move:
+they import `package:bithuman_app`, so they grade the product app's own config
+and belong in the app repo beside it.
+
+## Tier 2 — real app on simulators (`$BITHUMAN_APP_DIR/integration_test/`)
 
 All Tier 2 profiles are launched with:
 
@@ -100,7 +138,7 @@ built from the engine trees now in `bithuman-models` (libessence2 from `models/e
 (arm64-only: Apple-Silicon hosts; Intel hosts would need x86_64 sim builds
 of every third-party dep, not provided). `run_all.sh` still probes for the
 slice and auto-skips on checkouts bootstrapped against an older SDK drop.
-After re-vendoring, re-run `pod install` in `example/ios` once — the
+After re-vendoring, re-run `pod install` in the app's `ios/` once — the
 CocoaPods slice-selection script is generated from the xcframework's
 Info.plist at install time.
 

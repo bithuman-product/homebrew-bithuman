@@ -37,6 +37,15 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # The hermetic OpenAI-Realtime stand-in the headless harness under
+  # test/e2e/ dials. It lives IN THIS PACKAGE (e2e/mock_realtime), so the
+  # reference is a PATH, not a git pin: the product app reached it by
+  # `git: ref: <sha>` and that pin sat 43 commits behind main. A path
+  # dependency cannot go stale — the mock and the client it mocks move in
+  # the same commit or not at all. dev_dependencies are not resolved by
+  # consumers of a published package, so this never reaches a pub.dev user.
+  mock_realtime:
+    path: e2e/mock_realtime
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
