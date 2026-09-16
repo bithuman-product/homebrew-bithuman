@@ -328,6 +328,10 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       farSumSq = 0; farN = 0; farPeak = 0; farLineAt = now
     }
   }
+  // The AEC warm-up squelch that read this clock is gone (VP-IO carries echo now);
+  // the schedule sites still call it, harmlessly. Kept as a no-op rather than edited
+  // out of six call sites — one line, and the sites read clearly as "audio scheduled".
+  @inline(__always) private func notePlayoutScheduled(_ seconds: TimeInterval) {}
   /// A cut: the reason travels with the line (server speech_started, the app's text
   /// turn, the LOCAL energy VAD, a stop) so a reader can tell a phantom from a person.
   private var bargeN = 0
@@ -367,102 +371,18 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   private var botAudibleUntil = Date.distantPast
   private var botAudible: Bool { Date() < botAudibleUntil }
 
-  #if os(iOS)
-  // AEC WARM-UP SQUELCH + ECHO FLOOR (iOS only). Apple's VP-IO echo
-  // canceller needs seconds of UNINTERRUPTED farend (our speaker audio) to
-  // converge. On the iPhone speakerphone the unconverged echo is loud
-  // enough to trip OpenAI's server_vad, which cancels the response —
-  // truncating the farend exposure and re-arming the loop (observed on
-  // iPhone 17 Pro: a ~50 s storm of ~1 s self-cancelled utterances at
-  // session start, then clean once converged). Two-stage defense, both
-  // active only WHILE THE SPEAKER IS LIVE (mic passthrough while the bot
-  // is silent is untouched — there is no echo to mis-trigger on):
-  //   1. WARM-UP (adaptive): mic chunks are SOFT-LIMITED to ambient level
-  //      (kGateAmbientCap — never hard-zeroed: a stretch of digital zeros
-  //      collapses the server VAD's adaptive noise floor, and the splice
-  //      back to ordinary room tone then reads as a speech ONSET —
-  //      observed on-device as speech_started firing right as playout
-  //      ended, in a quiet room) until the post-AEC residual is OBSERVED
-  //      quiet — peak < kAecConvergedPeak for kAecConvergedRunSecs of
-  //      speaker-live time after at least kAecMinFarendSecs of farend
-  //      (hard cap kAecMaxFarendSecs so a noisy room can't gate the mic
-  //      forever). A fixed 8 s budget was tried first and the storm
-  //      resumed the second it lapsed — exit on MEASURED convergence.
-  //   2. SUSTAINED-BARGE GATE (post-warm-up): while the speaker is live,
-  //      chunks are soft-limited UNLESS the post-AEC peak has sustained ≥
-  //      voicePeakThresholdDuringBot (4000 — the LOCAL path's measured
-  //      floor) for voiceSustainSecs within one run (sub-floor dips up to
-  //      voiceGapToleranceSecs keep the run alive — the LOCAL energy
-  //      barge's exact robustness recipe). Measured on-device: the
-  //      converged residual is QUIET in steady state (< 1000) but spikes
-  //      past a plain 4000 floor on loud onsets (speakerphone nonlinearity
-  //      a linear canceller can't model) — impulsive spikes never sustain
-  //      0.3 s, real interrupting speech easily does. Once sustained, the
-  //      mic OPENS (everything passes, soft syllables included) and stays
-  //      open while loud taps keep landing, so server_vad hears the real
-  //      barge ~0.3 s after onset and cancels the turn; the barge then
-  //      stops the speaker → gate disengages → full-duplex listening.
-  // Cost: no barge-in during the first ~10 s of agent speech (the connect
-  // greeting), and barge-ins during bot speech land ~0.3 s later and must
-  // be at conversational volume — the same trade LOCAL mode already makes.
-  // macOS never compiles this — its user-validated path needs no squelch.
-  private static let kAecMinFarendSecs: TimeInterval = 5.0
-  private static let kAecMaxFarendSecs: TimeInterval = 30.0
-  private static let kAecConvergedPeak: Int32 = 1000
-  private static let kAecConvergedRunSecs: TimeInterval = 2.0
-  /// How long the mic stays open after the last loud tap of a sustained run.
-  private static let kBargeOpenTailSecs: TimeInterval = 0.5
-  /// Gated chunks are compressed to this peak (≈ quiet-room ambient, which
-  /// measures ~100-250 on iPhone 17 Pro) instead of zeroed — see WARM-UP.
-  private static let kGateAmbientCap: Int32 = 600
-  /// Grace added to the speaker-live window. The playout clock is fed
-  /// just-in-time by the Dart pacing governor (~180 ms lead); deep into a
-  /// long response, arrival jitter can briefly lapse the clock while audio
-  /// is STILL rendering, letting raw echo chunks slip to server_vad
-  /// (observed: spurious barges clustering late in a long reply with the
-  /// gate never opening). The grace also covers the room's reverb tail
-  /// after playout genuinely ends.
-  private static let kPlayoutGraceSecs: TimeInterval = 1.0
-  /// Unconditional mic soft-limit for the first seconds after engine start:
-  /// VP-IO's AGC ramps the mic gain from cold and server-side VAD
-  /// initializes its noise floor — every on-device run showed 1-2 phantom
-  /// speech_started events 1.5-4 s after the mic stream began, in a quiet
-  /// room, before ANY audio had played. Riding out the transient at room
-  /// tone kills that whole class.
-  private static let kMicStartGraceSecs: TimeInterval = 3.0
-  private var engineStartedAt = Date.distantPast
-  /// Soft-limit `frames` samples so the chunk's (sampled) peak lands at
-  /// kGateAmbientCap: ambient passes untouched, echo spikes compress to
-  /// room tone, and the server-side VAD's noise floor never sees a splice.
-  @inline(__always)
-  private func softLimitChunk(_ p: UnsafeMutablePointer<Int16>,
-                              frames: Int, peak: Int32) {
-    guard peak > Self.kGateAmbientCap else { return }
-    let scale = Float(Self.kGateAmbientCap) / Float(peak)
-    for i in 0..<frames {
-      p[i] = Int16(Float(p[i]) * scale)
-    }
-  }
-  private var aecFarendSecs: TimeInterval = 0
-  private var aecQuietRunSecs: TimeInterval = 0
-  private var playoutActiveUntil = Date.distantPast
-  private var aecWarmupMuteLogged = false
-  private var aecWarmupDone = false
-  // Sustained-barge run state (speaker-live chunks only).
-  private var iosBargeRunStart: Date?
-  private var iosBargeLastLoud: Date?
-  private var iosMicOpenUntil = Date.distantPast
-  /// Advance the "speaker is actually rendering" clock — called ONLY where
-  /// chunks reach the player (immediate schedule or gate flush), never for
-  /// gate-held chunks (held = silent = no farend for the AEC to learn from).
-  @inline(__always)
-  private func notePlayoutScheduled(_ seconds: TimeInterval) {
-    playoutActiveUntil = max(playoutActiveUntil, Date()).addingTimeInterval(seconds)
-  }
-  #else
-  @inline(__always)
-  private func notePlayoutScheduled(_ seconds: TimeInterval) {}
-  #endif
+  // ★ THE MICROPHONE IS NEVER GATED WHILE THE AGENT TALKS (2026-09-16). This file
+  // used to soft-limit the uplink to room level while the speaker was live: iOS a
+  // 3 s mic-start grace + an AEC warm-up squelch (5-30 s of every session) + a
+  // 0.3 s sustained-speech gate; macOS the same 0.3 s gate. Their own comment
+  // stated the cost — "no barge-in during the first ~10 s of agent speech ...
+  // barge-ins land ~0.3 s later and must be at conversational volume" — which is
+  // half-duplex. Echo is VP-IO's job (voice processing on both nodes) plus the
+  // server's far_field noise reduction. MEASURED on iPhone 15, 2026-09-16: VP-IO
+  // cancels a -18 dBFS far end to a -70..-90 dBFS steady residual; only the onset
+  // transient before it converges reaches ~-35 dBFS. The `bhmic` line carries the
+  // captured and the sent level so the residual and the (now zero) attenuation are
+  // on the record, and the echo arm counts every speech_started the residual causes.
   // Sustain window — the robustness gate. The mic must stay above the
   // (echo-margined) threshold for this long within ONE run before we treat it
   // as the user talking. Until then NOTHING happens — not the bot-mute, not the
@@ -476,16 +396,6 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   // this is what stops the longer sustain window from MISSING real speech.
   private let voiceGapToleranceSecs: TimeInterval = 0.12
   // macOS-only: the macOS cloud sustained-energy barge gate; iOS barges on the server VAD alone
-  #if os(macOS)
-  // [barge] macOS CLOUD sustained-energy gate state: the mic the OpenAI server
-  // VAD hears is soft-limited to ambient WHILE THE BOT IS AUDIBLE until the
-  // post-AEC peak sustains ≥ voicePeakThresholdDuringBot for voiceSustainSecs —
-  // so ambient noise / coughs / clicks can't trip an interruption; only ~0.3 s
-  // of sustained, conversational-volume speech does.
-  private var macBargeRunStart: Date?
-  private var macBargeLastLoud: Date?
-  private var macMicOpenUntil = Date.distantPast
-  #endif
   // Start of the current loud run + the most recent loud tap. A loud tap more
   // than voiceGapToleranceSecs after the last one begins a fresh run.
   private var firstLoudAt: Date?
@@ -1017,7 +927,6 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     player.play()
     #if os(iOS)
     started = true
-    engineStartedAt = Date()
     registerInterruptionHandler()
     #elseif os(macOS)
     // ORDER: set startedWithMic, then `started`, THEN register listeners. The
@@ -1104,6 +1013,15 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     // flush them just below. (No-op in cloud mode where onBarge is nil; the cloud
     // path already cancels the response at the server before calling barge.)
     onBarge?()
+    // ★ THE PICTURE FIRST, THEN THE SOUND (2026-09-16). clearAudioQueue() moves the
+    // texture's barge epoch and resets the engine (its in-flight chunk is gen-fenced),
+    // so no frame of the cancelled reply can be published after this line — a frame
+    // pulled a moment before is fenced by the epoch read at the top of the display
+    // tick. Only THEN is the unreleased audio dropped and the player flushed. The
+    // reverse order let a frame publish against an already-empty FIFO in the window
+    // between the two — the Apple form of Android's old 199-unit leak.
+    avatarTextureForLipsync?.setLipsyncPaused(false)  // clear any pause hold
+    avatarTextureForLipsync?.clearAudioQueue()
     // Invalidate the Elevate utterance gate: bump the generation (terminates
     // the poll chain), drop any chunks still held for the first frame, and
     // re-arm the gate so the agent's NEXT response is treated as a fresh
@@ -1119,12 +1037,6 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     // Safe to clear AFTER onBarge: the gen fence above means no late chunk can
     // refill this between here and the next turn.
     embodyPacedLock.lock(); let pacedDropped = embodyPaced.count; embodyPaced.removeAll(); pacedEpoch &+= 1; embodyPacedLock.unlock()
-    #if os(iOS)
-    // player.reset() below silences the speaker instantly — pull the
-    // AEC-warm-up playout clock back so the squelch never mutes the mic
-    // against a speaker that is no longer rendering.
-    playoutActiveUntil = Date()
-    #endif
     if started {
       // macOS-only: the HAL device-swap graph rebuild does not exist on iOS
       #if os(macOS)
@@ -1144,14 +1056,12 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       player.play()
       #endif
     }
-    // The speaker is silent HERE (player.reset() flushed its render state).
-    // `flushedInMs` is cut -> silence, the figure Android's AudioTrack flush reports.
+    // The speaker is silent HERE (player.reset() flushed its render state), and the
+    // texture was reset at the top of this function. `flushedInMs` is cut -> silence.
     bargeN += 1
     NSLog("[bhbarge] CUT %d reason=%@ hostMs=%lld flushedInMs=%.1f unreleasedSamples=%d oldSlicesAfterCut=%d",
           bargeN, reason, Int64(t0.timeIntervalSince1970 * 1000),
           Date().timeIntervalSince(t0) * 1000, pacedDropped, oldSlicesAfterCut)
-    avatarTextureForLipsync?.setLipsyncPaused(false)  // clear any pause hold
-    avatarTextureForLipsync?.clearAudioQueue()
   }
 
   // MARK: - Mic tap → resample → event channel
@@ -1253,9 +1163,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     if status == .error || out.frameLength == 0 { return }
     guard let int16Ptr = out.int16ChannelData?[0] else { return }
 
-    // Post-AEC peak of this chunk — measured BEFORE any iOS squelch zeroing
-    // so the convergence detector below sees the TRUE residual. Also feeds
-    // the LOCAL-mode energy barge further down.
+    // Post-AEC peak of this chunk: the `bhmic` line and the LOCAL-mode energy barge.
     var maxAbs: Int32 = 0
     let frames = Int(out.frameLength)
     for i in stride(from: 0, to: frames, by: 8) {
@@ -1264,105 +1172,6 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     }
     var capturedSq = 0.0
     for i in 0..<frames { let v = Double(int16Ptr[i]); capturedSq += v * v }
-
-    #if os(iOS)
-    // Mic-start grace: ride out the AGC ramp / VAD-init transient at room
-    // tone (see kMicStartGraceSecs).
-    if Date() < engineStartedAt.addingTimeInterval(Self.kMicStartGraceSecs) {
-      softLimitChunk(int16Ptr, frames: frames, peak: maxAbs)
-    } else
-    // AEC warm-up squelch + sustained-barge gate (see the state block
-    // above): while the speaker is live (graced for pacing jitter + reverb
-    // tail), soft-limit anything the canceller hasn't provably removed so
-    // echo can never reach server_vad (or the energy VAD).
-    if Date() < playoutActiveUntil.addingTimeInterval(Self.kPlayoutGraceSecs) {
-      let chunkSecs = Double(out.frameLength) / micTarget.sampleRate
-      if !aecWarmupDone {
-        aecFarendSecs += chunkSecs
-        if maxAbs < Self.kAecConvergedPeak {
-          aecQuietRunSecs += chunkSecs
-        } else {
-          aecQuietRunSecs = 0
-        }
-        if (aecFarendSecs >= Self.kAecMinFarendSecs
-              && aecQuietRunSecs >= Self.kAecConvergedRunSecs)
-            || aecFarendSecs >= Self.kAecMaxFarendSecs {
-          aecWarmupDone = true
-          NSLog("[RealtimeAudioIO] AEC warm-up complete (%.1f s farend, residual quiet %.1f s) — full duplex with echo floor",
-                aecFarendSecs, aecQuietRunSecs)
-        } else {
-          if !aecWarmupMuteLogged {
-            aecWarmupMuteLogged = true
-            NSLog("[RealtimeAudioIO] AEC warm-up: limiting mic to ambient while speaker live (until residual < %d for %.0f s)",
-                  Self.kAecConvergedPeak, Self.kAecConvergedRunSecs)
-          }
-          softLimitChunk(int16Ptr, frames: frames, peak: maxAbs)
-        }
-      }
-      if aecWarmupDone {
-        // Sustained-barge gate: open the mic only once the peak has stayed
-        // ≥ the floor for voiceSustainSecs within one run (dips up to
-        // voiceGapToleranceSecs keep the run alive). Impulsive echo spikes
-        // never sustain; real interrupting speech does.
-        let now = Date()
-        if maxAbs >= voicePeakThresholdDuringBot {
-          if iosBargeRunStart == nil ||
-             (iosBargeLastLoud.map { now.timeIntervalSince($0) > voiceGapToleranceSecs } ?? true) {
-            iosBargeRunStart = now
-          }
-          iosBargeLastLoud = now
-          if now.timeIntervalSince(iosBargeRunStart!) >= voiceSustainSecs {
-            if now >= iosMicOpenUntil {
-              NSLog("[RealtimeAudioIO] sustained speech during bot audio (peak=%d) — mic open",
-                    maxAbs)
-            }
-            iosMicOpenUntil = now.addingTimeInterval(Self.kBargeOpenTailSecs)
-          }
-        }
-        if now >= iosMicOpenUntil {
-          softLimitChunk(int16Ptr, frames: frames, peak: maxAbs)
-        }
-      }
-    }
-    #endif
-
-    // macOS-only: the macOS cloud sustained-energy barge gate; iOS barges on the server VAD alone
-    #if os(macOS)
-    // [barge] macOS CLOUD (voicePeakThreshold == 0): require ~0.3 s of sustained,
-    // conversational-volume speech before the OpenAI server VAD hears a barge.
-    // While the bot is audible, soft-limit the mic to ambient until the post-AEC
-    // peak stays ≥ voicePeakThresholdDuringBot for voiceSustainSecs within one
-    // run (dips up to voiceGapToleranceSecs keep the run alive). Impulsive
-    // ambient noise never sustains; real interruption does. macOS VP-IO AEC is
-    // converged, so the bot's own residual (~150-200) stays below the 4000 floor.
-    if voicePeakThreshold == 0 && botAudible {
-      let now = Date()
-      if maxAbs >= voicePeakThresholdDuringBot {
-        if macBargeRunStart == nil ||
-           (macBargeLastLoud.map { now.timeIntervalSince($0) > voiceGapToleranceSecs } ?? true) {
-          macBargeRunStart = now
-        }
-        macBargeLastLoud = now
-        if now.timeIntervalSince(macBargeRunStart!) >= voiceSustainSecs {
-          if now >= macMicOpenUntil {
-            NSLog("[RealtimeAudioIO] sustained speech during bot audio (peak=%d) — barge mic open", maxAbs)
-          }
-          macMicOpenUntil = now.addingTimeInterval(0.5)   // open tail after last loud tap
-        }
-      } else if let last = macBargeLastLoud,
-                now.timeIntervalSince(last) > voiceGapToleranceSecs {
-        macBargeRunStart = nil   // run lapsed into silence
-      }
-      if now >= macMicOpenUntil, maxAbs > 600 {
-        // Not (yet) a sustained barge → compress to ambient so server VAD stays quiet.
-        let scale = Float(600) / Float(maxAbs)
-        for i in 0..<frames { int16Ptr[i] = Int16(Float(int16Ptr[i]) * scale) }
-      }
-    } else {
-      macBargeRunStart = nil
-      macBargeLastLoud = nil
-    }
-    #endif
 
     var sentSq = 0.0
     for i in 0..<frames { let v = Double(int16Ptr[i]); sentSq += v * v }

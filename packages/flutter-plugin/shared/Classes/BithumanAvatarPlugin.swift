@@ -794,7 +794,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// Static behaviour of the live engine, resolved from the slug at load
   /// (EngineRegistry.capabilities) and reaffirmed from the created engine in
   /// loadFixtureAndRuntime. This REPLACES every `engineKind == "essence2"` policy
-  /// branch (audioReleaseSeconds / maxAudioQueueSamples / cushion / the
+  /// branch (audioReleaseSeconds / cushion / the
   /// composeTick drive-model selection). Defaults to the expression2 profile so a
   /// read before load — and the iOS path, where no engine instantiates — matches
   /// the old `engineKind != "essence2"` default. Cross-platform (EngineCapabilities
@@ -841,10 +841,12 @@ final class AvatarTexture: NSObject, FlutterTexture {
   // frame that reached the glass after the cut — COUNTED here, not prevented.
   private var audioArrived = 0
   private var audioFed = 0
+  private var bargeEpoch = 0
   private var bargeAt: CFTimeInterval = 0
   private var bargeIdlePending = false
   private var audioSinceBarge = true
   private var bargeLeaks = 0
+  private var bargeFenced = 0
   private var replyFirstFramePending = false
   private var holdTicks = 0
   private var holdRuns = 0
@@ -907,6 +909,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
     let dropped = audioQueue.count
     audioQueue.removeAll(keepingCapacity: true)
     pendingUtteranceReset = true
+    bargeEpoch &+= 1
     bargeAt = CACurrentMediaTime()
     bargeIdlePending = true
     audioSinceBarge = false
@@ -991,9 +994,6 @@ final class AvatarTexture: NSObject, FlutterTexture {
     audioQueue.append(contentsOf: floats)
     audioArrived += n
     audioSinceBarge = true
-    if audioQueue.count > maxAudioQueueSamples {
-      audioQueue.removeFirst(audioQueue.count - maxAudioQueueSamples)
-    }
     lastAudioArrivalTime = now
     audioLock.unlock()
   }
@@ -1010,9 +1010,6 @@ final class AvatarTexture: NSObject, FlutterTexture {
       pendingUtteranceReset = true
     }
     audioQueue.append(contentsOf: chunk)
-    if audioQueue.count > maxAudioQueueSamples {
-      audioQueue.removeFirst(audioQueue.count - maxAudioQueueSamples)
-    }
     lastAudioArrivalTime = now
     audioLock.unlock()
   }
@@ -1062,17 +1059,15 @@ final class AvatarTexture: NSObject, FlutterTexture {
   //   - On a new utterance (≥ idleResetSecs of silence) the runtime resetState()s.
   private static let samplesPerTick = 640           // 16 kHz, 40 ms/tick
   private static let idleResetSecs: Double = 1.0    // gap → new utterance
-  // Hard cap on the lipsync backlog. The compose loop drains this each render
-  // tick; normally it stays near-empty. If the renderer falls behind (CPU
-  // contention) an uncapped queue grows without bound — capping bounds memory
-  // AND keeps the per-tick removeFirst(take) cost O(cap) instead of
-  // O(whole-backlog). On overflow drop the OLDEST so the avatar skips slightly
-  // ahead to catch up rather than lagging forever. Engine-dependent: embody's
-  // ci=0 feed-ahead burst NEEDS the deep 96k (~6 s) buffer — 32k (2 s) starved
-  // it + dropped lipsync audio (the documented regression). essence2 mirrors the
-  // proven canonical Essence2 drive at 32k (~2 s): its realtime feed never races
-  // ahead, so a deeper buffer only adds A/V latency across the three buffers.
-  private var maxAudioQueueSamples: Int { capabilities.maxAudioQueueSamples }
+  // ★ NO CAP, NO DROP (2026-09-16). This queue was capped (96k samples expression-2,
+  // 32k essence-2) and DROPPED ITS OLDEST on overflow — a silent lipsync loss the
+  // transport's 1x pacer kept from ever happening. The pacer is gone: the whole
+  // reply arrives in a burst and is fed to the engine in the same tick, where the
+  // ENGINE is the bound (expression-2 parks its producer at maxQueuedFrames and
+  // keeps the audio; essence-2's pcmIn is unbounded and its ring is 8 deep). This
+  // queue then holds at most one tick's arrivals, and every sample the transport
+  // delivered reaches the engine. Proven on essence-2's old 2 s cap: a 60 s reply's
+  // lipsync now covers the whole reply (no drop). `audioFed` is the instrument.
   private var audioQueue: [Float] = []              // pending pushAudio samples
   private var lastAudioArrivalTime: CFTimeInterval = 0
   #if os(macOS) || os(iOS)
@@ -1216,7 +1211,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
   private static let maxDrainWaitTicks = 60
   // --- essence2 (Essence2) drive constants — verbatim from the proven canonical
   // composeTickElevate. Only composeTickEssence2 reads these; embody is untouched.
-  // (idleResetSecs already exists above; maxAudioQueueSamples is engine-conditional.)
+  // (idleResetSecs already exists above.)
   private static let maxComposesPerTick: Int = 5    // catch-up frame budget/tick
   // Max video lag behind the speaker clock before catch-up dropping: 3 frames = 120 ms.
   private static let elevateMaxLagFrames: Int = 3
@@ -1488,10 +1483,12 @@ final class AvatarTexture: NSObject, FlutterTexture {
     // the .bufferedDisplayClock drive, so the old `engineKind != "essence2"` guard
     // is always true here and is dropped. essence2's continuous slot clock (the
     // separate composeTickEssence2 loop) feeds realtime (samplesPerTick) instead.
-    let want = q < 24 ? 25600 : Self.samplesPerTick   // 25600 = one embody chunk
-    let take = paused ? 0 : min(want, audioQueue.count)
-    let samples = take > 0 ? Array(audioQueue.prefix(take)) : []
-    if take > 0 { audioQueue.removeFirst(take); audioFed += take }
+    // ★ EVERYTHING THAT ARRIVED GOES TO THE ENGINE NOW. feed() never blocks (it
+    // appends; a chunk renders on procQ) and the producer parks at maxQueuedFrames,
+    // so this cannot outrun the engine — the engine is the bound.
+    let take = paused ? 0 : audioQueue.count
+    let samples = take > 0 ? audioQueue : []
+    if take > 0 { audioQueue.removeAll(keepingCapacity: true); audioFed += take }
     let fedTotal = audioFed
     audioLock.unlock()
     if take > 0 {
@@ -1543,9 +1540,12 @@ final class AvatarTexture: NSObject, FlutterTexture {
     let paused = lipsyncPaused
     let needsReset = paused ? false : pendingUtteranceReset
     if !paused { pendingUtteranceReset = false }
-    let take = paused ? 0 : min(Self.samplesPerTick, audioQueue.count)   // hold queue while paused
-    let pending = take > 0 ? Array(audioQueue.prefix(take)) : []
-    if take > 0 { audioQueue.removeFirst(take); audioFed += take }
+    // Everything that arrived goes to the engine now (le_utt_push_audio appends to an
+    // unbounded pcmIn; its worker parks on the 8-deep ring). See composeTickEmbody.
+    let epochAtTop = bargeEpoch
+    let take = paused ? 0 : audioQueue.count   // hold queue while paused
+    let pending = take > 0 ? audioQueue : []
+    if take > 0 { audioQueue.removeAll(keepingCapacity: true); audioFed += take }
     let fedTotal = audioFed
     let lastAudio = lastAudioArrivalTime
     audioLock.unlock()
@@ -1581,11 +1581,20 @@ final class AvatarTexture: NSObject, FlutterTexture {
       // pair into one call (byte-identical: same be_essence2_pull_frame).
       let (got, isSpeech) = rt.pull(into: &bgrBuffer)
       if got > 0 {
-        audioLock.lock(); let stale = !audioSinceBarge; audioLock.unlock()
+        // ★ THE FENCE: a cut moved the epoch between the read at the top and this
+        // pull, OR no reply audio has arrived since the cut → the frame is the
+        // cancelled reply's. Not shown, not paired. (Android's guard, Apple side.)
+        audioLock.lock(); let epochNow = bargeEpoch; let stale = !audioSinceBarge; audioLock.unlock()
+        if epochNow != epochAtTop {
+          bargeFenced += 1
+          NSLog("[bhbarge] FENCED a frame pulled across the cut (epoch %d -> %d) fenced=%d", epochAtTop, epochNow, bargeFenced)
+          return
+        }
         if isSpeech && stale {
           bargeLeaks += 1
           NSLog("[bhbarge] LEAK old-reply speech frame after the cut (+%.0f ms) leaks=%d",
                 (CACurrentMediaTime() - bargeAt) * 1000, bargeLeaks)
+          return
         }
         publishBGRToTexture()                       // every frame shown — never dropped
         if isSpeech {                               // a GENERATED frame → release its paired 40 ms + mark speech
@@ -1630,6 +1639,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
       return
     }
     let now = CACurrentMediaTime()
+    audioLock.lock(); let epochAtTop = bargeEpoch; audioLock.unlock()
     if !embodySpeaking {
       // Wait for ci=0 + ci=1 (~32+ frames) before starting speech. ci=0 only
       // yields ~21 frames for a 1.6 s chunk, and ci=1 lands ~1.5 s later at
@@ -1678,13 +1688,20 @@ final class AvatarTexture: NSObject, FlutterTexture {
     embodyDrainWaitTicks = 0   // got a frame → disarm watchdog
     if holdTicks > 0 { noteHoldRunEnded() }
     noteFifo(now, queuedFrames: rt.queuedFrames, hadFrame: true)
-    audioLock.lock(); let stale = !audioSinceBarge; audioLock.unlock()
+    // ★ THE FENCE: a cut moved the epoch between the read at the top and this pull,
+    // OR no reply audio has arrived since the cut → the frame is the cancelled
+    // reply's. Not shown, not paired (Android's guard, Apple side).
+    audioLock.lock(); let epochNow = bargeEpoch; let stale = !audioSinceBarge; audioLock.unlock()
+    if epochNow != epochAtTop {
+      bargeFenced += 1
+      NSLog("[bhbarge] FENCED a frame pulled across the cut (epoch %d -> %d) fenced=%d", epochAtTop, epochNow, bargeFenced)
+      return
+    }
     if pulled.speech && stale {
-      // A speech frame with no reply audio arrived since the cut cannot be the new
-      // reply's: it is the old one leaking past the reset. Counted here; not prevented.
       bargeLeaks += 1
       NSLog("[bhbarge] LEAK old-reply speech frame after the cut (+%.0f ms) leaks=%d",
             (now - bargeAt) * 1000, bargeLeaks)
+      return
     }
     // ★INTERIM — REMOVE WHEN THE PLUGIN CONSUMES AN ENGINE CARRYING #693 (TAIL 0): the
     // engine then trims each utterance to F = round(seconds × fps) and never emits the

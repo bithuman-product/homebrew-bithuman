@@ -20,7 +20,6 @@
 // Apache-2.0; (c) bitHuman.
 
 import 'dart:async';
-import 'dart:io' show Platform;
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -110,32 +109,26 @@ class BithumanRealtimeSession {
   // error.
   bool _haveActiveResponse = false;
 
-  // Real-time pacing for bot audio. OpenAI streams `response.output_audio.delta`
-  // FASTER than real time (the whole reply arrives in a burst). The speaker
-  // (AVAudioPlayerNode) self-paces, but the avatar's lipsync queue drains at a
-  // hard 1x and backlogs under a burst, so video lags audio over a long reply.
-  // LOCAL mode never has this because its TTS source (ConverseSession) is
-  // metered to ~1x. We mirror that here: release each delta to the plugin only
-  // as fast as it will play, keeping the lipsync queue near-empty.
-  //
-  // ★ NOT ON ANDROID: there the plugin is the speaker and paces by the DAC, and
-  // pacing it starved the engine's look-ahead instead — see the delta handler.
-  //
-  // `_audioBufferedUntil` is the wall-clock time the audio handed to the plugin
-  // so far will finish playing. Reserved SYNCHRONOUSLY (before any await) so
-  // concurrently-dispatched delta handlers each claim the next slot rather than
-  // racing on a stale value. `_audioGen` invalidates deltas left parked in a
-  // pacing delay across a barge / cancel / turn boundary.
-  static const Duration _paceLead = Duration(milliseconds: 180);
-  DateTime _audioBufferedUntil = DateTime.fromMillisecondsSinceEpoch(0);
-  int _audioGen = 0;
+  // ★ THE REPLY REACHES THE PLUGIN AS FAST AS THE SERVER DELIVERS IT, ON EVERY
+  // PLATFORM (2026-09-16). OpenAI streams `response.output_audio.delta` at 8-28x
+  // real time. This transport used to meter the deltas to ~1x (+180 ms lead)
+  // before handing them over, on the theory the avatar's lipsync queue "drains at
+  // a hard 1x and backlogs under a burst". It does not: the presenter is clocked
+  // by the ENGINE's frames (Android writes each frame's samples to the AudioTrack;
+  // Apple releases one frame's slice per published lip-frame), and the engine
+  // bounds its own backlog (expression-2 parks its producer at maxQueuedFrames=64;
+  // essence-2's ring is 8 deep, le_utt_push non-blocking). Paced, the engine paid
+  // its look-ahead in wall clock — the Android pause and +900 ms of TTFA. On iOS,
+  // measured 2026-09-16, the paced build already held no mid-reply frame (FIFO
+  // holds 0 across a 90 s monologue); un-pacing there is TTFA + parity, and is
+  // SAFE ONLY BECAUSE the drop-oldest audioQueue cap is gone in the same change
+  // (a 42 s reply arriving in 4.5 s would otherwise lose 37 s of lipsync audio).
+  // `_droppingCancelledAudio` at the top of the delta handler fences a cancelled
+  // reply; nothing is ever parked between the socket and the plugin.
 
-  // Bump the audio generation and clear the pacing clock — call at every turn
-  // boundary (barge, cancel, new response, stop) so a fresh turn starts playing
-  // immediately and any delta still parked in a pacing delay is dropped.
+  // A turn boundary (barge, cancel, new response, stop): nothing of the previous
+  // turn is audible from what was handed over so far.
   void _resetAudioPacing() {
-    _audioGen++;
-    _audioBufferedUntil = DateTime.fromMillisecondsSinceEpoch(0);
     _audibleUntil = DateTime.fromMillisecondsSinceEpoch(0);
   }
 
@@ -726,38 +719,14 @@ class BithumanRealtimeSession {
           if (v > bpeak) bpeak = v;
         }
         _botLevel.add(bpeak / 32768.0);
-        // Pace to ~1x real time before handing the chunk to the plugin, so
-        // the lipsync queue can't backlog under OpenAI's faster-than-real-time
-        // burst (the cause of cloud A/V drift). Reserve this chunk's playback
-        // slot SYNCHRONOUSLY — `_handleMessage` is async and the stream doesn't
-        // serialize it, so burst deltas run concurrently; advancing
-        // `_audioBufferedUntil` before the await is what keeps them ordered
-        // instead of all reading the same stale clock.
-        final gen = _audioGen;
+        // `_audibleUntil` tracks when the audio handed over so far finishes — used
+        // by the injection proof and the stress driver to know the agent is talking.
         final chunkDur = Duration(
             microseconds: ((pcm24kBytes.length ~/ 2) * 1000000 / 24000).round());
         final now = DateTime.now();
         _audibleUntil = (_audibleUntil.isAfter(now) ? _audibleUntil : now).add(chunkDur);
-        var waitMs = 0;
-        // ★ ANDROID IS NOT PACED HERE. There the plugin IS the speaker: playSpeakerPCM
-        // buffers the reply, feeds the engine, and writes each frame's own samples
-        // to the AudioTrack (AvatarPlayer) — the device is the clock, nothing can
-        // backlog against it, and the deferred flush below is moot (no lead to drain).
-        // Paced to 1x, the engine's look-ahead (chunk 1 = 2.75 s of audio, 1.15 s
-        // beyond chunk 0) was paid in wall-clock: measured 2026-09-15 on a Galaxy
-        // S25+, every reply ran out of frames 1.05 s in and paused 300-400 ms.
-        if (!Platform.isAndroid) {
-          final playAt = _audioBufferedUntil.isAfter(now) ? _audioBufferedUntil : now;
-          _audioBufferedUntil = playAt.add(chunkDur);
-          // Release `_paceLead` early so the speaker never starves on jitter.
-          waitMs = playAt.difference(now).inMilliseconds - _paceLead.inMilliseconds;
-        }
-        if (waitMs > 0) {
-          await Future<void>.delayed(Duration(milliseconds: waitMs));
-          // A barge/cancel/new-turn/stop while we were parked invalidates this
-          // chunk (it belongs to a response that's no longer playing).
-          if (gen != _audioGen || _droppingCancelledAudio || !_open) break;
-        }
+        // No wait: hand the chunk to the plugin as it arrives. The engine bounds
+        // the backlog; the presenter is clocked by the engine's frames.
         // Single call drives BOTH the speaker (VP-IO player node) AND
         // the avatar's lipsync queue from the same chunk in the same
         // instant. A/V cannot drift; VP-IO's AEC means the speaker
@@ -819,24 +788,12 @@ class BithumanRealtimeSession {
         }
         _deltaN = 0;
         // Flush the avatar's final partial lipsync chunk so the last word isn't
-        // clipped. response.done arrives BEFORE the paced audio deltas finish
-        // being handed to playSpeakerPCM (client-side _paceLead pacing), so defer
-        // the flush until the pacing queue (_audioBufferedUntil, reserved
-        // synchronously per delta) has drained. Gate on _audioGen so a barge /
-        // cancel between here and the deferred call drops the flush (the cloud
-        // analogue of the native barge gen-fence) — it must never land after
-        // interrupt() reset the runtime for a new turn.
-        final flushGen = _audioGen;
-        final flushDrainAt = _audioBufferedUntil;
-        unawaited(() async {
-          final waitMs = flushDrainAt.difference(DateTime.now()).inMilliseconds;
-          if (waitMs > 0) {
-            await Future<void>.delayed(Duration(milliseconds: waitMs));
-          }
-          if (_open && !_droppingCancelledAudio && flushGen == _audioGen) {
-            try { await avatar.notifyTurnEnd(); } catch (_) {}
-          }
-        }());
+        // clipped. Every delta has already been handed to the plugin (nothing is
+        // parked here now the pacer is gone), so the flush goes immediately; a
+        // barge lands on the plugin's own reset and is fenced there.
+        if (!_droppingCancelledAudio) {
+          try { await avatar.notifyTurnEnd(); } catch (_) {}
+        }
         // A cancelled reply means the user is talking: the server creates the
         // next reply itself (create_response), the driver must not race it.
         if (_devStress && doneStatus == 'completed') {

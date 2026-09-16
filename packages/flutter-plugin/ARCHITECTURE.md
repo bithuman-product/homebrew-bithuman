@@ -225,7 +225,7 @@ The plugin then drives whatever `any BithumanEngine` comes back **purely by
 20 fps display tick; `.atomicSlotClock` runs the essence2 single atomic feed+pull
 tick (the byte-frozen a2x path). Both loops are kept **verbatim** and selected by
 capability — no `engineKind` string branches, no `as? Essence2Runtime` downcast.
-The per-engine policy (`audioReleaseSeconds` / `maxAudioQueueSamples` /
+The per-engine policy (`audioReleaseSeconds` /
 `speechCushion`) is read from `capabilities`.
 
 ### What else the umbrella owns
