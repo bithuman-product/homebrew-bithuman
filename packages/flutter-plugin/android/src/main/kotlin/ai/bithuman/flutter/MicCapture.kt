@@ -78,8 +78,8 @@ class MicCapture(
         live = true
         Log.i("bhmic", "OPEN source=VOICE_COMMUNICATION mode=${am.mode} device=${r.routedDevice?.type} " +
             "aec=${aec?.enabled} rateIn=$RATE_IN chunkMs=100 hostMs=${System.currentTimeMillis()}")
-        // The SAME attestation the Apple planes emit from RealtimeAudioIO, in the same
-        // vocabulary, so ONE reader grades the platform canceller on every plane. Every
+        // The SAME attestation Apple's RealtimeAudioIO emits, in the same vocabulary, so
+        // ONE reader grades the platform canceller on iOS, macOS and Android alike. Every
         // value is READ BACK from the framework, never the value asked for: `mode` is what
         // AudioManager reports (MODE_IN_COMMUNICATION == 3 is what makes the platform AEC
         // reference the playout), `aec` is AcousticEchoCanceler.enabled. Both can legitimately

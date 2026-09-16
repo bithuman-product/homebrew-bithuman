@@ -921,7 +921,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   /// `BITHUMAN_NO_VPIO` lever, and the device-swap `bringUp(vpio:)` fallback that retries
   /// with the canceller off after a failed start. After either, the session runs with no
   /// echo cancellation at all and every other line in the log looks identical. macOS has
-  /// no AVAudioSession, so on that plane this line is the ONLY evidence the platform
+  /// no AVAudioSession, so on that platform this line is the ONLY evidence the platform
   /// canceller is on: before it existed, the published macOS session log (2026-09-16,
   /// mac_run_e2p170macpub.log) contained ZERO lines about VP-IO, and no one could say
   /// whether the canceller or the raised server_vad threshold was carrying the load.
