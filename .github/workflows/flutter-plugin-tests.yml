@@ -1,0 +1,49 @@
+# flutter-plugin-tests — packages/flutter-plugin/test/ runs on EVERY push and PR that
+# touches the plugin. avatar_fit_test.dart is the fill rule the owner accepted on his
+# phone (#41); essence2_catalog_test.dart guards the catalog read. Until this workflow
+# existed no homebrew workflow ran `flutter test` at all (preflight.yml verifies repo
+# layout; plugin-platform-guards.yml grades Swift #if reasons), so those tests ran only
+# when a human ran them — a memory, not a gate.
+#
+# ★A GATE MUST BE ABLE TO SAY "I COULD NOT LOOK": the test census runs first and refuses
+# an empty set. NOT a publish trigger: publish-pubdev.yml listens to tags flutter-v*;
+# this file listens to pushes and PRs and uploads nothing.
+name: flutter plugin tests
+
+on:
+  push:
+    branches: [main]
+    paths: ['packages/flutter-plugin/**', '.github/workflows/flutter-plugin-tests.yml']
+  pull_request:
+    paths: ['packages/flutter-plugin/**', '.github/workflows/flutter-plugin-tests.yml']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  plugin:
+    name: packages/flutter-plugin — flutter test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: packages/flutter-plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: toolchain
+        run: flutter --version
+      - name: the test census is non-empty (a gate that can say it could not look)
+        run: |
+          set -euo pipefail
+          N=$(ls test/*_test.dart 2>/dev/null | wc -l | tr -d ' ')
+          echo "test files: $N"; ls test/*_test.dart
+          [ "$N" -ge 1 ] || { echo "::error::no *_test.dart under packages/flutter-plugin/test — nothing was graded"; exit 1; }
+      - name: flutter pub get
+        run: flutter pub get
+      - name: flutter test
+        run: flutter test --reporter expanded
