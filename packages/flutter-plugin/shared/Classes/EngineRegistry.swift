@@ -90,6 +90,13 @@ enum EngineRegistry {
       // engine default). Set BEFORE init (Essence2Engine reads the statics).
       Essence2Engine.activeAgentDir = ref.path
       Essence2Engine.motionDir = ref.motionDir
+      // The engine bills the session it is about to serve; the credential must
+      // be set BEFORE be_essence2_create (which arms the meter first, before any
+      // work). Without it the engine's own fallback is the process environment
+      // (BITHUMAN_API_SECRET), which an installed app never has.
+      if let s = ref.apiSecret, !s.isEmpty {
+        _ = s.withCString { be_essence2_set_api_secret($0) }
+      }
       return Essence2Engine()
     }
     #endif

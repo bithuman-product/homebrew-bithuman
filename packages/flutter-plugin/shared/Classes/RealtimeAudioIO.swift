@@ -438,6 +438,23 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       } else {
         try input.setVoiceProcessingEnabled(true)
         try output.setVoiceProcessingEnabled(true)
+        // macOS-only: the iMac's canceller leaves -46..-56 dBFS of echo that AGC
+        // re-amplifies into a self-interruption; the iPhone's leaves -70..-90 and
+        // never needed this (measured 2026-09-16, details below).
+        #if os(macOS)
+        // No automatic gain on the Mac's uplink. VP-IO's AGC drives the capture
+        // toward a target level whenever nobody near is talking — and while the
+        // agent talks, what it finds to amplify is the echo the canceller left
+        // behind. Measured on echelon (iMac, M4, macOS 26.6.2, built-in speakers
+        // at 40 %, 2026-09-16): the residual the server heard peaked at -34 dBFS
+        // (RMS -51) with a far end at -19..-23 dBFS, and server_vad at 0.7 still
+        // read it as the user speaking twice in 333 s of monologue. The iPhone's
+        // canceller leaves -70..-90 dBFS and never needed this. The server's own
+        // far_field pipeline sets the level it wants; the plugin sends what the
+        // canceller produced, unamplified (the attenuation the contract measures
+        // stays 0: captured == sent).
+        input.isVoiceProcessingAGCEnabled = false
+        #endif
         // Let other apps' audio keep playing. VP-IO DUCKS (suppresses) non-voice
         // audio by default, so Music / video / system sounds go silent while the
         // app runs. Minimize that ducking so all sound passes through (macOS 14+ /

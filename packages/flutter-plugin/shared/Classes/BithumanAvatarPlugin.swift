@@ -171,15 +171,15 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
         result(FlutterError(code: "BAD_ARGS", message: "load requires path", details: nil))
         return
       }
-      // `apiSecret` is accepted for API compatibility but unused: the embody
-      // engine is pure on-device (no metered auth / heartbeat). When the
-      // metered enforcement gate lands (offline-token program Components
-      // 1/2, owner-gated), wire auth through the Component-4 surface that
-      // already ships DARK in this pod: DeviceIdentity.fingerprint32()
-      // (hardware-bound billing fingerprint — never nil/random) +
-      // DeviceIdentity.registerRequestSigner() (Secure Enclave request
-      // signing) + SealedCounterStore.registerWithEngine() (kiosk SKU only;
-      // mobile-offline is NOT-OFFERED).
+      // `apiSecret` rides the AvatarRef to the engine. expression-2 is pure
+      // on-device and ignores it; essence-2 BILLS the session it serves and
+      // refuses to create one without a credential (be_essence2_create -3,
+      // "no authenticated session for this render") — which is exactly what an
+      // iPhone did on 2026-09-16: the app held the secret in its Keychain, the
+      // Android half fetches by code with it, and this handler dropped it on the
+      // floor ("accepted for API compatibility but unused"). A macOS run only
+      // ever worked because the lane exported BITHUMAN_API_SECRET into the
+      // process environment, which no installed app has.
       guard let textureRegistry = registrarTextures else {
         result(FlutterError(code: "NO_REGISTRY",
                             message: "no FlutterTextureRegistry available",
@@ -198,6 +198,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       texture.engineKind = EngineRegistry.canonical(for: engineArg)
       texture.capabilities = EngineRegistry.capabilities(for: engineArg)
       texture.motionDir = args["motionDir"] as? String
+      texture.apiSecret = args["apiSecret"] as? String
       let textureId = textureRegistry.register(texture)
       texture.textureId = textureId
       texture.registry = textureRegistry
@@ -803,6 +804,9 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// essence2 actor `.bhx` dir from the load args (nil = engine default). Carried
   /// into the AvatarRef that EngineRegistry.make consumes.
   var motionDir: String?
+  /// The host app's api-secret from the load args (nil = none given). Carried into
+  /// the AvatarRef; essence-2's self-host meter bills the session to it.
+  var apiSecret: String?
   /// Bot audio released per published SPEECH frame = 1/displayFps. embody runs at
   /// 20 fps (0.05 s); essence2 at 25 fps (0.04 s). A constant 0.05 over-demands at
   /// 25 fps (releases more audio than a frame carries → A/V drift). Read by
@@ -1344,7 +1348,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
     // is the SINGLE publisher of frames — a steady 50 ms cadence eliminates the
     // 40 ms-grid judder, and it paints the neutral idle pose between utterances
     // (so the avatar settles instead of freezing on a mid-word frame).
-    let disp = DispatchSource.makeTimerSource(queue: renderQueue)
+    let disp = DispatchSource.makeTimerSource(flags: .strict, queue: renderQueue)
     disp.schedule(deadline: .now() + 0.05, repeating: 0.05, leeway: .milliseconds(3))
     disp.setEventHandler { [weak self] in self?.embodyDisplayTick() }
     disp.resume()
@@ -1800,7 +1804,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// .bufferedDisplayClock — exactly the old embody fallback.
   private func loadFixtureAndRuntime() {
     #if os(macOS) || os(iOS)
-    let ref = AvatarRef(path: imxPath, motionDir: motionDir)
+    let ref = AvatarRef(path: imxPath, motionDir: motionDir, apiSecret: apiSecret)
     let engine = EngineRegistry.make(engineKind, ref)
     avatar = engine
     capabilities = engine.capabilities   // authoritative (handles the essence2→embody fallback)
@@ -1821,7 +1825,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
   }
 
   private func startTimer() {
-    let t = DispatchSource.makeTimerSource(queue: renderQueue)
+    let t = DispatchSource.makeTimerSource(flags: .strict, queue: renderQueue)
     t.schedule(deadline: .now() + 0.040, repeating: 0.040, leeway: .milliseconds(2))
     t.setEventHandler { [weak self] in self?.composeTick() }
     timer = t
