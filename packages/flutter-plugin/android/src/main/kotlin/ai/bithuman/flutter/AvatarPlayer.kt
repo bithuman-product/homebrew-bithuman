@@ -178,6 +178,8 @@ class AvatarPlayer(
     @Volatile private var nLeak = 0
     @Volatile private var nBarge = 0
     @Volatile private var cutAtMs = 0L
+    /** Set with [cutAtMs]; cleared by the first idle frame presented after the cut. */
+    @Volatile private var cutIdleAtMs = 0L
 
     /** Session sample count: monotonic, never reset — contract 1. */
     @Volatile private var sessionSamples = 0L
@@ -286,7 +288,7 @@ class AvatarPlayer(
         track.pause()
         track.flush()
         track.play()
-        nBarge++; cutAtMs = t0
+        nBarge++; cutAtMs = t0; cutIdleAtMs = t0
         Log.i("bhbarge", "CUT $nBarge hostMs=$t0 epoch=$epoch headBefore=$headBefore flushedInMs=${System.currentTimeMillis() - t0} " +
             "q=${avatar.queuedFrames} pendingSlices=${runCatching { avatar.pendingAudioSlices }.getOrDefault(-1)}")
         pBase = sessionSamples          // the device counter restarts; the session does not
@@ -703,26 +705,10 @@ class AvatarPlayer(
     @Volatile private var nPresDropStale = 0L
     @Volatile private var nPresDropLate = 0L
     @Volatile private var nWriteSpeech = 0L
-    @Volatile private var lastSpeechWriteMs = 0L
-
-    /**
-     * Is the SPEAKER playing the agent's voice right now (plus [hangoverMs] after)?
-     *
-     * The microphone needs this. Measured on a Galaxy S25+ with nobody in the room: the
-     * agent's own voice came out of the speaker, the platform echo canceller did not hold
-     * at speakerphone volume, the uplink transcribed it as the USER ("you: If you're here
-     * to help, just let me know what you'd like to talk about." — the agent's own words),
-     * the server's turn detection answered it, and the session talked to itself
-     * indefinitely. The avatar then animates that chatter and never reaches its idle loop,
-     * which is what a person sees as "it never rests".
-     *
-     * The writer is the right place to read it from: `track.write` blocks until the device
-     * takes the samples, so the last speech write is within a buffer of what is audible.
-     */
-    fun speakingRecently(hangoverMs: Long = 400): Boolean {
-        val t = lastSpeechWriteMs
-        return t > 0 && System.currentTimeMillis() - t < hangoverMs
-    }
+    /** Sum of squares / count of the speech samples handed to the device since the last `bhfar` line. */
+    @Volatile private var farSumSq = 0.0
+    @Volatile private var farN = 0L
+    @Volatile private var farPeak = 0
 
     /** created -> handed to write() -> presented. If they disagree, units are being lost. */
     fun census(): String = "created=$nCreated written=$nWritten presented=$nPresented " +
@@ -774,7 +760,22 @@ class AvatarPlayer(
                     val wus = (System.nanoTime() - writeT0) / 1000L
                     writeUs += wus; if (wus > writeMaxUs) writeMaxUs = wus
                     nWritten++
-                    if (u.speech) { nWriteSpeech++; lastSpeechWriteMs = System.currentTimeMillis() }
+                    if (u.speech) {
+                        nWriteSpeech++
+                        // The far end the echo canceller must remove: what this reply put on the
+                        // speaker, as a level. `bhfar` once a second, beside the mic's `bhmic`.
+                        var sq = 0.0
+                        var pk = farPeak
+                        var i = 0
+                        val a = u.audio
+                        while (i + 1 < a.size) {
+                            val v = ((a[i + 1].toInt() shl 8) or (a[i].toInt() and 0xFF)).toShort().toInt()
+                            val av = if (v < 0) -v else v
+                            if (av > pk) pk = av
+                            sq += v.toDouble() * v; i += 2
+                        }
+                        farSumSq += sq; farN += a.size / 2; farPeak = pk
+                    }
                     val nowMs = System.currentTimeMillis()
                     if (lastWriteMs > 0 && nowMs - lastWriteMs >= 120) {
                         Log.i("bhgap", "WRITE GAP ${nowMs - lastWriteMs}ms speech=${u.speech} " +
@@ -872,6 +873,11 @@ class AvatarPlayer(
         if (now - beat > 1000) {
             beat = now
             sampleUnderruns()
+            if (farN > 0) {
+                val rms = Math.sqrt(farSumSq / farN)
+                Log.i("bhfar", "speechSamples=$farN peak1s=$farPeak rms1s=${rms.toInt()} dbfs=%.1f hostMs=$now".format(20 * Math.log10(maxOf(rms, 1.0) / 32768.0)))
+                farSumSq = 0.0; farN = 0; farPeak = 0
+            }
             stats.refresh()
             val avg = if (pullCalls > 0) pullNanos / pullCalls / 1_000_000.0 else 0.0
             Log.i("bhav", "PROD where=$where idle=$nIdle speech=$nSpeech tailUnits=$nTailUnits " +
@@ -899,6 +905,11 @@ class AvatarPlayer(
         if (u == null) return
         presentedSeq = maxOf(presentedSeq, u.seq)
         if (u.speech) nPresSpeech++
+        if (cutIdleAtMs > 0 && !u.speech) {
+            // The owner's "fall back to idle": the first idle frame on the glass after a cut.
+            Log.i("bhbarge", "IDLE-SHOWN sinceCutMs=${now - cutIdleAtMs} epoch=${u.epoch} hostMs=$now")
+            cutIdleAtMs = 0L
+        }
         if (cutAtMs > 0 && u.speech && u.kind != 'H') {
             Log.i("bhbarge", "NEW-MOUTH sinceCutMs=${now - cutAtMs} epoch=${u.epoch} kind=${u.kind} leaks=$nLeak")
             cutAtMs = 0L
