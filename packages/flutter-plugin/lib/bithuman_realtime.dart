@@ -20,6 +20,7 @@
 // Apache-2.0; (c) bitHuman.
 
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -115,6 +116,9 @@ class BithumanRealtimeSession {
   // LOCAL mode never has this because its TTS source (ConverseSession) is
   // metered to ~1x. We mirror that here: release each delta to the plugin only
   // as fast as it will play, keeping the lipsync queue near-empty.
+  //
+  // ★ NOT ON ANDROID: there the plugin is the speaker and paces by the DAC, and
+  // pacing it starved the engine's look-ahead instead — see the delta handler.
   //
   // `_audioBufferedUntil` is the wall-clock time the audio handed to the plugin
   // so far will finish playing. Reserved SYNCHRONOUSLY (before any await) so
@@ -637,11 +641,20 @@ class BithumanRealtimeSession {
         final chunkDur = Duration(
             microseconds: ((pcm24kBytes.length ~/ 2) * 1000000 / 24000).round());
         final now = DateTime.now();
-        final playAt = _audioBufferedUntil.isAfter(now) ? _audioBufferedUntil : now;
-        _audioBufferedUntil = playAt.add(chunkDur);
-        // Release `_paceLead` early so the speaker never starves on jitter.
-        final waitMs =
-            playAt.difference(now).inMilliseconds - _paceLead.inMilliseconds;
+        var waitMs = 0;
+        // ★ ANDROID IS NOT PACED HERE. There the plugin IS the speaker: playSpeakerPCM
+        // buffers the reply, feeds the engine, and writes each frame's own samples
+        // to the AudioTrack (AvatarPlayer) — the device is the clock, nothing can
+        // backlog against it, and the deferred flush below is moot (no lead to drain).
+        // Paced to 1x, the engine's look-ahead (chunk 1 = 2.75 s of audio, 1.15 s
+        // beyond chunk 0) was paid in wall-clock: measured 2026-09-15 on a Galaxy
+        // S25+, every reply ran out of frames 1.05 s in and paused 300-400 ms.
+        if (!Platform.isAndroid) {
+          final playAt = _audioBufferedUntil.isAfter(now) ? _audioBufferedUntil : now;
+          _audioBufferedUntil = playAt.add(chunkDur);
+          // Release `_paceLead` early so the speaker never starves on jitter.
+          waitMs = playAt.difference(now).inMilliseconds - _paceLead.inMilliseconds;
+        }
         if (waitMs > 0) {
           await Future<void>.delayed(Duration(milliseconds: waitMs));
           // A barge/cancel/new-turn/stop while we were parked invalidates this
