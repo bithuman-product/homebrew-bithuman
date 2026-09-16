@@ -164,7 +164,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     s.player?.stop(); s.player = null
                     Log.i(TAG, "held: player stopped (app off screen)")
                 } else if (s.player == null && !s.stopped.get()) {
-                    val p = AvatarPlayer(s.avatar, s.idle, capturable = false) { bmp -> s.draw(bmp) }
+                    val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                    val p = AvatarPlayer(s.avatar, s.idle, debuggable = debuggable, capturable = false) { bmp -> s.draw(bmp) }
                     s.player = p; p.start()
                     Log.i(TAG, "released: fresh player started")
                 }
@@ -221,7 +222,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 entry.surfaceTexture().setDefaultBufferSize(avatar.width, avatar.height)
                 val s = AvatarSession(code, avatar, entry, Surface(entry.surfaceTexture()))
                 s.idle = idle
-                val p = AvatarPlayer(avatar, idle, capturable = false) { bmp -> s.draw(bmp) }
+                val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                val p = AvatarPlayer(avatar, idle, debuggable = debuggable, capturable = false) { bmp -> s.draw(bmp) }
                 s.player = p
                 main.post {
                     sessions[entry.id()] = s
