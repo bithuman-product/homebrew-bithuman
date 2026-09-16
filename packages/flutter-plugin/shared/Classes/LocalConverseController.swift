@@ -18,16 +18,17 @@ import FlutterMacOS
 /// AvatarTexture (idle driver-video + 25fps compose); only the BRAIN is new:
 ///   mic (AEC'd) → Apple SpeechAnalyzer → converse push_text
 ///   converse TTS (24k) → RealtimeAudioIO.playSpeakerPCM24k (speaker + avatar)
-///   barge-in: ENERGY-VAD (unified). The bot STOPS (turn cancelled + speaker/
-///             lipsync flushed) the moment the post-AEC mic energy crosses the
-///             single `vad_threshold` — RealtimeAudioIO fires io.barge() and the
-///             onBarge hook here cancels the brain turn. Energy onset is ~150 ms
-///             vs the old ASR word-count's ~300-700 ms first-word latency, so it
-///             cuts the instant the user speaks. An echo margin (applied while
-///             the bot is audible) stops the bot's own AEC residual from self-
-///             barging. The ASR now only transcribes the user's turn for the
-///             brain (pushText on .final) + captions; it no longer gates barge.
-///             Shared by macOS + iOS — the same path as cloud-WebSocket.
+///   barge-in: HOLD → CONFIRM (RealtimeAudioIO.duplexTick). The bot goes quiet
+///             the moment the post-AEC mic energy crosses an echo-aware floor —
+///             a LOSSLESS pause of speaker + lipsync, not a cut, so the reply is
+///             still there if it turns out to have been the agent's own echo.
+///             With the speaker paused the far end is silent and the residual
+///             with it, so the microphone is re-read against the plain quiet-mode
+///             threshold; a person still speaking CONFIRMS and io.barge() fires
+///             onBarge here to cancel the brain turn, and an echo RELEASES and the
+///             reply resumes from the sample it stopped on. The ASR only transcribes
+///             the user's turn for the brain (pushText on .final) + captions; it
+///             does not gate barge. Shared by macOS + iOS.
 ///
 /// macOS 26+ only — it holds a SpeechPipeline (SpeechAnalyzer). The plugin
 /// guards the entry path with `#available(macOS 26.0, *)`.
@@ -142,7 +143,10 @@ final class LocalConverseController: @unchecked Sendable {
             self.converse.interrupt()
             self.lock.lock(); self.botAudibleUntil = .distantPast; self.lock.unlock()
         }
-        io.lipsyncPauseControl = false   // hard cut, lossy — "stop the moment the user talks"
+        // (Nothing to switch on here: the lossless hold follows the gate itself —
+        // RealtimeAudioIO buffers instead of dropping whenever vad_threshold > 0,
+        // which is exactly when a held reply can still be resumed. It used to be a
+        // second flag a caller had to remember, and the caller did not.)
 
         // mic → ASR. Feed CONTINUOUSLY, including while the bot is speaking, so the
         // user's interruption is transcribed live for the brain. VP-IO AEC keeps
@@ -266,8 +270,6 @@ final class LocalConverseController: @unchecked Sendable {
         micCont.finish()
         io?.onMicTap = nil
         io?.onBarge = nil
-        io?.onUserSpeechStart = nil
-        io?.onUserSpeechEnd = nil
         io?.resumePlayback()   // clear any lingering pause hold before teardown
         Task { await speech?.stop() }
         converse.stop()

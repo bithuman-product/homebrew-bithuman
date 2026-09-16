@@ -337,11 +337,17 @@ class BithumanRealtimeSession {
       //     (median, 6/6 trials, 0 local wins). The 643 ms it was to beat also carries
       //     ~156 ms that never happened: the server back-dates `audio_start_ms` (measured
       //     −156 ms median, −156…−260 over 5 sweeps against a known onset).
-      //   • THE FLOOR CANNOT SEPARATE THE TWO VOICES ON DEVICE ANYWAY. See
-      //     `voicePeakThresholdDuringBot` in RealtimeAudioIO.swift for the distributions.
+      //   • AND NO ABSOLUTE FLOOR CAN SEPARATE THE TWO VOICES ON DEVICE ANYWAY —
+      //     the distributions overlap. LOCAL mode, which has no server VAD behind it,
+      //     now answers that with a HOLD → CONFIRM gate instead of a constant: it
+      //     pauses the agent losslessly and re-reads the microphone with the far end
+      //     silent (`duplexTick` in RealtimeAudioIO.swift). That is strictly slower to
+      //     DECIDE than server_vad — the decision waits out a drain plus a confirm
+      //     window — so it stays off here, where a faster and better-informed barge
+      //     already exists.
       //
       // So: server_vad stays the cloud barge. The vad_threshold knob drives LOCAL mode
-      // only, where there is no server VAD and this energy gate is the only trigger.
+      // only, where there is no server VAD and the duplex gate is the only trigger.
       await avatar.audioStart(
           vadThreshold: 0, enableMic: enableMic, vpioAgc: EchoProfile.current.vpioAgc);
       if (enableMic) {
