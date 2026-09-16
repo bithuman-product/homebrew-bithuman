@@ -1,0 +1,72 @@
+# The Flutter pod and SwiftPM are two paths to one on-device engine, and until
+# 2026-09-16 nothing compared them: Package.swift served `essence2-v1.7.0` while
+# the pod took a default from the PRIVATE engine repo and linked
+# `essence2-v1.2.0` — a pre-release whose own title reads "superseded". Five
+# releases apart, on one repo, for ten days. The plugin's own committed globs
+# were written for the older archive, so the first macOS run of the day carried
+# no audio encoder and the engine refused with -2.
+#
+# The engine adapter SOURCE was worse: `locate_engine_sdk` took a ref and both
+# call sites omitted it, so the Swift compiled into the pod came from main HEAD
+# at bootstrap time, into gitignored directories, with no revision recorded.
+# `flutter-plugin-v2.6.1` named no engine at all.
+#
+# This is the gate. Offline, no credential, runs on a fork.
+name: apple engine pin
+
+on:
+  pull_request:
+    paths:
+      - 'packages/flutter-plugin/scripts/bootstrap.sh'
+      - 'Package.swift'
+      - 'scripts/check-apple-engine-pin.sh'
+      - '.github/workflows/apple-engine-pin.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'packages/flutter-plugin/scripts/bootstrap.sh'
+      - 'Package.swift'
+      - 'scripts/check-apple-engine-pin.sh'
+      - '.github/workflows/apple-engine-pin.yml'
+  workflow_dispatch:
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: A tag names an engine — on both Apple paths
+        run: ./scripts/check-apple-engine-pin.sh
+
+      - name: Negative control — re-create the defect, require a REFUSAL
+        run: |
+          # A check that cannot fail is not a check. Each arm is the real defect,
+          # not a synthetic one: A4 is literally the 1.2.0-vs-1.7.0 drift and A2
+          # is literally the call site that omitted the ref.
+          set -u
+          B=packages/flutter-plugin/scripts/bootstrap.sh
+          cp "$B" "$RUNNER_TEMP/bootstrap.bak"
+          restore() { cp "$RUNNER_TEMP/bootstrap.bak" "$B"; }
+          arm() {  # $1 = name, $2 = sed program
+            sed -i "$2" "$B"
+            if ./scripts/check-apple-engine-pin.sh > /dev/null 2>&1; then
+              echo "::error::the pin check PASSED with '$1' applied — it is not looking"
+              restore; exit 1
+            fi
+            echo "  refused: $1"
+            restore
+          }
+          arm "BITHUMAN_MODELS_REF becomes a branch name" \
+              's|BITHUMAN_MODELS_REF:-[0-9a-f]\{40\}|BITHUMAN_MODELS_REF:-main|'
+          arm "the source pin is deleted" \
+              '/^BITHUMAN_MODELS_REF=/d'
+          arm "a locate_engine_sdk call site drops the ref" \
+              's| "\$BITHUMAN_MODELS_REF"; then|; then|'
+          arm "the resources digest is deleted" \
+              '/^LIBESSENCE2_RESOURCES_SHA256=/d'
+          arm "the pod rolls back to the superseded essence2-v1.2.0" \
+              's|LIBESSENCE2_RELEASE:-essence2-v[0-9.]*|LIBESSENCE2_RELEASE:-essence2-v1.2.0|'
+          arm "one hex digit of the engine digest moves" \
+              's|LIBESSENCE2_SHA256:-e|LIBESSENCE2_SHA256:-f|'
+          ./scripts/check-apple-engine-pin.sh

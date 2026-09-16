@@ -71,7 +71,9 @@ w2v + taehv + warm) + `.avatar` (per-identity: student + atok + canon + idle.mp4
 
 The on-device **light/ANE** tier is `models/essence-2/sdk` (Layer 1):
 `Essence2Engine.swift` over the `be_essence2_*` C ABI, published as
-`libessence2.xcframework` (release `libessence2-v1.0-a2x`). Frozen on-device format:
+`libessence2.xcframework`, pinned by tag + sha256 in `scripts/bootstrap.sh`
+(the APPLE ENGINE PIN block) — never by a default in the engine repo.
+Frozen on-device format:
 `.elevatedir` per-identity bundle (`requires_engine_abi: 2`), BGR-no-swap output,
 the byte-frozen a2x render path. **OPTIONAL** — absent its static lib the build is
 embody-only.
@@ -133,8 +135,11 @@ Both engine repos expose an **identically-shaped** `sdk/` conforming to Layer 0:
   CoreML model bundle (no static lib), landing under the FROZEN `embody`
   subdirectory.
 - **`models/essence-2/sdk`** — `Essence2Engine.swift` + `include/be_essence2.h`. Its
-  bootstrap fetches the sha-pinned `libessence2-v1.0-a2x` release and extracts the
-  per-platform `libessence2.a` + resources. `manifest.yaml` declares
+  bootstrap fetches and sha-verifies the release **this plugin names** —
+  `LIBESSENCE2_RELEASE` / `LIBESSENCE2_SHA256` (+ the resources pair) are passed
+  in from the APPLE ENGINE PIN block in `scripts/bootstrap.sh`, so the engine
+  repo's own default never decides — and extracts the per-platform
+  `libessence2.a` + resources. `manifest.yaml` declares
   `native: { gate: ESSENCE2_AVAILABLE, vendoredLib: libessence2.a, umbrellaHeader:
   include/be_essence2.h, release{tag, sha256, resourcesSha256}, resources[…] }`.
 
@@ -305,7 +310,10 @@ brain, or the audio IO.
 - **Formats** `.model` + `.avatar` (+ `requires_engine_abi`), `.elevatedir`, legacy
   `.imx`/`.lab`. **C ABI** `be_essence2_*` + `be_essence2.h` (BGR-no-swap), binary
   name `libessence2.*`.
-- **The a2x render path** + the release pin `libessence2-v1.0-a2x` (both sha256s).
+- **The a2x render path** + the engine release pin (tag + both sha256s), which
+  lives in this plugin's `scripts/bootstrap.sh` beside the Android Maven
+  coordinates and must equal `Package.swift`'s `essence2Tag` —
+  `scripts/check-apple-engine-pin.sh` refuses a commit where it does not.
 - **INVARIANT #1** — exactly one module-map xcframework per pod (`libconverse`);
   every engine core is a plain static `.a` with its header in the umbrella.
 - **The app pin** — `bithuman-jarvis-app` git-deps this umbrella at a fixed commit; the

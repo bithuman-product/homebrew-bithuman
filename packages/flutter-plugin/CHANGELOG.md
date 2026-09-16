@@ -1,5 +1,36 @@
 ## Unreleased
 
+**A tag names an engine.** The Apple engine edge had no pin. `locate_engine_sdk`
+took a ref and both call sites omitted it, so the engine adapter Swift compiled
+into the pod came from bithuman-models **main HEAD at bootstrap time**, into
+gitignored directories, with no revision recorded anywhere in the built
+artifact — two developers building `flutter-plugin-v2.6.1` a week apart got
+different engine code and neither could tell. The binary half was worse: the
+pod ran the engine SDK's bootstrap with no engine coordinate, so the tag came
+from a default in the engine repo — `essence2-v1.2.0`, a pre-release whose own
+title reads "superseded by essence2-v1.5.0", last rolled 2026-09-06 — while
+`Package.swift` served `essence2-v1.7.0` on the SwiftPM path. Five releases
+apart, one repo, no gate between them. Measured on the published slices:
+v1.2.0 carries 0 `DriverCursor` and 0 `decoded IN PLACE`, v1.7.0 carries 257 and
+1. Nothing that ran on a device linked v1.2.0 — every Apple build overrode the
+default by hand — but the plugin's own committed globs were written for it, so
+`s.resources` looked for `a2x_w2v.*.onnx` (a v1.2.0-era name), the app carried
+no audio encoder, and `be_essence2_create` returned -2 on the first macOS run of
+2026-09-16.
+
+The coordinates now live in `scripts/bootstrap.sh`, committed and immutable,
+exactly as `android/build.gradle` names `ai.bithuman:essence2-android:0.5.8`:
+`BITHUMAN_MODELS_REF` (a 40-hex commit sha for the adapter source, passed at both
+call sites and checked out by the clone path) plus the engine release, its
+digest, and the resources pair, passed explicitly to the engine SDK's bootstrap
+so the engine repo's default never decides. Every build log now names the
+revision it resolved, including the developer override and sibling-checkout
+paths that cannot be pinned. `scripts/check-apple-engine-pin.sh` refuses a
+commit where the pod and `Package.swift` name different engines or different
+bytes, where the source pin is a branch rather than a sha, or where a call site
+drops the ref; its CI job re-creates all six defects and requires a refusal for
+each.
+
 **Dev levers cannot steer a release build; one echo table.** Every environment variable
 the Apple plugin read (15 of them — `EMBODY_MARKER_EVERY`, the A/V sync marker that
 flashes a frame white with a click; `BITHUMAN_NO_VPIO`, which removes the echo canceller;
