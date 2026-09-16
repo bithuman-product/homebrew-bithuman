@@ -9,19 +9,30 @@
 #
 # The installed binary is named `bithuman` (so users still type
 # `bithuman run`, `bithuman doctor`, etc.). Only the Homebrew package
-# name carries the `-cli` suffix, matching the PyPI convention:
+# name carries the `-cli` suffix:
 #
-#   pip install bithuman          # Python SDK (library) -- current (2.10.0)
-#   pip install bithuman-cli      # Python CLI bundle -- ★STALE + macOS-ONLY.
-#                                 #   2.3.25, 2026-06-05, two files ever, both
-#                                 #   py3-none-macosx_11_0_arm64. It exits 1 on
-#                                 #   Linux, and on macOS it puts a June
-#                                 #   Mach-O `bithuman` (internal version
-#                                 #   2.3.6) on PATH that routes local-vs-cloud
-#                                 #   from a FILENAME -- the defect cli-v2.5.1
-#                                 #   was cut to disarm. Do not advertise it.
 #   brew install bithuman-cli     # CLI (Homebrew)        <-- canonical
 #   brew install bithuman         # CLI (deprecated alias)
+#
+# ★THIS CLI IS NOT DISTRIBUTED ON PyPI, AND `bithuman-cli` IS NOT A pip
+# COORDINATE FOR IT. The name is retired there as a user-facing coordinate by
+# owner ruling ("cli tool should be separate from pypi python lib") and it does
+# not resolve today: measured 2026-09-16, anonymously,
+# https://pypi.org/pypi/bithuman-cli/json and https://pypi.org/simple/bithuman-cli/
+# both answer 404. There is no stub and there will not be one, so this file
+# names no pip line for the CLI at all — a comment that shows the command with a
+# caveat after it is still the command somebody copies. The three install paths
+# are: this formula, the tap's install.sh, and the per-target tarball on the
+# release. (`pip install bithuman` is the Python SDK LIBRARY, a different
+# artifact on a different axis; it deliberately puts no `bithuman` command on
+# PATH and is not an install path for this tool either.)
+#
+# ★THE RECORD OF WHY, kept because a retired coordinate that nobody records
+# comes back: what used to sit on that name was 2.3.25 (2026-06-05, two files
+# ever, both py3-none-macosx_11_0_arm64). It exited 1 on Linux, and on macOS it
+# put a June Mach-O `bithuman` on PATH that routed local-vs-cloud from a
+# FILENAME — the defect cli-v2.5.1 was cut to disable. Every file under the name
+# was deleted from PyPI on 2026-09-11.
 #
 # Engine: libessence 3.1.0 (ABI 7) — the engine core bundled in this
 # CLI. Note the engine-core version is a SEPARATE axis from the CLI/SDK
@@ -51,6 +62,30 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
+  # ★2026-09-16: THE PIN MOVES FORWARD to cli-v2.6.21 (bithuman 9167c111b, both halves
+  # from that ONE commit; engine pin essence1-v3.1.3-e2.24 = bithuman-models 8bd9a35c3).
+  # ★WHAT A CUSTOMER GETS THAT THEY DID NOT HAVE: `bithuman run` on an expression-2
+  # identity is a CONVERSATION. Up to and including 2.6.20 it was a page on localhost
+  # showing the avatar being fed one hardcoded silent sample — no microphone, no brain,
+  # no way to interrupt — so a conversation was not possible on that path at all. It now
+  # joins a room, publishes video and audio, takes your microphone and answers, and an
+  # interrupt lands because the reply is a live track rather than a rendered file.
+  # `--offscreen` still gives the deterministic benchmark, and with no render host
+  # installed beside the binary the cloud handoff is unchanged.
+  # AND BETWEEN TURNS IT SHOWS THE RIGHT FACE: the identity's own recorded idle clip,
+  # played from its first frame to its last and back to the first — wrapping only at the
+  # end, where the seam was authored — instead of whatever the model invented for silence.
+  # It is played as a stream, so a long clip costs what a short one costs (measured 99.5 MB
+  # for a ten-second clip and 99.3 MB for the same clip six times as long). THE SPEAKING
+  # FRAMES ARE THE SAME BYTES: 189 of 189 byte-identical against 2.6.20, determinism
+  # control alongside. An identity with no idle clip behaves exactly as it did.
+  # Third change: `BITHUMAN_DEFAULT_AVATAR_LEGACY=1` hard-failed on every released binary
+  # with a checksum mismatch (exit 69) and works again. Binaries already published cannot
+  # be fixed — they carry the old checksum compiled in; their primary path is untouched.
+  # Engine core reads libessence 2.11.0 / ABI 7 on this release (the version axis moved
+  # with bithuman-models; the ABI did not).
+  #
+  # Superseded description, kept for the record: cli-v2.6.14 (2026-09-13).
   # ★2026-09-13: THE PIN MOVES FORWARD to cli-v2.6.14 (bithuman 3482ffdf4, both halves
   # from that ONE commit; engine pin essence1-v3.1.3-e2.16 = bithuman-models 30ff5ea49).
   # ONE CHANGE against 2.6.13, and it is a macOS one: `bithuman render` now compresses the
@@ -352,8 +387,8 @@ class BithumanCli < Formula
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.20/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "01f7030d96b4b75688bd738d5d0f6a0a17c3671af2e375d581c2a3c25a0c154f"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.21/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "6aa3bdd413096745ed447514759ec99e689ec1d344b301bd64d1db411c5fa0d8"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
