@@ -12,9 +12,8 @@
 // before that change — ships `idleLoop` as a `List<Bitmap>` of 48 frames and has no
 // `Expression2IdleLoop` class, so plugin 2.4.0's `implementation ...:0.4.6` did not
 // compile against Central at all: it compiled only against a mavenLocal 0.4.6 built
-// from a later main. Until 0.4.7 is public on Central this half resolves from
-// mavenLocal only — a stranger's clone builds the Apple halves and NOT this one.
-// Stated, not hidden.
+// from a later main. 0.4.7 is public on Central since 2026-09-16 — a stranger's clone
+// builds this half from mavenCentral() alone (plugin 2.6.1 is the first tag that does).
 group = 'ai.bithuman.flutter'
 version = '0.1.0'
 
@@ -61,14 +60,13 @@ android {
 
 dependencies {
     implementation 'ai.bithuman:expression2-android:0.4.7'
-    // 0.5.7: the first coordinate with `Essence2Avatar.idle` (the driver footage between
-    // turns) and a meter that refuses without a credential rather than rendering free.
-    // ★ 0.5.7's motion frontier advances only behind feed(): under THIS plugin's un-paced
-    // transport it delivered 72-77 % of a reply's frames on a Galaxy S25+ (bithuman-models
-    // #737). 0.5.8 carries the SDK's own motion thread and the driver-cursor fix (#738);
-    // it is staged in the Portal, not public — the pin moves when it is (never before:
-    // a coordinate nobody can resolve is a build nobody can make).
-    implementation 'ai.bithuman:essence2-android:0.5.7'
+    // 0.5.8 (public on Central since 2026-09-16): the SDK's own motion thread — every frame
+    // of a reply comes out under THIS plugin's un-paced transport, where 0.5.7 (motion
+    // frontier advanced only behind feed()) delivered 72-77 % of a reply's frames on a
+    // Galaxy S25+ (bithuman-models #737) — and the driver-cursor fix (#738). 0.5.7 remains
+    // the first coordinate with `Essence2Avatar.idle` and a meter that refuses without a
+    // credential rather than rendering free.
+    implementation 'ai.bithuman:essence2-android:0.5.8'
     implementation 'com.qualcomm.qti:qnn-litert-delegate:2.49.0'
     implementation 'com.qualcomm.qti:qnn-runtime:2.49.0'
 }
