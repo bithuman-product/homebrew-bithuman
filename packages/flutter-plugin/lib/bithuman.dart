@@ -324,7 +324,10 @@ class BithumanAvatar {
   /// Must be called before [playSpeakerPCM] or [micStream] yield data.
   /// [enableMic] false = speaker-only session (no VP-IO mic, no mic-permission
   /// prompt) — used for a TEXT-only conversation. Voice sessions pass true.
-  Future<void> audioStart({int vadThreshold = 0, bool enableMic = true}) async {
+  ///
+  /// [vpioAgc] false turns Apple VP-IO's automatic gain OFF on the uplink (the
+  /// device row in `EchoProfile` decides; Android ignores it).
+  Future<void> audioStart({int vadThreshold = 0, bool enableMic = true, bool vpioAgc = true}) async {
     if (_disposed) throw const BithumanAvatarException('avatar is disposed');
     // Bump BEFORE the await so the value native receives equals the one
     // [micStream] reads next (called right after this resolves) — the unique
@@ -335,6 +338,7 @@ class BithumanAvatar {
       'vadThreshold': vadThreshold,
       'micGen': _micGen,
       'enableMic': enableMic,
+      'vpioAgc': vpioAgc,
     });
   }
 

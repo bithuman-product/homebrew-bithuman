@@ -50,18 +50,12 @@ import CoreAudio   // HAL default-device listeners for audio hot-swap (no AVAudi
 /// diagnostics, mic event-channel traces, etc. Steady-state production
 /// runs leave this off so logs only contain lifecycle + error lines —
 /// mobile log pipes are slow + size-constrained.
-private let kVerboseAudioLog: Bool = {
-  let v = ProcessInfo.processInfo.environment["BITHUMAN_DEBUG_AUDIO"] ?? ""
-  return v == "1" || v.lowercased() == "true"
-}()
+private let kVerboseAudioLog: Bool = DevLevers.debugAudio
 
 /// Barge-calibration logging gate (`BITHUMAN_DEBUG_BARGE=1`): logs the post-AEC
 /// mic peak vs the effective (echo-margined) threshold and the bot-audible flag,
 /// so the energy `vad_threshold` + `voicePeakThresholdDuringBot` can be tuned per device.
-private let kDebugBarge: Bool = {
-  let v = ProcessInfo.processInfo.environment["BITHUMAN_DEBUG_BARGE"] ?? ""
-  return v == "1" || v.lowercased() == "true"
-}()
+private let kDebugBarge: Bool = DevLevers.debugBarge
 
 @inline(__always)
 private func vlog(_ msg: @autoclosure () -> String) {
@@ -432,29 +426,13 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       // ⚠️macOS 26 regression: VP-IO transforms the 3-ch built-in mic into a
       // 9-ch bus of DIGITAL SILENCE (mic dead). BITHUMAN_NO_VPIO=1 disables VP-IO
       // → raw mic has signal (no AEC; use headphones to avoid echo).
-      let noVPIO = ProcessInfo.processInfo.environment["BITHUMAN_NO_VPIO"] == "1"
+      let noVPIO = DevLevers.noVPIO
       if noVPIO {
         NSLog("[RealtimeAudioIO] VP-IO DISABLED (BITHUMAN_NO_VPIO) — raw mic, no AEC")
       } else {
         try input.setVoiceProcessingEnabled(true)
         try output.setVoiceProcessingEnabled(true)
-        // macOS-only: the iMac's canceller leaves -46..-56 dBFS of echo that AGC
-        // re-amplifies into a self-interruption; the iPhone's leaves -70..-90 and
-        // never needed this (measured 2026-09-16, details below).
-        #if os(macOS)
-        // No automatic gain on the Mac's uplink. VP-IO's AGC drives the capture
-        // toward a target level whenever nobody near is talking — and while the
-        // agent talks, what it finds to amplify is the echo the canceller left
-        // behind. Measured on echelon (iMac, M4, macOS 26.6.2, built-in speakers
-        // at 40 %, 2026-09-16): the residual the server heard peaked at -34 dBFS
-        // (RMS -51) with a far end at -19..-23 dBFS, and server_vad at 0.7 still
-        // read it as the user speaking twice in 333 s of monologue. The iPhone's
-        // canceller leaves -70..-90 dBFS and never needed this. The server's own
-        // far_field pipeline sets the level it wants; the plugin sends what the
-        // canceller produced, unamplified (the attenuation the contract measures
-        // stays 0: captured == sent).
-        input.isVoiceProcessingAGCEnabled = false
-        #endif
+        applyUplinkGain(input)
         // Let other apps' audio keep playing. VP-IO DUCKS (suppresses) non-voice
         // audio by default, so Music / video / system sounds go silent while the
         // app runs. Minimize that ducking so all sound passes through (macOS 14+ /
@@ -840,6 +818,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       if startedWithMic && vpio {
         try engine.inputNode.setVoiceProcessingEnabled(true)   // Swift-throwing
         try output.setVoiceProcessingEnabled(true)
+        applyUplinkGain(engine.inputNode)
       }
       // Reconnect mixer→output at the new device's bus format (player→mixer stays 24 kHz).
       // disconnect + connect BOTH raise an uncatchable NSException on a torn /
@@ -879,7 +858,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       try engine.start()                 // Swift-throwing
     }
 
-    let noVPIO = ProcessInfo.processInfo.environment["BITHUMAN_NO_VPIO"] == "1"
+    let noVPIO = DevLevers.noVPIO
     do {
       try bringUp(vpio: !noVPIO)
     } catch {
@@ -912,8 +891,26 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   }
   #endif
 
-  func start(vadThreshold: Int32? = nil, mic: Bool = true) throws {
+  /// Uplink gain policy from the Dart echo table (`EchoProfile.current.vpioAgc`):
+  /// false ⇒ VP-IO's automatic gain is OFF and the plugin sends what the canceller
+  /// produced, unamplified. Why it is a per-DEVICE row and not a platform `#if`:
+  /// VP-IO's AGC drives the capture toward a target level whenever nobody near is
+  /// talking — and while the agent talks, what it finds to amplify is the echo the
+  /// canceller left behind. The iMac's canceller leaves -46..-56 dBFS of that
+  /// (server_vad 0.7 still read it as the user twice in 333 s); the iPhone's leaves
+  /// -70..-90 and never needed this. The table carries those numbers; this only
+  /// applies them. Default true = the OS default, untouched.
+  private var vpioAgc = true
+
+  /// Apply the row's gain policy to the input node. Called at graph bring-up AND on
+  /// the device hot-swap path (a re-enabled VP-IO would otherwise come back with AGC).
+  private func applyUplinkGain(_ input: AVAudioInputNode) {
+    if !vpioAgc { input.isVoiceProcessingAGCEnabled = false }
+  }
+
+  func start(vadThreshold: Int32? = nil, mic: Bool = true, vpioAgc: Bool = true) throws {
     if let th = vadThreshold, th > 0 { voicePeakThreshold = th }
+    self.vpioAgc = vpioAgc
     if started { return }
     #if os(iOS)
     if mic { try configureAudioSession() }
@@ -1550,9 +1547,11 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   /// How many times a published speech frame went out WITHOUT its audio slice.
   /// Every one of these is 50 ms the picture has gained on the sound, permanently.
   private var embodySkippedSlices = 0
-  /// Append a diagnostic line to /embody_av.txt (survives an `open`-launched app).
+  /// Append a diagnostic line to $EMBODY_DUMP_DIR/embody_av.txt (survives an
+  /// `open`-launched app). No directory (every release build) ⇒ nothing is written.
   private func appendAvProbe(_ s: String) {
-    let p = (ProcessInfo.processInfo.environment["EMBODY_DUMP_DIR"] ?? "/tmp") + "/embody_av.txt"
+    guard let dir = DevLevers.dumpDir else { return }
+    let p = dir + "/embody_av.txt"
     guard let d = (s + "\n").data(using: .utf8) else { return }
     if let fh = FileHandle(forWritingAtPath: p) { fh.seekToEndOfFile(); fh.write(d); try? fh.close() }
     else { try? d.write(to: URL(fileURLWithPath: p)) }

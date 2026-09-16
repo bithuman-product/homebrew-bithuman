@@ -33,9 +33,9 @@ import Foundation
 /// encoded to mp4 + eyeballed. Off unless EMBODY_DUMP_FRAMES is set — inert in
 /// the shipping app.
 enum EmbodyAvatarDump {
-  static let on = ProcessInfo.processInfo.environment["EMBODY_DUMP_FRAMES"] != nil
+  static let on = DevLevers.dumpFrames
   static let dir: String = {
-    let base = ProcessInfo.processInfo.environment["EMBODY_DUMP_DIR"] ?? "/tmp"
+    let base = DevLevers.dumpDir ?? "/tmp"
     let d = base + "/embody_frames"
     try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true)
     return d
@@ -484,9 +484,11 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       }
       let enableMic = args["enableMic"] as? Bool ?? true
       let vadThreshold = args["vadThreshold"] as? Int
+      // Uplink gain policy from the Dart echo table (EchoProfile.current.vpioAgc).
+      let vpioAgc = args["vpioAgc"] as? Bool ?? true
       let doStart: () -> Void = { [weak self] in
         do {
-          try self?.audioIOs[textureId]?.start(vadThreshold: vadThreshold.map { Int32($0) }, mic: enableMic)
+          try self?.audioIOs[textureId]?.start(vadThreshold: vadThreshold.map { Int32($0) }, mic: enableMic, vpioAgc: vpioAgc)
           result(nil)
         } catch {
           result(FlutterError(code: "AUDIO_START_FAILED",
@@ -502,7 +504,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       let doStartMicOff: () -> Void = { [weak self] in
         NSLog("[BithumanAvatar] mic not granted → starting speaker-only")
         do {
-          try self?.audioIOs[textureId]?.start(vadThreshold: vadThreshold.map { Int32($0) }, mic: false)
+          try self?.audioIOs[textureId]?.start(vadThreshold: vadThreshold.map { Int32($0) }, mic: false, vpioAgc: vpioAgc)
           result(nil)
         } catch {
           result(FlutterError(code: "AUDIO_START_FAILED",
@@ -1148,8 +1150,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
   private var publishedFrameCount = 0               // texture-publish counter
   /// Verbose dev instrumentation gate (frame-counter logs). Off by default;
   /// enable with environment variable BH_AVATAR_DEBUG=1.
-  private static let avatarDebugLogging =
-    ProcessInfo.processInfo.environment["BH_AVATAR_DEBUG"] == "1"
+  private static let avatarDebugLogging = DevLevers.avatarDebug
 
   private var bgrBuffer = [UInt8](repeating: 0, count: 1920 * 1080 * 3)
   private var frameW: Int = 0
@@ -1205,7 +1206,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// takes for that frame. Filmed from outside, the flash-to-click gap IS the A/V offset at the
   /// ear; a marker that took a shortcut would measure the shortcut. 0 = off.
   private static let markerEverySpeechFrames: Int = {
-    let s = Double(ProcessInfo.processInfo.environment["EMBODY_MARKER_EVERY"] ?? "0") ?? 0
+    let s = DevLevers.markerEverySeconds
     return s > 0 ? max(1, Int(s * 20)) : 0
   }()
   private var embodyMarkers = 0
@@ -1261,7 +1262,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// Looped to ~20 s so the ctx fully converges. Nil → warm-up uses silence (old).
   private func loadWarmSpeech() -> [Float]? {
     var url: URL?
-    if let p = ProcessInfo.processInfo.environment["EMBODY_WARM_WAV"], !p.isEmpty {
+    if let p = DevLevers.warmWav {
       url = URL(fileURLWithPath: p)
     } else if let eng = Expression2Engine.engineDir,
               FileManager.default.fileExists(atPath: "\(eng)/warm.wav") {
@@ -1369,15 +1370,18 @@ final class AvatarTexture: NSObject, FlutterTexture {
         NSLog("[embody] idle painted — engine live")
         // DEV headless verification: dump the in-app idle frame (BGR) so a
         // remote/CI run can confirm the avatar actually renders without a screen.
-        let dumpDir = ProcessInfo.processInfo.environment["EMBODY_DUMP_DIR"] ?? "/tmp"
-        let url = URL(fileURLWithPath: dumpDir).appendingPathComponent("embody_app_idle.bgr")
-        try? Data(self.bgrBuffer.prefix(self.frameW * self.frameH * 3)).write(to: url)
-        NSLog("[embody] dumped in-app idle frame -> %@", url.path)
+        // Only when EMBODY_DUMP_DIR names a directory (debug builds) — a release
+        // build writes no probe file.
+        if let dumpDir = DevLevers.dumpDir {
+          let url = URL(fileURLWithPath: dumpDir).appendingPathComponent("embody_app_idle.bgr")
+          try? Data(self.bgrBuffer.prefix(self.frameW * self.frameH * 3)).write(to: url)
+          NSLog("[embody] dumped in-app idle frame -> %@", url.path)
+        }
       }
       // DEV: with EMBODY_TEST_AUDIO=1, feed continuous real-time synthetic audio
       // so frames flow WITHOUT a live conversation — to measure display
       // smoothness headlessly. 640 samples / 40 ms = 16 kHz real-time.
-      if ProcessInfo.processInfo.environment["EMBODY_TEST_AUDIO"] == "1" {
+      if DevLevers.testAudio {
         NSLog("[embody] TEST_AUDIO on — feeding synthetic 16k speech")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
           var ph: Float = 0
@@ -1394,11 +1398,10 @@ final class AvatarTexture: NSObject, FlutterTexture {
       // the same audioQueue path the live TTS uses, so a headless run reproduces
       // real-speech rendering (the synthetic buzz above can't — a steady tone
       // hides identity-specific onset/decode issues). Off unless the var is set.
-      if var wav = ProcessInfo.processInfo.environment["EMBODY_TEST_WAV"], !wav.isEmpty {
+      if let wav = DevLevers.testWav {
         // A phone has no shared filesystem with the host, so a drive has to be copied
-        // into the app's own container and named relative to it. Absolute paths are
-        // unchanged; a relative one resolves against the app home.
-        if !wav.hasPrefix("/") { wav = NSHomeDirectory() + "/" + wav }
+        // into the app's own container and named relative to it (DevLevers.path
+        // resolves a relative name against the app home).
         NSLog("[embody] TEST_WAV on — feeding %@", wav)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
           guard let self = self,
@@ -1424,7 +1427,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
       }
       // DEV: EMBODY_BENCH=1 → measure peak on-device GENERATION throughput
       // (back-to-back, unpaced) once, after warm-up.
-      if ProcessInfo.processInfo.environment["EMBODY_BENCH"] == "1" {
+      if DevLevers.bench {
         DispatchQueue.global(qos: .userInitiated).async { rt.benchSync(20) }
       }
     }

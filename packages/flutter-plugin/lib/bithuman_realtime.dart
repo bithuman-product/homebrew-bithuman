@@ -21,7 +21,6 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -29,6 +28,8 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 
 import 'bithuman.dart';
+import 'src/dev_levers.dart';
+import 'src/echo_profile.dart';
 
 /// One Realtime session over a single WebSocket.
 ///
@@ -62,8 +63,7 @@ class BithumanRealtimeSession {
   /// `--dart-define=BITHUMAN_REALTIME_WS_URL=ws://…`. Inert in production:
   /// null + empty define → the real endpoint.
   static String? debugEndpointOverride;
-  static const String _envEndpointOverride =
-      String.fromEnvironment('BITHUMAN_REALTIME_WS_URL');
+  static const String _envEndpointOverride = DevLevers.wsUrl;
 
   /// The WebSocket URL this session dials (override-aware).
   String get _endpoint =>
@@ -157,7 +157,7 @@ class BithumanRealtimeSession {
   // greeting doubles as turn 0. Paired with scripts/stress-webrtc-iphone.sh
   // + stress-webrtc-metrics.py. Default-off (define unset) in every
   // production build, so shipped behavior on both platforms is unchanged.
-  static const _devStress = bool.fromEnvironment('BITHUMAN_DEV_STRESS');
+  static const _devStress = DevLevers.stress;
   static const _stressInstructions =
       'Speak an uninterrupted monologue of roughly sixty seconds on any '
       'interesting topic. Do not pause for questions, do not address the '
@@ -173,7 +173,7 @@ class BithumanRealtimeSession {
   // monologues are left alone: 3 x 60 s of the agent talking with nobody in the
   // room is the echo control (every speech_started there is the agent hearing
   // itself). Default-off (define unset) in every production build.
-  static const _devMicFile = String.fromEnvironment('BH_MIC_FILE');
+  static const _devMicFile = DevLevers.micFile;
   static const _devInjectAfter = Duration(seconds: 6);
   static const _devInjectFromStressTurn = 4;
   Int16List? _inject;
@@ -310,7 +310,8 @@ class BithumanRealtimeSession {
       // response.cancel + avatar.interrupt), which cancels the cloud response at
       // its source. A local energy cut would silence the speaker without telling
       // OpenAI to stop generating. The vad_threshold knob drives LOCAL mode only.
-      await avatar.audioStart(vadThreshold: 0, enableMic: enableMic);
+      await avatar.audioStart(
+          vadThreshold: 0, enableMic: enableMic, vpioAgc: EchoProfile.current.vpioAgc);
       if (enableMic) {
         _micSub = avatar.micStream.listen(_sendMicBytes);
       }
@@ -382,11 +383,12 @@ class BithumanRealtimeSession {
             // Android, VP-IO on Apple) plus `far_field` noise reduction above.
             // `threshold` (0..1) is the one dial: raise it if the agent ever
             // interrupts itself on its own echo, lower it if a soft cut-in is
-            // missed. 0.5 with 300 ms pre-roll / 500 ms end-of-turn silence is the
-            // iOS WebRTC session's proven value; both platforms send the same block.
+            // missed. Its value is the DEVICE row in EchoProfile — set from the
+            // measured post-canceller residual, with the falsifier recorded beside
+            // it — never a literal here. 300 ms pre-roll / 500 ms end-of-turn silence.
             'turn_detection': {
               'type': 'server_vad',
-              'threshold': Platform.isMacOS ? 0.7 : 0.5,
+              'threshold': EchoProfile.current.serverVadThreshold,
               'prefix_padding_ms': 300,
               'silence_duration_ms': 500,
               'create_response': true,

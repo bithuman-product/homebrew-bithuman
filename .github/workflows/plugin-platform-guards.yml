@@ -9,13 +9,25 @@ on:
   pull_request:
     paths:
       - 'packages/flutter-plugin/shared/Classes/**'
+      - 'packages/flutter-plugin/ios/Classes/**'
+      - 'packages/flutter-plugin/macos/Classes/**'
+      - 'packages/flutter-plugin/lib/**'
+      - 'packages/flutter-plugin/android/src/**'
       - 'scripts/check_platform_guards.sh'
+      - 'scripts/check_dev_levers.sh'
+      - 'scripts/prove_dev_levers_release.sh'
       - '.github/workflows/plugin-platform-guards.yml'
   push:
     branches: [main]
     paths:
       - 'packages/flutter-plugin/shared/Classes/**'
+      - 'packages/flutter-plugin/ios/Classes/**'
+      - 'packages/flutter-plugin/macos/Classes/**'
+      - 'packages/flutter-plugin/lib/**'
+      - 'packages/flutter-plugin/android/src/**'
       - 'scripts/check_platform_guards.sh'
+      - 'scripts/check_dev_levers.sh'
+      - 'scripts/prove_dev_levers_release.sh'
       - '.github/workflows/plugin-platform-guards.yml'
   workflow_dispatch:
 
@@ -39,3 +51,53 @@ jobs:
           fi
           cp /tmp/guard.bak "$F"
           ./scripts/check_platform_guards.sh
+
+  # ── DEV LEVERS: one door per language, and a release build has no key ──────────────────
+  # 2026-09-15/16: a persistent Android sysprop (our A/V sync marker) painted white frames on
+  # every build after it, release included; a proof APK with BITHUMAN_DEV_STRESS + BH_MIC_FILE
+  # sat on the owner's phone; the Apple plugin read 15 env vars in every build. Every read now
+  # goes through DevLevers.swift (#if DEBUG) / dev_levers.dart (!kReleaseMode) / devInt()
+  # (FLAG_DEBUGGABLE), and the server_vad threshold has one writer (echo_profile.dart).
+  dev-levers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: every dev lever goes through its door; one echo-threshold writer
+        run: ./scripts/check_dev_levers.sh
+      - name: Negative controls — a stray read, a stripped guard and a second writer must each FAIL
+        run: |
+          set -u
+          P=packages/flutter-plugin
+          red() { if ./scripts/check_dev_levers.sh >/dev/null 2>&1; then echo "::error::$1 — the check PASSED; it is not looking"; exit 1; fi; echo "control fires: $1"; }
+          F=$P/shared/Classes/SpeechPipeline.swift; cp "$F" /tmp/c1
+          echo 'let stray = ProcessInfo.processInfo.environment["BH_STRAY"]' >> "$F"; red "stray Swift env read"; cp /tmp/c1 "$F"
+          F=$P/lib/src/dev_levers.dart; cp "$F" /tmp/c2
+          sed -i "s/enabled \&\& bool.fromEnvironment('BITHUMAN_DEV_STRESS')/bool.fromEnvironment('BITHUMAN_DEV_STRESS')/" "$F"; red "ungated Dart lever"; cp /tmp/c2 "$F"
+          F=$P/lib/openai_webrtc_session.dart; cp "$F" /tmp/c3
+          sed -i "s/'threshold': EchoProfile.current.serverVadThreshold,/'threshold': 0.5,/" "$F"; red "second server_vad literal"; cp /tmp/c3 "$F"
+          ./scripts/check_dev_levers.sh
+
+  dev-levers-release-arm:
+    # The arm itself: the Swift door compiled as Release (-O, no DEBUG) and as Debug, run with
+    # EVERY lever set — Release must print the unset row, Debug the sentinels. Needs swiftc.
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: release ignores every lever, debug reads them
+        run: ./scripts/prove_dev_levers_release.sh
+      - name: Negative control — a door without '#if DEBUG' must FAIL the arm
+        run: |
+          set -u
+          F=packages/flutter-plugin/shared/Classes/DevLevers.swift; cp "$F" /tmp/door.bak
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("packages/flutter-plugin/shared/Classes/DevLevers.swift"); s = p.read_text()
+          s = s.replace("    #if DEBUG\n    return ProcessInfo.processInfo.environment[name]\n    #else\n    return nil\n    #endif", "    return ProcessInfo.processInfo.environment[name]")
+          s = s.replace("    #if DEBUG\n    return true\n    #else\n    return false\n    #endif", "    return true")
+          p.write_text(s)
+          PY
+          if ./scripts/prove_dev_levers_release.sh >/dev/null 2>&1; then echo "::error::the arm PASSED with the door's #if DEBUG removed — it is not looking"; cp /tmp/door.bak "$F"; exit 1; fi
+          echo "control fires: door without #if DEBUG"
+          cp /tmp/door.bak "$F"
+          ./scripts/prove_dev_levers_release.sh

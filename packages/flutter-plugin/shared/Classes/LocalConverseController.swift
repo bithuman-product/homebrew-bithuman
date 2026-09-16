@@ -51,7 +51,7 @@ final class LocalConverseController: @unchecked Sendable {
     /// Barge-latency instrumentation. Set BITHUMAN_DEBUG_BARGE=1 to log the
     /// timeline (bot-speaking edge, each ASR partial/final with word count, and
     /// the stop) so we can pinpoint the stop-the-moment-I-talk delay.
-    private let dbgBarge = ProcessInfo.processInfo.environment["BITHUMAN_DEBUG_BARGE"] == "1"
+    private let dbgBarge = DevLevers.debugBarge
     private static func ts() -> String { String(format: "%.3f", Date().timeIntervalSince1970) }
 
     /// Forwarded converse events for the Dart UI (captions + status).

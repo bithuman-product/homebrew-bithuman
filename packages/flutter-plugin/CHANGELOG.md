@@ -1,5 +1,31 @@
 ## Unreleased
 
+**Dev levers cannot steer a release build; one echo table.** Every environment variable
+the Apple plugin read (15 of them — `EMBODY_MARKER_EVERY`, the A/V sync marker that
+flashes a frame white with a click; `BITHUMAN_NO_VPIO`, which removes the echo canceller;
+`EMBODY_TEST_AUDIO` / `EMBODY_TEST_WAV`, which drive the engine with no conversation; the
+debug-log switches; the probe-file directory) now goes through one door,
+`shared/Classes/DevLevers.swift`, whose single read is `#if DEBUG` — a Release build
+returns nil for every name whatever the environment holds. Two probe files
+(`embody_app_idle.bgr`, `embody_av.txt`) that every build wrote to `/tmp` are written only
+when a debug build names a directory. Every `--dart-define` the plugin honoured
+(`BITHUMAN_DEV_STRESS`, `BITHUMAN_DEV_GREETING`, `BH_MIC_FILE`, `BITHUMAN_REALTIME_WS_URL`,
+`BITHUMAN_TRANSPORT`) is declared once in `lib/src/dev_levers.dart` as
+`!kReleaseMode && …`, a compile-time constant that folds away in `flutter build --release`.
+Android was already gated on `FLAG_DEBUGGABLE` (2.4.0). `scripts/check_dev_levers.sh`
+refuses a read outside a door; `scripts/prove_dev_levers_release.sh` compiles the Swift door
+as Release and Debug and runs both with every lever set.
+
+The `server_vad` threshold and the uplink gain policy are one table,
+`lib/src/echo_profile.dart`, keyed by device class (iPhone 0.5 / Android 0.5 / Mac 0.7 with
+VP-IO AGC off), each row carrying the post-canceller residual it was measured against, the
+date, and the falsifier (0 self-interruptions over ≥ 3 × 60 s of the agent talking with
+nobody in the room) — as `const` asserts, so a row without those numbers does not compile.
+Both transports read it; the Swift side takes `vpioAgc` from `audioStart` instead of a
+`#if os(macOS)` literal, and re-applies it on the audio-device hot-swap path (before, a Mac
+device change came back with AGC on). Shipped behaviour on every device is unchanged: the
+values are the ones 2.6.0 carried, now with their evidence beside them.
+
 ## 2.6.1 — 2026-09-16
 
 Tag `flutter-plugin-v2.6.1`. One change: the Android essence-2 pin moves
