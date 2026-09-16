@@ -192,7 +192,17 @@ class BithumanRealtimeSession {
   bool get agentAudible => _audibleUntil.isAfter(DateTime.now());
   int _injectN = 0;
   Timer? _injectTimer;
+  int _deltaN = 0;   // deltas of the current reply; 0 -> the next one is the reply's first byte
+  int _replyFirstDeltaMs = 0, _replyLastDeltaMs = 0, _replyAudioSamples = 0;
   bool _injectArmedThisResponse = false;
+
+  /// One instrument line: printed AND written to the native log, so a reader of
+  /// the device console sees the transport's events beside the presenter's.
+  void _log(String line) {
+    // ignore: avoid_print
+    print(line);
+    unawaited(avatar.nativeLog(line));
+  }
 
   /// Stress driver (see [_devStress]): request the next long monologue.
   /// Single pending timer — cancel→done bursts must not stack queued turns.
@@ -201,8 +211,7 @@ class BithumanRealtimeSession {
     _stressTimer = Timer(delay, () {
       if (!_open || _ws == null) return;
       _stressTurn += 1;
-      // ignore: avoid_print
-      print('[stress] turn $_stressTurn requested');
+      _log('[stress] turn $_stressTurn requested hostMs=${DateTime.now().millisecondsSinceEpoch}');
       _send({
         'type': 'response.create',
         'response': {'instructions': _stressInstructions},
@@ -315,8 +324,7 @@ class BithumanRealtimeSession {
         final bd = await rootBundle.load(_devMicFile);
         final bytes = Uint8List.fromList(bd.buffer.asUint8List(bd.offsetInBytes, bd.lengthInBytes & ~1));
         _inject = Int16List.view(bytes.buffer);
-        // ignore: avoid_print
-        print('[barge] INJECT asset $_devMicFile: ${_inject!.length} samples '
+        _log('[barge] INJECT asset $_devMicFile: ${_inject!.length} samples '
             '(${(_inject!.length / 24).round()} ms) mixed into the mic ${_devInjectAfter.inSeconds} s into '
             'every reply from stress turn $_devInjectFromStressTurn');
       }
@@ -572,11 +580,9 @@ class BithumanRealtimeSession {
     }
     if (injectedOnset) {
       _injectN++;
-      // ignore: avoid_print
-      print('[barge] INJECT onset #$_injectN hostMs=$hostMs packet=#$_micDbgN active=$_haveActiveResponse audible=$agentAudible');
+      _log('[barge] INJECT onset #$_injectN hostMs=$hostMs packet=#$_micDbgN active=$_haveActiveResponse audible=$agentAudible');
     } else if (inj != null && _injectPos < 0 && pcm != pcm24kPcm16le) {
-      // ignore: avoid_print
-      print('[barge] INJECT end #$_injectN hostMs=$hostMs');
+      _log('[barge] INJECT end #$_injectN hostMs=$hostMs');
     }
   }
 
@@ -600,7 +606,7 @@ class BithumanRealtimeSession {
     _droppingCancelledAudio = true;
     _resetAudioPacing();
     try {
-      await avatar.interrupt();
+      await avatar.interrupt(reason: 'text');
     } catch (_) {}
     if (!_open) return;
     _send({
@@ -647,7 +653,7 @@ class BithumanRealtimeSession {
     // Wipe the lipsync queue + stop the speaker player IMMEDIATELY.
     // Without this, the avatar keeps animating the agent's last
     // buffered audio for ~1-2 s after the user hangs up.
-    try { await avatar.interrupt(); } catch (_) {}
+    try { await avatar.interrupt(reason: 'stop'); } catch (_) {}
     await _micSub?.cancel();
     _micSub = null;
     await _wsSub?.cancel();
@@ -689,6 +695,16 @@ class BithumanRealtimeSession {
         final b64 = evt['delta'] as String?;
         if (b64 == null) return;
         final pcm24kBytes = base64Decode(b64);
+        final arrivedMs = DateTime.now().millisecondsSinceEpoch;
+        if (_deltaN++ == 0) {
+          // t0 of time-to-first-audio: the reply's first byte at the transport. The
+          // presenter logs the first speech frame it shows ([bhttfa] first speech frame).
+          _log('[bhttfa] first delta hostMs=$arrivedMs bytes=${pcm24kBytes.length}');
+          _replyFirstDeltaMs = arrivedMs;
+          _replyAudioSamples = 0;
+        }
+        _replyLastDeltaMs = arrivedMs;
+        _replyAudioSamples += pcm24kBytes.length ~/ 2;
         if (_inject != null && !_injectArmedThisResponse && _stressTurn >= _devInjectFromStressTurn) {
           _injectArmedThisResponse = true;
           _injectTimer?.cancel();
@@ -753,6 +769,7 @@ class BithumanRealtimeSession {
         // is behind us; resume forwarding audio.delta normally.
         _droppingCancelledAudio = false;
         _haveActiveResponse = true;
+        _deltaN = 0;
         _injectArmedThisResponse = false;
         _stressTimer?.cancel(); // a reply is in flight; the driver waits for its done
         _resetAudioPacing(); // fresh turn plays immediately, no carried lead
@@ -788,9 +805,19 @@ class BithumanRealtimeSession {
         _status.add(RealtimeStatus.responseDone);
         final doneStatus = ((evt['response'] as Map<String, dynamic>?)?['status'] as String?) ?? '';
         if (doneStatus != 'completed') {
-          // ignore: avoid_print
-          print('[barge] response.done status=$doneStatus hostMs=${DateTime.now().millisecondsSinceEpoch}');
+          _log('[barge] response.done status=$doneStatus hostMs=${DateTime.now().millisecondsSinceEpoch}');
         }
+        if (_deltaN > 0) {
+          // How fast the reply reached the plugin: its audio seconds over the wall
+          // seconds between its first and last delta. The presenter's `bhfeed` lines
+          // carry the same figure one hop later, at the engine.
+          final wallS = (_replyLastDeltaMs - _replyFirstDeltaMs).clamp(40, 1 << 30) / 1000.0;
+          final audioS = _replyAudioSamples / 24000.0;
+          _log('[bhdeliver] reply audio_s=${audioS.toStringAsFixed(2)} wall_s=${wallS.toStringAsFixed(2)} '
+              'ratio=${(audioS / wallS).toStringAsFixed(1)} deltas=$_deltaN status=$doneStatus '
+              'hostMs=${DateTime.now().millisecondsSinceEpoch}');
+        }
+        _deltaN = 0;
         // Flush the avatar's final partial lipsync chunk so the last word isn't
         // clipped. response.done arrives BEFORE the paced audio deltas finish
         // being handed to playSpeakerPCM (client-side _paceLead pacing), so defer
@@ -834,8 +861,7 @@ class BithumanRealtimeSession {
         // earpiece-mic path has weak AEC and the server fires false
         // speech_started events on agent-self-leak.
         final ssMs = DateTime.now().millisecondsSinceEpoch;
-        // ignore: avoid_print
-        print('[barge] speech_started hostMs=$ssMs audio_start_ms=${evt['audio_start_ms']} '
+        _log('[barge] speech_started hostMs=$ssMs audio_start_ms=${evt['audio_start_ms']} '
             'active=$_haveActiveResponse audible=$agentAudible injecting=${_injectPos >= 0}');
         _stressTimer?.cancel();
         if (_haveActiveResponse) {
@@ -843,15 +869,13 @@ class BithumanRealtimeSession {
         }
         _droppingCancelledAudio = true;
         _resetAudioPacing(); // drop any delta parked in a pacing delay
-        await avatar.interrupt();
-        // ignore: avoid_print
-        print('[barge] interrupt returned hostMs=${DateTime.now().millisecondsSinceEpoch} '
+        await avatar.interrupt(reason: 'speech_started');
+        _log('[barge] interrupt returned hostMs=${DateTime.now().millisecondsSinceEpoch} '
             '(+${DateTime.now().millisecondsSinceEpoch - ssMs} ms after speech_started)');
         _status.add(RealtimeStatus.userSpeaking);
         break;
       case 'input_audio_buffer.speech_stopped':
-        // ignore: avoid_print
-        print('[barge] speech_stopped hostMs=${DateTime.now().millisecondsSinceEpoch} '
+        _log('[barge] speech_stopped hostMs=${DateTime.now().millisecondsSinceEpoch} '
             'audio_end_ms=${evt['audio_end_ms']}');
         _status.add(RealtimeStatus.userStopped);
         break;

@@ -143,6 +143,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             }
             "notifyTurnEnd" -> { session(call)?.player?.endOfReply(); result.success(null) }
             "interrupt" -> { session(call)?.player?.bargeIn(); result.success(null) }
+            // The transport's instrument lines, into logcat beside the player's own.
+            "log" -> { Log.i("bhdart", call.argument<String>("line") ?: ""); result.success(null) }
             // The mouth is driven by the real audio here; nothing to gate.
             "setSpeaking" -> result.success(true)
 

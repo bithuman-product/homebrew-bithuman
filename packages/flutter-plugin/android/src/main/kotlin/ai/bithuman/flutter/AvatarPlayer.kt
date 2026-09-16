@@ -177,6 +177,10 @@ class AvatarPlayer(
     /** Speech units admitted while a Reset was pending — the old reply leaking past a barge-in. */
     @Volatile private var nLeak = 0
     @Volatile private var nBarge = 0
+    /** 16 kHz samples handed to the engine, ever; and whether the reply being fed has shown its first mouth. */
+    @Volatile private var nFed16k = 0L
+    @Volatile private var replyBoundary = true
+    @Volatile private var replyFirstPending = false
     @Volatile private var cutAtMs = 0L
     /** Set with [cutAtMs]; cleared by the first idle frame presented after the cut. */
     @Volatile private var cutIdleAtMs = 0L
@@ -649,9 +653,11 @@ class AvatarPlayer(
                     avatar.resetState(true)      // also restarts the engine's audioSample count
                     resetGen++
                     resetPending = false
+                    replyBoundary = true; replyFirstPending = false
                     if (cutAtMs > 0) Log.i("bhbarge", "RESET landed sinceCutMs=${t0 - cutAtMs} resetMs=${System.currentTimeMillis() - t0} leaks=$nLeak")
                 }
                 is Tail -> {
+                    replyBoundary = true; replyFirstPending = false
                     // Where this reply's audio stops. Used for one thing only: bounding the
                     // end-of-conversation drain above. Never to place a frame in time.
                     synchronized(audioLock) { if (replyEnds.lastOrNull() != audioLen) replyEnds.addLast(audioLen) }
@@ -672,6 +678,11 @@ class AvatarPlayer(
                         val whole = if (usable == joined.size) joined else joined.copyOfRange(0, usable)
                         synchronized(audioLock) { append(whole) }
                         avatar.feed(toFloat16k(whole))
+                        nFed16k += whole.size / 3
+                        // What reached the ENGINE and when: the conversation contract's delivery
+                        // ratio is read from these lines (audio seconds fed / wall seconds).
+                        Log.i("bhfeed", "+${whole.size / 3} fed=$nFed16k q=${avatar.queuedFrames} hostMs=${System.currentTimeMillis()}")
+                        if (replyBoundary) { replyBoundary = false; replyFirstPending = true }
                     }
                 }
             }
@@ -905,6 +916,11 @@ class AvatarPlayer(
         if (u == null) return
         presentedSeq = maxOf(presentedSeq, u.seq)
         if (u.speech) nPresSpeech++
+        if (u.speech && replyFirstPending) {
+            // The reply's first mouth on the glass: TTFA's end (the transport logs its start).
+            replyFirstPending = false
+            Log.i("bhttfa", "first speech frame hostMs=$now")
+        }
         if (cutIdleAtMs > 0 && !u.speech) {
             // The owner's "fall back to idle": the first idle frame on the glass after a cut.
             Log.i("bhbarge", "IDLE-SHOWN sinceCutMs=${now - cutIdleAtMs} epoch=${u.epoch} hostMs=$now")

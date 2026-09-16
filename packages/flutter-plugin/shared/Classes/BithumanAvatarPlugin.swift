@@ -556,7 +556,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // Barge-in: kill the agent's in-flight playback + lipsync.
       // Called from Dart the moment input_audio_buffer.speech_started
       // arrives from OpenAI (well before silence_duration_ms detects
-      // end-of-user-turn).
+      // end-of-user-turn). `reason` names the caller on the CUT line.
       guard let args = call.arguments as? [String: Any],
             let textureId = args["textureId"] as? Int64 else {
         result(FlutterError(code: "BAD_ARGS",
@@ -564,7 +564,16 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
                             details: nil))
         return
       }
-      audioIOs[textureId]?.barge()
+      audioIOs[textureId]?.barge(reason: (args["reason"] as? String) ?? "app")
+      result(nil)
+
+    case "log":
+      // The transport's instrument lines, into the same stream as the presenter's.
+      // ★A release iOS build's Dart `print` reaches the unified log only, never the
+      // console `devicectl` attaches; NSLog reaches both.
+      if let args = call.arguments as? [String: Any], let line = args["line"] as? String {
+        NSLog("%@", line)
+      }
       result(nil)
 
     case "notifyTurnEnd":
@@ -823,6 +832,65 @@ final class AvatarTexture: NSObject, FlutterTexture {
     return Unmanaged.passRetained(pb)
   }
 
+  // ---- the conversation instrument (read by tools/conformance conversation_apple) ----
+  // `bhfeed`: what reached the ENGINE and when. `bhttfa`: a reply's first speech frame
+  // on the glass. `bhrun HOLD`: ticks in speech with no frame to show (the display is
+  // the speaker's clock here, so a hold is silence). `bhfifo`, once a second in
+  // speech: how much audio is waiting in front of the engine and behind it. `bhbarge`
+  // RESET / IDLE-SHOWN / NEW-MOUTH / LEAK per cut, LEAK being an old-reply speech
+  // frame that reached the glass after the cut — COUNTED here, not prevented.
+  private var audioArrived = 0
+  private var audioFed = 0
+  private var bargeAt: CFTimeInterval = 0
+  private var bargeIdlePending = false
+  private var audioSinceBarge = true
+  private var bargeLeaks = 0
+  private var replyFirstFramePending = false
+  private var holdTicks = 0
+  private var holdRuns = 0
+  private var fifoLineAt: CFTimeInterval = 0
+  private var ticksWithFrame1s = 0, ticksWithout1s = 0
+  private func noteHoldRunEnded() {
+    holdRuns += 1
+    NSLog("[bhrun] HOLD %d ticks (%d ms) ended at hostMs=%lld holds=%d", holdTicks, holdTicks * 40,
+          Int64(Date().timeIntervalSince1970 * 1000), holdRuns)
+    holdTicks = 0
+  }
+  private func noteSpeechFramePresented(_ now: CFTimeInterval) {
+    audioLock.lock()
+    let first = replyFirstFramePending; replyFirstFramePending = false
+    let cut = bargeAt; if first { bargeAt = 0 }
+    audioLock.unlock()
+    if first {
+      NSLog("[bhttfa] first speech frame hostMs=%lld", Int64(Date().timeIntervalSince1970 * 1000))
+      if cut > 0 {
+        NSLog("[bhbarge] NEW-MOUTH sinceCutMs=%.0f leaks=%d", (now - cut) * 1000, bargeLeaks)
+      }
+    }
+  }
+  private func noteIdleFramePresented() {
+    audioLock.lock()
+    let pending = bargeIdlePending; bargeIdlePending = false
+    let cut = bargeAt
+    audioLock.unlock()
+    if pending, cut > 0 {
+      NSLog("[bhbarge] IDLE-SHOWN sinceCutMs=%.0f hostMs=%lld", (CACurrentMediaTime() - cut) * 1000,
+            Int64(Date().timeIntervalSince1970 * 1000))
+    }
+  }
+  /// Once a second while in speech: the audio in front of the engine (this queue),
+  /// the frames behind it, and how many of the last second's ticks had a frame.
+  private func noteFifo(_ now: CFTimeInterval, queuedFrames: Int, hadFrame: Bool) {
+    if hadFrame { ticksWithFrame1s += 1 } else { ticksWithout1s += 1 }
+    if now - fifoLineAt >= 1.0 {
+      audioLock.lock(); let ahead = audioQueue.count; audioLock.unlock()
+      NSLog("[bhfifo] unfedMs=%d q=%d ticksWithFrame=%d ticksWithout=%d hostMs=%lld",
+            ahead * 1000 / 16000, queuedFrames, ticksWithFrame1s, ticksWithout1s,
+            Int64(Date().timeIntervalSince1970 * 1000))
+      ticksWithFrame1s = 0; ticksWithout1s = 0; fifoLineAt = now
+    }
+  }
+
   /// Drop everything queued for lipsync and slide the avatar back to looping
   /// idle until the next bot chunk lands. Used by the barge-in path so the
   /// avatar stops animating the cancelled response.
@@ -831,10 +899,21 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// lip-frames are dropped immediately — the pre-rendered idle LOOP covers the
   /// gap (no frozen frame), so deferring the reset is unnecessary.
   func clearAudioQueue() {
+    var qBefore = 0
+    #if os(macOS) || os(iOS)
+    qBefore = avatar?.queuedFrames ?? 0
+    #endif
     audioLock.lock()
+    let dropped = audioQueue.count
     audioQueue.removeAll(keepingCapacity: true)
     pendingUtteranceReset = true
+    bargeAt = CACurrentMediaTime()
+    bargeIdlePending = true
+    audioSinceBarge = false
+    replyFirstFramePending = false
     audioLock.unlock()
+    NSLog("[bhbarge] RESET q=%d unfedSamples=%d hostMs=%lld", qBefore, dropped,
+          Int64(Date().timeIntervalSince1970 * 1000))
     #if os(macOS) || os(iOS)
     // embody: drop the buffered speech frames + reset the stream NOW (not on the
     // next compose tick) so a hang-up / barge stops the avatar INSTANTLY — with
@@ -905,7 +984,13 @@ final class AvatarTexture: NSObject, FlutterTexture {
     if lastAudioArrivalTime > 0, (now - lastAudioArrivalTime) >= Self.idleResetSecs {
       pendingUtteranceReset = true
     }
+    if !audioSinceBarge || lastAudioArrivalTime == 0
+        || (now - lastAudioArrivalTime) >= Self.idleResetSecs {
+      replyFirstFramePending = true     // this arrival begins a reply: its first mouth frame is TTFA's end
+    }
     audioQueue.append(contentsOf: floats)
+    audioArrived += n
+    audioSinceBarge = true
     if audioQueue.count > maxAudioQueueSamples {
       audioQueue.removeFirst(audioQueue.count - maxAudioQueueSamples)
     }
@@ -1406,8 +1491,12 @@ final class AvatarTexture: NSObject, FlutterTexture {
     let want = q < 24 ? 25600 : Self.samplesPerTick   // 25600 = one embody chunk
     let take = paused ? 0 : min(want, audioQueue.count)
     let samples = take > 0 ? Array(audioQueue.prefix(take)) : []
-    if take > 0 { audioQueue.removeFirst(take) }
+    if take > 0 { audioQueue.removeFirst(take); audioFed += take }
+    let fedTotal = audioFed
     audioLock.unlock()
+    if take > 0 {
+      NSLog("[bhfeed] +%d fed=%d q=%d hostMs=%lld", take, fedTotal, q, Int64(Date().timeIntervalSince1970 * 1000))
+    }
     // New utterance → full reset of the engine stream (buf/ci/prev/ctx) so the new
     // response starts CLEAN at ci=0: lip-frames map 1:1 to the new audio (correct A/V,
     // no prior-tail content, no accumulating lag). The continuous-stream variant
@@ -1456,9 +1545,13 @@ final class AvatarTexture: NSObject, FlutterTexture {
     if !paused { pendingUtteranceReset = false }
     let take = paused ? 0 : min(Self.samplesPerTick, audioQueue.count)   // hold queue while paused
     let pending = take > 0 ? Array(audioQueue.prefix(take)) : []
-    if take > 0 { audioQueue.removeFirst(take) }
+    if take > 0 { audioQueue.removeFirst(take); audioFed += take }
+    let fedTotal = audioFed
     let lastAudio = lastAudioArrivalTime
     audioLock.unlock()
+    if take > 0 {
+      NSLog("[bhfeed] +%d fed=%d q=%d hostMs=%lld", take, fedTotal, rt.framesAvailable, Int64(Date().timeIntervalSince1970 * 1000))
+    }
 
     if needsReset { rt.resetState() }            // → be_essence2_reset (essence2 witness)
     if !pending.isEmpty { rt.pushAudio(pending) }   // → pushI16 (exact ×32768 int16 conv, byte-frozen)
@@ -1488,14 +1581,27 @@ final class AvatarTexture: NSObject, FlutterTexture {
       // pair into one call (byte-identical: same be_essence2_pull_frame).
       let (got, isSpeech) = rt.pull(into: &bgrBuffer)
       if got > 0 {
+        audioLock.lock(); let stale = !audioSinceBarge; audioLock.unlock()
+        if isSpeech && stale {
+          bargeLeaks += 1
+          NSLog("[bhbarge] LEAK old-reply speech frame after the cut (+%.0f ms) leaks=%d",
+                (CACurrentMediaTime() - bargeAt) * 1000, bargeLeaks)
+        }
         publishBGRToTexture()                       // every frame shown — never dropped
         if isSpeech {                               // a GENERATED frame → release its paired 40 ms + mark speech
           lastSpeechPullAt = CACurrentMediaTime()
           speechFrameLock.lock(); _speechFramesPublished += 1; speechFrameLock.unlock()
           onSpeechFramePublished?()                  // releaseEmbodyAudioFrame: emit THIS frame's audio slice
+          noteSpeechFramePresented(CACurrentMediaTime())
+        } else {
+          noteIdleFramePresented()
         }
+        noteFifo(CACurrentMediaTime(), queuedFrames: backlog, hadFrame: true)
       }
       return
+    }
+    if !pending.isEmpty || lastSpeechPullAt > 0 && CACurrentMediaTime() - lastSpeechPullAt < 1.0 {
+      noteFifo(CACurrentMediaTime(), queuedFrames: 0, hadFrame: false)
     }
 
     // Idle: no speech frames ready and we've been quiet a moment → keep the
@@ -1504,7 +1610,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
     let quietFor = lastAudio > 0 ? (CACurrentMediaTime() - lastAudio)
                                  : Double.greatestFiniteMagnitude
     if pending.isEmpty, quietFor > 0.2, cap > 0 {
-      if rt.idle(into: &bgrBuffer) > 0 { publishBGRToTexture() }   // → be_essence2_idle_frame
+      if rt.idle(into: &bgrBuffer) > 0 { publishBGRToTexture(); noteIdleFramePresented() }   // → be_essence2_idle_frame
     }
   }
   #endif
@@ -1532,9 +1638,12 @@ final class AvatarTexture: NSObject, FlutterTexture {
       // first reply). After ci=1 the queue stays ahead, so it's smooth.
       if rt.queuedFrames >= rt.speechCushion {
         embodySpeaking = true   // cushion ready → live speech
+        if holdTicks > 0 { noteHoldRunEnded() }
       } else { publishIdleLoopFrame(rt); return }
     }
     guard let pulled = rt.pull() else {
+      holdTicks += 1   // in speech with no frame to show: the display is the speaker's clock, so this is silence
+      noteFifo(now, queuedFrames: rt.queuedFrames, hadFrame: false)
       // No lip-frame this tick. Two reasons to HOLD (keep embodySpeaking=true and
       // hold the current frame — audio is paired, so it pauses too, no drift)
       // rather than flip to idle:
@@ -1562,10 +1671,21 @@ final class AvatarTexture: NSObject, FlutterTexture {
               rt.hasPendingTail ? "y" : "n")
       }
       embodyDrainWaitTicks = 0
+      holdTicks = 0              // the reply ended; not a hold
       embodySpeaking = false; publishIdleLoopFrame(rt)
       return
     }
     embodyDrainWaitTicks = 0   // got a frame → disarm watchdog
+    if holdTicks > 0 { noteHoldRunEnded() }
+    noteFifo(now, queuedFrames: rt.queuedFrames, hadFrame: true)
+    audioLock.lock(); let stale = !audioSinceBarge; audioLock.unlock()
+    if pulled.speech && stale {
+      // A speech frame with no reply audio arrived since the cut cannot be the new
+      // reply's: it is the old one leaking past the reset. Counted here; not prevented.
+      bargeLeaks += 1
+      NSLog("[bhbarge] LEAK old-reply speech frame after the cut (+%.0f ms) leaks=%d",
+            (now - bargeAt) * 1000, bargeLeaks)
+    }
     // ★INTERIM — REMOVE WHEN THE PLUGIN CONSUMES AN ENGINE CARRYING #693 (TAIL 0): the
     // engine then trims each utterance to F = round(seconds × fps) and never emits the
     // padded last chunk (the serve path already does), this case cannot occur, and this
@@ -1609,6 +1729,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
     if pulled.speech {
       speechFrameLock.lock(); _speechFramesPublished += 1; speechFrameLock.unlock()
       onSpeechFramePublished?()
+      noteSpeechFramePresented(now)
     }
     if embodyLastPublish > 0 {
       let gap = (now - embodyLastPublish) * 1000
@@ -1631,6 +1752,7 @@ final class AvatarTexture: NSObject, FlutterTexture {
   /// texture untouched; only an engine without that surface (no clip, or an
   /// engine that serves idle as bytes) takes the BGR copy path.
   private func publishIdleLoopFrame(_ rt: any BithumanEngine) {
+    noteIdleFramePresented()
     if let pb = rt.idleNextPixelBuffer() {
       publishPixelBufferToTexture(pb)
     } else if rt.idle(into: &bgrBuffer) > 0 {

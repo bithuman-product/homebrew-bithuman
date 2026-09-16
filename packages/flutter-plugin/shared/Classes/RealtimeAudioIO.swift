@@ -305,6 +305,37 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   private var micChunkCount = 0
   private var spkChunkCount = 0
 
+  // ---- the conversation instrument (read by tools/conformance conversation_apple) ----
+  // `bhmic`, once a second: the post-AEC capture (dbfs) and what actually left for the
+  // transport after anything in this file touched it (sentDbfs) — their difference is
+  // the plugin's own attenuation, which the contract says must be 0. `bhfar`, once a
+  // second: the level of the agent's audio as scheduled to the speaker — the far end
+  // the canceller has to remove. Both carry the host clock the transport's lines use.
+  private var micSumSq = 0.0, micSentSumSq = 0.0, micN = 0, micPeak: Int32 = 0, micChunks1s = 0
+  private var micLineAt = Date.distantPast
+  private var farSumSq = 0.0, farN = 0, farPeak: Float = 0
+  private var farLineAt = Date.distantPast
+  @inline(__always) private func noteFarEnd(_ p: UnsafePointer<Float>, _ n: Int) {
+    var sq = 0.0; var pk = farPeak
+    for i in 0..<n { let v = p[i]; let a = v < 0 ? -v : v; if a > pk { pk = a }; sq += Double(v * v) }
+    farSumSq += sq; farN += n; farPeak = pk
+    let now = Date()
+    if now.timeIntervalSince(farLineAt) >= 1.0 {
+      let rms = (farSumSq / Double(max(1, farN))).squareRoot()
+      NSLog("[bhfar] speechSamples=%d peak1s=%d rms1s=%d dbfs=%.1f hostMs=%lld",
+            farN, Int(farPeak * 32768), Int(rms * 32768),
+            20 * log10(max(rms, 1.0 / 32768.0)), Int64(now.timeIntervalSince1970 * 1000))
+      farSumSq = 0; farN = 0; farPeak = 0; farLineAt = now
+    }
+  }
+  /// A cut: the reason travels with the line (server speech_started, the app's text
+  /// turn, the LOCAL energy VAD, a stop) so a reader can tell a phantom from a person.
+  private var bargeN = 0
+  /// Moved by barge() when the FIFO is dropped; a slice released under an older epoch
+  /// than the current one belonged to the cancelled reply (counted, see release).
+  private var pacedEpoch = 0
+  private var oldSlicesAfterCut = 0
+
   // Local voice-activity detection — the LOCAL-mode barge trigger. Mic chunks
   // with post-AEC PCM16 peak above the effective threshold count as "user
   // talking", and a barge fires once that holds for `voiceSustainSecs`
@@ -1061,7 +1092,8 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   ///      render state so the speaker goes silent within ~10 ms.
   ///   2. Tell the avatar to stop lipsyncing the cancelled audio (clear the
   ///      audio queue → looping-idle path until the next bot chunk).
-  func barge() {
+  func barge(reason: String = "app") {
+    let t0 = Date()
     NSLog("[RealtimeAudioIO] barge: cancelling agent playback + lipsync")
     playbackPaused = false   // turn-over supersedes any pause
     // ORDER MATTERS (mirrors cloud: cancel the producer FIRST, then drop queued
@@ -1086,7 +1118,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     // via the texture's clearAudioQueue, so no frames pull this stale audio).
     // Safe to clear AFTER onBarge: the gen fence above means no late chunk can
     // refill this between here and the next turn.
-    embodyPacedLock.lock(); embodyPaced.removeAll(); embodyPacedLock.unlock()
+    embodyPacedLock.lock(); let pacedDropped = embodyPaced.count; embodyPaced.removeAll(); pacedEpoch &+= 1; embodyPacedLock.unlock()
     #if os(iOS)
     // player.reset() below silences the speaker instantly — pull the
     // AEC-warm-up playout clock back so the squelch never mutes the mic
@@ -1112,6 +1144,12 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       player.play()
       #endif
     }
+    // The speaker is silent HERE (player.reset() flushed its render state).
+    // `flushedInMs` is cut -> silence, the figure Android's AudioTrack flush reports.
+    bargeN += 1
+    NSLog("[bhbarge] CUT %d reason=%@ hostMs=%lld flushedInMs=%.1f unreleasedSamples=%d oldSlicesAfterCut=%d",
+          bargeN, reason, Int64(t0.timeIntervalSince1970 * 1000),
+          Date().timeIntervalSince(t0) * 1000, pacedDropped, oldSlicesAfterCut)
     avatarTextureForLipsync?.setLipsyncPaused(false)  // clear any pause hold
     avatarTextureForLipsync?.clearAudioQueue()
   }
@@ -1224,6 +1262,8 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       let a = int16Ptr[i] < 0 ? -Int32(int16Ptr[i]) : Int32(int16Ptr[i])
       if a > maxAbs { maxAbs = a }
     }
+    var capturedSq = 0.0
+    for i in 0..<frames { let v = Double(int16Ptr[i]); capturedSq += v * v }
 
     #if os(iOS)
     // Mic-start grace: ride out the AGC ramp / VAD-init transient at room
@@ -1324,6 +1364,20 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     }
     #endif
 
+    var sentSq = 0.0
+    for i in 0..<frames { let v = Double(int16Ptr[i]); sentSq += v * v }
+    micSumSq += capturedSq; micSentSumSq += sentSq; micN += frames; micChunks1s += 1
+    if maxAbs > micPeak { micPeak = maxAbs }
+    if Date().timeIntervalSince(micLineAt) >= 1.0 {
+      let rms = (micSumSq / Double(max(1, micN))).squareRoot()
+      let sent = (micSentSumSq / Double(max(1, micN))).squareRoot()
+      NSLog("[bhmic] chunks=%d peak1s=%d rms1s=%d dbfs=%.1f sentDbfs=%.1f agentAudible=%@ hostMs=%lld",
+            micChunks1s, micPeak, Int(rms), 20 * log10(max(rms, 1.0) / 32768.0),
+            20 * log10(max(sent, 1.0) / 32768.0), botAudible ? "1" : "0",
+            Int64(Date().timeIntervalSince1970 * 1000))
+      micSumSq = 0; micSentSumSq = 0; micN = 0; micPeak = 0; micChunks1s = 0; micLineAt = Date()
+    }
+
     let n = Int(out.frameLength) * 2
 
     // The LOCAL-mode energy barge on the post-AEC mic signal (enabled whenever
@@ -1364,7 +1418,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
           // installed tap callback — the tap runs on the realtime audio thread
           // and AVAudioPlayerNode.stop() dispatch_syncs on that queue → "BUG IN
           // CLIENT OF LIBDISPATCH" SIGTRAP. Hop to the main queue.
-          DispatchQueue.main.async { [weak self] in self?.barge() }
+          DispatchQueue.main.async { [weak self] in self?.barge(reason: "energy_vad") }
         }
       }
     }
@@ -1490,6 +1544,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       case .open:
         speakerGenLock.unlock()
         notePlayoutScheduled(Double(frameCount) / serverTtsFormat.sampleRate)
+        if let f = inBuf.floatChannelData?[0] { noteFarEnd(f, Int(frameCount)) }
         // macOS-only: device-swap-safe scheduling; iOS has no HAL swap so it schedules directly
         #if os(macOS)
         // Atomic vs a device swap: the entry gate at the top of this function is
@@ -1547,6 +1602,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       }
     } else {
       notePlayoutScheduled(Double(frameCount) / serverTtsFormat.sampleRate)
+      if let f = inBuf.floatChannelData?[0] { noteFarEnd(f, Int(frameCount)) }
       // macOS-only: device-swap-safe scheduling; iOS has no HAL swap so it schedules directly
       #if os(macOS)
       _ = scheduleAndPlayGuarded(inBuf)   // atomic vs device swap (cloud/no-avatar path)
@@ -1611,6 +1667,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     }
     let chunk = Array(embodyPaced.prefix(need))
     embodyPaced.removeFirst(need)
+    let epochAtTake = pacedEpoch
     embodyPacedLock.unlock()
     guard let buf = AVAudioPCMBuffer(pcmFormat: serverTtsFormat, frameCapacity: AVAudioFrameCount(need)) else { return }
     buf.frameLength = AVAudioFrameCount(need)
@@ -1646,6 +1703,14 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     player.scheduleBuffer(buf, completionHandler: nil)
     if !player.isPlaying && !playbackPaused { player.play() }
     #endif
+    if let f = buf.floatChannelData?[0] { noteFarEnd(f, need) }
+    embodyPacedLock.lock(); let epochNow = pacedEpoch; embodyPacedLock.unlock()
+    if epochNow != epochAtTake {
+      // A cut landed between taking this slice and scheduling it: 50 ms of the
+      // cancelled reply reached the player AFTER the flush. Counted on the CUT line.
+      oldSlicesAfterCut += 1
+      NSLog("[bhbarge] OLD-SLICE scheduled after the cut (epoch %d -> %d) total=%d", epochAtTake, epochNow, oldSlicesAfterCut)
+    }
     embodyRelN += 1
     if embodyRelN % 20 == 0 {
       embodyPacedLock.lock(); let bufN = embodyPaced.count; embodyPacedLock.unlock()
