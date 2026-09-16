@@ -50,6 +50,17 @@ jobs:
           restore() { cp "$RUNNER_TEMP/bootstrap.bak" "$B"; }
           arm() {  # $1 = name, $2 = sed program
             sed -i "$2" "$B"
+            # ★AN ARM THAT CHANGED NO BYTES IS NOT AN ARM. The digest arm below
+            # was spelt `LIBESSENCE2_SHA256:-e` and stopped matching anything the
+            # day the pinned digest stopped starting with `e` (essence2-v1.8.0 is
+            # 06be42fe…): sed edited nothing, the check passed on an UNMUTATED
+            # file, and this step reported the CHECK as blind when the blind thing
+            # was the arm. Assert the subject actually moved before grading it —
+            # for every arm, so the next hard-coded literal cannot hide either.
+            if cmp -s "$B" "$RUNNER_TEMP/bootstrap.bak"; then
+              echo "::error::the arm '$1' changed no bytes — its sed no longer matches its subject, so it grades nothing"
+              restore; exit 1
+            fi
             if ./scripts/check-apple-engine-pin.sh > /dev/null 2>&1; then
               echo "::error::the pin check PASSED with '$1' applied — it is not looking"
               restore; exit 1
@@ -67,6 +78,8 @@ jobs:
               '/^LIBESSENCE2_RESOURCES_SHA256=/d'
           arm "the pod rolls back to the superseded essence2-v1.2.0" \
               's|LIBESSENCE2_RELEASE:-essence2-v[0-9.]*|LIBESSENCE2_RELEASE:-essence2-v1.2.0|'
-          arm "one hex digit of the engine digest moves" \
-              's|LIBESSENCE2_SHA256:-e|LIBESSENCE2_SHA256:-f|'
+          # Value-INDEPENDENT: rewrite the whole digest to a different, still
+          # well-formed sha256, so this arm keeps biting whatever the pin becomes.
+          arm "the engine digest is a different valid sha256" \
+              's|LIBESSENCE2_SHA256:-[0-9a-f]\{64\}|LIBESSENCE2_SHA256:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|'
           ./scripts/check-apple-engine-pin.sh
