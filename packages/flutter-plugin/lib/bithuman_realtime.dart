@@ -321,7 +321,11 @@ class BithumanRealtimeSession {
       //     after the server's own speech_started (19.7 / 29.0 / 29.0 over three arms),
       //     measured with the client sending no cancel at all. Nothing is left
       //     generating. (There is no `response.cancelled` event on the GA shape at
-      //     all — 0 in 11 sessions; cancellation is signalled by `response.done`.)
+      //     all — 0 across the 6 sessions that logged every inbound event, covering
+      //     22 responses of which 11 were cancelled; cancellation is signalled by
+      //     `response.done`. The "11 sessions" this line first claimed counted five
+      //     more that only logged speech_started, which is a denominator the evidence
+      //     did not cover.)
       //   • A CLIENT CUT THE SERVER DOES NOT CONFIRM COSTS THE WHOLE TURN. Cancelling
       //     on a non-speech burst ends the reply `reason=client_cancelled` and NO
       //     replacement response is created: the agent stops mid-sentence and never

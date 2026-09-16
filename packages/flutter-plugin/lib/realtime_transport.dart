@@ -537,6 +537,12 @@ const String _kTransportDefine = DevLevers.transport;
 /// captures on VOICE_COMMUNICATION with the platform AEC in MODE_IN_COMMUNICATION
 /// — which is the configuration `EchoProfile.android` is measured against.
 ///
+/// Read it off Android's own log rather than off this branch, the way an adoption
+/// claim is supposed to be proved: `[bhttfa] first delta` and `[bhdeliver]` are
+/// emitted by `bithuman_realtime.dart` and by nothing else. Android's graded
+/// conversation run (`conversation_android.normalized.log`, the one
+/// `EchoProfile.android` cites) carries 52 of each and zero `[webrtc]` lines.
+///
 /// That matters beyond tidiness. Every target is meant to follow the SAME voice
 /// interaction model, one codebase serving all of them, and this factory is where
 /// that is true or false. A reader auditing "does every target barge the same
