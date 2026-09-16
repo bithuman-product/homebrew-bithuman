@@ -88,7 +88,9 @@ class BithumanAvatar {
   /// (light-avatar photoreal) engine instead — [imxPath] is then the `.lab`
   /// path, [motionDir] the teacher-onnx dir, and [chunk] the frames-per-flush
   /// (16 = realtime on Apple Silicon; use 2 on iOS for lower latency/memory).
-  /// Essence2 runs on macOS + iOS arm64.
+  /// Essence2 runs on macOS + iOS arm64, and on Android (`engine: 'essence2'`,
+  /// where [imxPath] is the agent CODE and [apiSecret] is required: the members
+  /// come through the metered door and every frame is metered).
   static Future<BithumanAvatar> load(
     String imxPath, {
     String? apiSecret,

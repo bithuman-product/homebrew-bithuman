@@ -39,6 +39,15 @@ and the Android engine pin moves to the AAR that carries the class this plugin i
   class. Until 0.4.7 is public, this half resolves from mavenLocal only — stated here
   and in `android/build.gradle`.
 
+* **Android runs essence-2.** `load(engine: 'essence2')` on Android opens the published
+  `ai.bithuman:essence2-android` AAR (0.5.7+, the identity fetched by code through the
+  metered door with the app's credential, which also arms the engine's meter). The
+  player is now written against `AvatarEngine` — the same admission / write-ahead /
+  presentation / idle rules run on either SDK; what differs per engine (frame rate,
+  where a frame's audio position comes from, what a reset and a tail are) is stated in
+  one file, `AvatarEngine.kt`. Before this the Android half refused every engine but
+  expression-2 by name. minSdk is 29 (essence2-android declares 29).
+
 ## 2.4.0 — 2026-09-16
 
 The first tagged plugin release (`flutter-plugin-v2.4.0`). Everything below shipped to

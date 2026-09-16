@@ -1,10 +1,11 @@
-// bithuman — Android half of the umbrella plugin (expression-2 on device).
+// bithuman — Android half of the umbrella plugin (expression-2 and essence-2 on device).
 //
-// The engine is the PUBLISHED `ai.bithuman:expression2-android` AAR from Maven Central,
-// so a fresh clone builds with no private SDK and no vendor bundle. It needs google()
-// beside mavenCentral(): its LiteRT dependency lives on Google's Maven only. The two
-// Qualcomm coordinates are the Hexagon NPU delegate the SDK loads when the SoC has one
-// (Snapdragon); elsewhere they are inert.
+// The engines are the PUBLISHED `ai.bithuman:expression2-android` and
+// `ai.bithuman:essence2-android` AARs from Maven Central, so a fresh clone builds with no
+// private SDK and no vendor bundle. expression-2 needs google() beside mavenCentral():
+// its LiteRT dependency lives on Google's Maven only. The two Qualcomm coordinates are
+// the Hexagon NPU delegate that SDK loads when the SoC has one (Snapdragon); elsewhere
+// they are inert. essence-2 resolves from Central alone.
 //
 // ★ The pin is 0.4.7, which the presenter needs: `Expression2IdleLoop` (the idle clip
 // decoded in place, `next(bitmap)`) exists from 0.4.7 ONLY. Central's 0.4.6 — built
@@ -43,7 +44,7 @@ android {
     namespace = 'ai.bithuman.flutter'
     compileSdk = 36
     defaultConfig {
-        minSdk = 26   // the AAR declares 26
+        minSdk = 29   // essence2-android declares 29 (expression2-android 26); the app must match
         ndk { abiFilters 'arm64-v8a' }   // the AAR ships arm64-v8a only
     }
     compileOptions {
@@ -60,6 +61,9 @@ android {
 
 dependencies {
     implementation 'ai.bithuman:expression2-android:0.4.7'
+    // 0.5.7: the first coordinate with `Essence2Avatar.idle` (the driver footage between
+    // turns) and a meter that refuses without a credential rather than rendering free.
+    implementation 'ai.bithuman:essence2-android:0.5.7'
     implementation 'com.qualcomm.qti:qnn-litert-delegate:2.49.0'
     implementation 'com.qualcomm.qti:qnn-runtime:2.49.0'
 }

@@ -1,7 +1,5 @@
 package ai.bithuman.flutter
 
-import ai.bithuman.expression2.Expression2Avatar
-import ai.bithuman.expression2.Expression2IdleLoop
 import android.graphics.Bitmap
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -20,9 +18,8 @@ import java.util.concurrent.LinkedBlockingQueue
  * The agent's voice and the frames generated from it, presented as ONE unit.
  *
  * The engine generates video from audio, so a frame and the samples it came from are
- * one object. `Expression2Frame.presentationTimeUs` is what binds them: it places each
- * frame on the timeline of the audio that was fed in, so we can cut that frame's own
- * samples out of the pending audio.
+ * one object. The engine says where each frame falls on the audio that was fed in
+ * ([AvatarEngine.pull]), so we can cut that frame's own samples out of the pending audio.
  *
  * Three rules from the A/V sync contract, and they are different rules:
  *
@@ -48,15 +45,17 @@ import java.util.concurrent.LinkedBlockingQueue
  * silence — admitted and presented exactly like speech. So there is one clock, one
  * state machine, and no frozen frame. `pts` is the session's own monotonic sample
  * count and spans both, so idle and speech cannot disagree about where they are.
- * The idle frame is decoded IN PLACE by the SDK (`Expression2IdleLoop.next` fills a
- * slot of the same bitmap ring speech uses): every frame of the clip, in order, with
- * the wrap where the clip ends — the SDK logs each wrap with its index. Nothing here
- * holds the clip and nothing here decides where it loops.
+ * The idle frame is decoded IN PLACE by the SDK ([IdleClip.next] fills a slot of the
+ * same bitmap ring speech uses): every frame of the clip, in order, with the wrap
+ * where the clip ends — logged with its index. Nothing here holds the clip and
+ * nothing here decides where it loops.
+ *
+ * The engine is whichever [AvatarEngine] the plugin loaded — expression-2 at 20 fps or
+ * essence-2 at 25 — and the unit's size follows its frame rate; every rule above is
+ * the same for both.
  */
 class AvatarPlayer(
-    private val avatar: Expression2Avatar,
-    /** The identity's idle clip, the SDK's own cursor over it. Null if the model has none. */
-    private val idleLoop: Expression2IdleLoop?,
+    private val avatar: AvatarEngine,
     /**
      * ★ Whether the HOST APP is a debuggable build (`ApplicationInfo.FLAG_DEBUGGABLE`).
      * Every dev lever below is gated on this, so a release APK on a customer's phone
@@ -113,13 +112,20 @@ class AvatarPlayer(
     @Volatile private var running = true
     @Volatile private var epoch = 0
 
+    /** The identity's idle clip, the SDK's own cursor over it. Null if the model has none. */
+    private val idleLoop: IdleClip? = avatar.idle
+    /** contract 1: samples_per_frame == sample_rate / fps — the engine's rate, so per player. */
+    val SAMPLES_PER_FRAME = RATE / avatar.fps
+    val BYTES_PER_FRAME = SAMPLES_PER_FRAME * 2
+
     /**
      * THE AGENT'S AUDIO, AS FED — one byte stream, and the engine says where each
      * frame falls on it.
      *
-     * `Expression2Frame.audioSample` (expression2-android 0.4.5) is the first 16 kHz
-     * sample of the audio a frame was generated from, counted over everything fed
-     * since the last reset. Feeding is 24 kHz PCM16 in and 16 kHz float out, three
+     * [AvatarEngine.pull] returns the first 16 kHz sample of the audio a frame was
+     * generated from, counted over everything fed since the last reset (expression-2:
+     * `Expression2Frame.audioSample`, 0.4.5; essence-2: the frame's ordinal times the
+     * engine's 640-sample hop). Feeding is 24 kHz PCM16 in and 16 kHz float out, three
      * bytes of stream per fed sample, so a frame's own audio is exactly
      * `[3 * audioSample, 3 * audioSample + BYTES_PER_FRAME)` — the app does arithmetic
      * where it used to keep a model of the engine's segments. What that deletes:
@@ -216,9 +222,17 @@ class AvatarPlayer(
     @Volatile private var nMarkers = 0
     private val audioTs = AudioTimestamp()
 
+    /**
+     * The sync-marker's other half: a device-side recording (scrcpy `--audio-source=output`)
+     * can only carry a `USAGE_MEDIA` track, so a DEBUGGABLE build with
+     * `debug.bh.capturable=1` set plays through one — the same lever the Android sample
+     * uses for its marker arm. Off (and unreadable) on a release build, like the marker.
+     */
+    private val captureOn: Boolean = capturable || (debuggable && devInt("debug.bh.capturable") == 1)
+
     private val track: AudioTrack = AudioTrack.Builder()
         .setAudioAttributes(AudioAttributes.Builder()
-            .setUsage(if (capturable) AudioAttributes.USAGE_MEDIA else AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setUsage(if (captureOn) AudioAttributes.USAGE_MEDIA else AudioAttributes.USAGE_VOICE_COMMUNICATION)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build())
         .setAudioFormat(AudioFormat.Builder()
@@ -281,7 +295,8 @@ class AvatarPlayer(
      * WHOLE — including from the audio device, or the new epoch's mouth moves
      * against the old epoch's tail. `pts` does not reset.
      */
-    fun bargeIn() {
+    /** [reason] names who cut (speech_started / text / stop / app) on the CUT line — clause 11 reads it by name, as the Apple presenter writes it. */
+    fun bargeIn(reason: String = "app") {
         val t0 = System.currentTimeMillis()
         val headBefore = track.playbackHeadPosition
         resetPending = true             // before the epoch moves: see `pending` in produce()
@@ -293,8 +308,8 @@ class AvatarPlayer(
         track.flush()
         track.play()
         nBarge++; cutAtMs = t0; cutIdleAtMs = t0
-        Log.i("bhbarge", "CUT $nBarge hostMs=$t0 epoch=$epoch headBefore=$headBefore flushedInMs=${System.currentTimeMillis() - t0} " +
-            "q=${avatar.queuedFrames} pendingSlices=${runCatching { avatar.pendingAudioSlices }.getOrDefault(-1)}")
+        Log.i("bhbarge", "CUT $nBarge reason=$reason hostMs=$t0 epoch=$epoch headBefore=$headBefore flushedInMs=${System.currentTimeMillis() - t0} " +
+            "q=${avatar.queuedFrames} pendingSlices=${avatar.pendingAudioSlices}")
         pBase = sessionSamples          // the device counter restarts; the session does not
         tsValid = false; tsReadAt = 0L  // and so does its timestamp
         inbox.offer(Reset)
@@ -412,7 +427,7 @@ class AvatarPlayer(
                 pullCalls++; pullNanos += System.nanoTime() - t0
                 if (ms > pullMaxMs) pullMaxMs = ms
                 if (ms > 50) pullOver50++
-                if (f == null) {
+                if (f < 0) {
                     nullPulls++
                     // STARVATION: the ready-frame depth reached zero while the engine
                     // still had an utterance to finish. Counted as episodes, not pulls.
@@ -424,7 +439,7 @@ class AvatarPlayer(
                             "toWrite=${toWrite.size} chunks=${st?.chunks} frames=${st?.frames} wallMs=${"%.0f".format(st?.wallMs ?: -1.0)}")
                     }
                 } else {
-                    heldFrom = f.audioSample * BYTES_PER_SAMPLE16
+                    heldFrom = f * BYTES_PER_SAMPLE16
                     if (starveAt > 0) {
                         val st = runCatching { avatar.stats() }.getOrNull()
                         val h = synchronized(audioLock) { head }
@@ -433,7 +448,7 @@ class AvatarPlayer(
                         starveAt = 0L
                     }
                 }
-                lastPullOk = f != null
+                lastPullOk = f >= 0
             }
 
             if (heldFrom >= 0 && !pending) {
@@ -572,8 +587,8 @@ class AvatarPlayer(
         // and it cost the demos lane a crash on the first re-adoption: in an app that
         // HOLDS one avatar across several players (hide/show, idle hold), stopping a
         // player closed the engine and the next player's first pull() threw
-        // `this Expression2Avatar is closed`. Whoever calls Expression2Avatar.create
-        // calls close — BithumanPlugin, in dispose(), here.
+        // `this Expression2Avatar is closed`. Whoever creates the engine calls close —
+        // BithumanPlugin, in dispose(), here.
     }
 
     private fun admitSpeech(frame: Bitmap, slot: Int, body: ByteArray, kind: Char, e: Int) {
@@ -650,7 +665,7 @@ class AvatarPlayer(
                         audioHead = 0L; audioLen = 0L; head = 0L; carry = ByteArray(0); replyEnds.clear()
                     }
                     val t0 = System.currentTimeMillis()
-                    avatar.resetState(true)      // also restarts the engine's audioSample count
+                    avatar.reset()               // also restarts the engine's sample count
                     resetGen++
                     resetPending = false
                     replyBoundary = true; replyFirstPending = false
@@ -975,12 +990,8 @@ class AvatarPlayer(
         private const val IDLE_BURST = 4
         /** Chunks fed per unit produced. Unbounded feeding starves the sink. */
         /** Stop feeding once the engine holds this many frames — about two seconds. */
-        /** contract 1: samples_per_frame == sample_rate / fps */
-        val SAMPLES_PER_FRAME = RATE / Expression2Avatar.FRAMES_PER_SECOND
-        val BYTES_PER_FRAME = SAMPLES_PER_FRAME * 2
         /** Bytes of 24 kHz PCM16 per 16 kHz sample fed: 1.5 samples, two bytes each. */
         const val BYTES_PER_SAMPLE16 = 3L
-        const val US_PER_FRAME = 1_000_000L / Expression2Avatar.FRAMES_PER_SECOND
         /** Device buffer, in units (AudioTrack below asks for 4). */
         private const val DEVICE_UNITS = 4
         /** Write-queue depth below which the sink is fed silence rather than waited on. */
