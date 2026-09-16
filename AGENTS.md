@@ -136,7 +136,7 @@ All requests require `api-secret: YOUR_SECRET` header.
 | POST | `/v1/dynamics/generate` | Create gesture animations |
 | GET | `/v1/dynamics/{agent_id}` | List available gestures |
 
-### CLI (`bithuman` — install via Homebrew or the `curl|sh` installer; there is no CLI wheel on PyPI and none is coming, and the `bithuman` PyPI wheel is the library only)
+### CLI (`bithuman` — install via Homebrew or the `curl|sh` installer; the CLI is not distributed on PyPI, and the `bithuman` PyPI wheel is the library only)
 
 | Command | Purpose |
 |---|---|
