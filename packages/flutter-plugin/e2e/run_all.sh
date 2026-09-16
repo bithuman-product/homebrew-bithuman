@@ -53,7 +53,25 @@
 set -uo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-EXAMPLE_DIR="$HERE/../example"
+# ★ THERE IS NO `example/` DIRECTORY HERE, AND THERE NEVER WAS. This line
+# pointed at "$HERE/../example" — a path that does not exist in this
+# repository — so every leg below did `cd` into nothing. Tier 1 ran in
+# whatever directory the failed cd left it in; every Tier 2 leg hit
+# `|| result=FAIL`. Two things are true and they are different:
+#
+#   TIER 1 lives HERE now (packages/flutter-plugin/test/), needs no device and
+#   runs on every push in .github/workflows/flutter-plugin-tests.yml.
+#
+#   TIER 2 drives the PRODUCT APP, which is a different repository
+#   (bithuman-product/bithuman-jarvis-app). It cannot be found from this path
+#   and is not guessed at: point BITHUMAN_APP_DIR at a checkout, or the Tier 2
+#   legs record a LOUD skip that says so.
+PLUGIN_DIR="$HERE/.."
+APP_DIR="${BITHUMAN_APP_DIR:-}"
+if [ -n "$APP_DIR" ] && [ ! -f "$APP_DIR/pubspec.yaml" ]; then
+    echo "BITHUMAN_APP_DIR=$APP_DIR has no pubspec.yaml — not a Flutter app checkout" >&2
+    exit 2
+fi
 OUT_DIR="${OUT_DIR:-/tmp/bithuman-e2e-harness}"
 METRICS_DIR="$OUT_DIR/metrics"
 mkdir -p "$OUT_DIR" "$METRICS_DIR"
@@ -127,9 +145,15 @@ metric() { # metric <scenario> <logfile> <out.json> [extra args…]
 # ────────────────────────────────────────────────────────── Tier 1
 run_tier1() {
     want tier1 || return 0
-    note "TIER 1 — widget/unit (test/)"
-    ( cd "$EXAMPLE_DIR" && flutter test test/ ) 2>&1 | tee "$OUT_DIR/tier1.log" | tail -3
-    if grep -q "All tests passed" "$OUT_DIR/tier1.log"; then result_tier1="pass"
+    note "TIER 1 — widget/unit + the headless voice harness (plugin test/)"
+    # ★GRADE ON THE EXIT STATUS, NOT ON A PHRASE. This read
+    # `grep -q "All tests passed"`, and flutter's reporter prints "All OTHER
+    # tests passed!" the moment one case is skipped — so a green run with a
+    # single platform-skipped case was recorded FAIL, and a run that died
+    # before printing anything was FAIL for the wrong reason. tee swallows the
+    # status, so read PIPESTATUS.
+    ( cd "$PLUGIN_DIR" && flutter test test/ ) 2>&1 | tee "$OUT_DIR/tier1.log" | tail -3
+    if [ "${PIPESTATUS[0]}" -eq 0 ]; then result_tier1="pass"
     else result_tier1="FAIL"; fi
 }
 
@@ -137,7 +161,8 @@ run_tier1() {
 run_macos() {
     want macos || return 0
     note "TIER 2 — macOS (full session flow vs mock realtime)"
-    cd "$EXAMPLE_DIR" || { result_macos="FAIL"; return; }
+    if [ -z "$APP_DIR" ]; then result_macos="skip(set BITHUMAN_APP_DIR)"; return; fi
+    cd "$APP_DIR" || { result_macos="FAIL"; return; }
     flutter test integration_test/e2e_session_flow_test.dart -d macos \
         "${COMMON_DEFINES[@]}" \
         --dart-define=BITHUMAN_ENGINE=elevate \
@@ -196,7 +221,8 @@ run_ios() {
         echo "        elevate create will fail on a fresh sim container"
     fi
     echo "  sim: $udid (staging $E2E_ELEVATE_SRC via config.json)"
-    cd "$EXAMPLE_DIR" || { result_ios="FAIL"; return; }
+    if [ -z "$APP_DIR" ]; then result_ios="skip(set BITHUMAN_APP_DIR)"; return; fi
+    cd "$APP_DIR" || { result_ios="FAIL"; return; }
     local log_start
     log_start=$(date '+%Y-%m-%d %H:%M:%S')
     flutter test integration_test/e2e_boot_smoke_test.dart -d "$udid" \
@@ -259,7 +285,8 @@ run_android() {
         done
     fi
     "$ADB" logcat -c 2>/dev/null
-    cd "$EXAMPLE_DIR" || { result_android="FAIL"; return; }
+    if [ -z "$APP_DIR" ]; then result_android="skip(set BITHUMAN_APP_DIR)"; return; fi
+    cd "$APP_DIR" || { result_android="FAIL"; return; }
 
     local SERIAL
     SERIAL=$("$ADB" devices | awk '/^emulator-/ {print $1; exit}')
@@ -340,7 +367,8 @@ run_macos_scn() {
     if [ -z "$E2E_ELEVATE_SRC" ]; then
         echo "  SKIP: no elevatedir found (set E2E_ELEVATE_SRC)"; return
     fi
-    cd "$EXAMPLE_DIR" || { result_macos_scn="FAIL"; return; }
+    if [ -z "$APP_DIR" ]; then result_macos_scn="skip(set BITHUMAN_APP_DIR)"; return; fi
+    cd "$APP_DIR" || { result_macos_scn="FAIL"; return; }
     local soak="${E2E_IDLE_SOAK_S:-60}" ok=1
 
     : > "$OUT_DIR/macos-idle-native.log"
@@ -406,7 +434,8 @@ run_ios_scn() {
         [ -n "$udid" ] && { xcrun simctl boot "$udid"; booted_by_us=1; sleep 8; }
     fi
     [ -z "$udid" ] && { echo "  no iPhone simulator available — skipping"; return; }
-    cd "$EXAMPLE_DIR" || { result_ios_scn="FAIL"; return; }
+    if [ -z "$APP_DIR" ]; then result_ios_scn="skip(set BITHUMAN_APP_DIR)"; return; fi
+    cd "$APP_DIR" || { result_ios_scn="FAIL"; return; }
     local soak="${E2E_IDLE_SOAK_S:-60}" ok=1
 
     # Native truth: the test dup2's the Runner's stderr (NSLog mirror) to a
@@ -515,7 +544,8 @@ run_android_scn() {
     "$ADB" -s "$SERIAL" push "$BUNDLE" "$DEV_BUNDLE" >/dev/null \
         || { echo "  adb push failed"; result_android_scn="FAIL"; return; }
     "$ADB" -s "$SERIAL" shell chmod -R a+rX /data/local/tmp/e2e
-    cd "$EXAMPLE_DIR" || { result_android_scn="FAIL"; return; }
+    if [ -z "$APP_DIR" ]; then result_android_scn="skip(set BITHUMAN_APP_DIR)"; return; fi
+    cd "$APP_DIR" || { result_android_scn="FAIL"; return; }
     "$ADB" -s "$SERIAL" logcat -c 2>/dev/null
     flutter test integration_test/e2e_drive_soak_test.dart -d "$SERIAL" \
         "${COMMON_DEFINES[@]}" \

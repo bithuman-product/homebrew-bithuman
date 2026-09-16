@@ -5,6 +5,14 @@
 # layout; plugin-platform-guards.yml grades Swift #if reasons), so those tests ran only
 # when a human ran them — a memory, not a gate.
 #
+# ★SINCE 2026-09-16 IT ALSO RUNS THE HEADLESS VOICE HARNESS (test/e2e/). That is the
+# owner's acceptance test for the unified layer — "to test voice chat we do not even
+# need visuals" — and it is literally true here: a REAL BithumanRealtimeSession dials a
+# REAL loopback socket served by e2e/mock_realtime while the whole ai.bithuman.avatar
+# method channel is a recorded double, so there is no engine, no texture and no device
+# on this runner. It graded nothing for months because it lived in bithuman-jarvis-app,
+# which has no .github/ directory.
+#
 # ★A GATE MUST BE ABLE TO SAY "I COULD NOT LOOK": the test census runs first and refuses
 # an empty set. NOT a publish trigger: publish-pubdev.yml listens to tags flutter-v*;
 # this file listens to pushes and PRs and uploads nothing.
@@ -37,12 +45,26 @@ jobs:
           cache: true
       - name: toolchain
         run: flutter --version
-      - name: the test census is non-empty (a gate that can say it could not look)
+      # ★THE CENSUS NAMES THE HEADLESS HARNESS FILE BY FILE, because "the set
+      # is empty" is not the failure this repo actually had. test/e2e/ was
+      # written in bithuman-jarvis-app — a repo with no .github/ directory at
+      # all — and sat there unrun while the code under it changed twice
+      # (semantic_vad -> server_vad #44, the 1x pacer deleted #47). Both
+      # assertions were stale on the day it moved here. A count would not have
+      # noticed the harness leaving; a named list does.
+      - name: the test census is non-empty and still carries the headless harness
         run: |
           set -euo pipefail
-          N=$(ls test/*_test.dart 2>/dev/null | wc -l | tr -d ' ')
-          echo "test files: $N"; ls test/*_test.dart
+          N=$(find test -name '*_test.dart' | wc -l | tr -d ' ')
+          echo "test files: $N"; find test -name '*_test.dart' | sort
           [ "$N" -ge 1 ] || { echo "::error::no *_test.dart under packages/flutter-plugin/test — nothing was graded"; exit 1; }
+          for f in \
+            test/e2e/fake_avatar_platform.dart \
+            test/e2e/realtime_session_mock_test.dart \
+            test/e2e/transport_state_machine_test.dart \
+            test/e2e/transport_pick_test.dart ; do
+            [ -f "$f" ] || { echo "::error::$f is missing — the headless voice harness (a real BithumanRealtimeSession against a loopback mock, with NO engine and NO texture) is the one thing here that grades the voice layer end to end. If it genuinely moved, move this list with it; do not delete the line to make the step pass."; exit 1; }
+          done
       # ★THE FORMAT RATCHET — a re-add is caught HERE, on every push, not at
       # publish time. The publish door in publish-pubdev.yml is the refusal
       # that matters, but it only runs on a `flutter-v*` tag, so on its own a
@@ -75,5 +97,11 @@ jobs:
 
       - name: flutter pub get
         run: flutter pub get
-      - name: flutter test
+      # Runs test/ RECURSIVELY, so test/e2e/ is in this one invocation: the
+      # headless harness (loopback WebSocket + a mocked ai.bithuman.avatar
+      # channel) needs no device, no engine binary and no network beyond
+      # 127.0.0.1, so it belongs on the same ubuntu runner as the unit tests.
+      # Anything that DOES need a device stayed behind in the app — see
+      # e2e/README.md "What does not run here".
+      - name: flutter test (unit + the headless e2e harness)
         run: flutter test --reporter expanded
