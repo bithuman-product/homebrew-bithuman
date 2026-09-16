@@ -1,3 +1,39 @@
+## Unreleased — the voice layer stops importing the render layer
+
+No behaviour change, no version bump, nothing to publish: this is the layering
+move, and its whole point is that every existing caller is untouched.
+
+**What changed.** `bithuman_realtime.dart` and `realtime_transport.dart` imported
+`package:bithuman/bithuman.dart` for exactly one reason — four constructors took
+`required BithumanAvatar avatar`. They now take **`VoiceAudioPort`**
+(`lib/src/voice_protocol.dart`), the audio surface those call sites actually use,
+and `BithumanAvatar implements VoiceAudioPort`. `avatar: myAvatar` is the same
+call it always was; the dependency now points **render → voice**.
+
+The transport choice moved with it: `kTransportRegistry` +
+`pickTransportDescriptor` replace the if-chain, one `TransportDescriptor` per
+transport with its capability record, and `pickTransport` reads `Platform` once
+at the edge and hands it in as a `TransportRequest` field.
+
+**Why it is worth a line in a changelog that usually records behaviour.** A
+conversation can now be driven with **no engine, no texture and no device** —
+`test/voice_port_test.dart` runs a local turn (greeting, barge, captions, mute)
+against a stand-in port, and `test/transport_registry_test.dart` grades the
+routing table for **every** target on the ubuntu runner. The only routing test
+that existed before is in the product app, is written `skip: !Platform.isMacOS`,
+and lives in a repo with no CI — so of the routing contract's four named
+outcomes, none had ever been graded anywhere.
+
+Graded by mutation, all five test files, 30 tests: dropping the `implements`
+clause reddens the port arm alone; re-adding the render import reddens the edge
+arm alone; retyping one constructor back to `BithumanAvatar` reddens the two
+voice files and no other; weakening the registry's platform predicate reddens one
+routing arm. `avatar_fit` / `echo_profile` / `essence2_catalog` stay green under
+all four. `flutter analyze` on the product app is byte-identical to its output
+against `main` without this change, and on `avatar_chat` reports no issues.
+
+---
+
 ## 2.6.5 — 2026-09-16
 
 Tag `flutter-plugin-v2.6.5`. **The Android half of the barge-in fix.** The pin moves

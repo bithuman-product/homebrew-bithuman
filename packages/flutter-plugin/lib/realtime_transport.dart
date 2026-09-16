@@ -19,20 +19,34 @@
 // Local mode on either platform goes through LocalConverseTransport,
 // which also drives the native VP-IO RealtimeAudioIO directly.
 //
-// Both adapters expose the same `RealtimeTransport` surface; the UI
-// doesn't know or care which one it's holding. `pickTransport()` is the
-// platform-conditional factory at the bottom of this file.
+// All three adapters expose the same `RealtimeTransport` surface; the UI
+// doesn't know or care which one it's holding. Which one a request gets is
+// decided by `kTransportRegistry` in `src/voice_protocol.dart` — a typed
+// descriptor per transport, in priority order — and `pickTransport()` at the
+// bottom of this file builds the one that table names.
+//
+// ★THIS FILE NO LONGER IMPORTS THE RENDER LAYER. The four constructors took
+// `required BithumanAvatar avatar` and that single edge was the whole reason
+// voice depended on render; what they actually use is an audio unit, so they
+// take `VoiceAudioPort` and `BithumanAvatar` implements it. Passing an avatar
+// is unchanged for every caller. Passing something that is NOT one is now
+// possible, which is how a conversation gets tested with no engine, no texture
+// and no device.
 //
 // Apache-2.0; (c) bitHuman.
 
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:bithuman/bithuman.dart';
 import 'package:bithuman/bithuman_realtime.dart';
 
 import 'openai_webrtc_session.dart';
 import 'src/dev_levers.dart';
+import 'src/voice_protocol.dart';
+
+/// The voice layer's own Layer-0 contract — the audio port a transport drives
+/// and the typed registry that decides which transport a request gets.
+export 'src/voice_protocol.dart';
 
 /// Lifecycle states that any underlying transport can be in. Maps the
 /// concrete `RealtimeStatus` (WebSocket) and `WebRTCStatus` (WebRTC)
@@ -129,7 +143,7 @@ abstract class RealtimeTransport {
 class WebSocketTransport implements RealtimeTransport {
   WebSocketTransport({
     required String apiKey,
-    required BithumanAvatar avatar,
+    required VoiceAudioPort avatar,
     required String model,
     required String voice,
     required String systemPrompt,
@@ -243,7 +257,7 @@ class WebRTCTransport implements RealtimeTransport {
           vadThreshold: vadThreshold,
         );
 
-  final BithumanAvatar avatar;
+  final VoiceAudioPort avatar;
   final OpenAIWebRTCSession _session;
   StreamSubscription<dynamic>? _remoteAudioSub;
   StreamSubscription<dynamic>? _interruptForwardSub;
@@ -362,7 +376,7 @@ class LocalConverseTransport implements RealtimeTransport {
     this.vadThreshold = 0,
     this.systemPrompt = '',
   });
-  final BithumanAvatar avatar;
+  final VoiceAudioPort avatar;
   final String ggufPath;
   final String? supertonicAssets;
   final String? voice;
@@ -521,40 +535,27 @@ class LocalConverseTransport implements RealtimeTransport {
 /// what the A/B measures). Local mode is unaffected — no cloud transport.
 const String _kTransportDefine = DevLevers.transport;
 
-/// Platform-conditional factory. Local mode (macOS/iOS) → on-device
-/// converse; EVERY cloud platform — Android, iOS, macOS — → WebSocket + the
-/// plugin's native audio (unless [_kTransportDefine] opts into WebRTC — see
-/// above). Adding a new transport = one branch here, no UI change.
+/// Build the transport a request resolves to.
 ///
-/// ★ ONE CLOUD TRANSPORT EVERYWHERE, AND THIS PARAGRAPH USED TO SAY THE OPPOSITE.
-/// It read "Android MUST take the WebRTC branch: the Android plugin's frames-path
-/// revival stubs the native VP-IO surface (`audioStart` returns false,
-/// `playSpeakerPCM` is a no-op, the mic EventChannel never emits), so the
-/// WebSocket transport connects fine but is mute AND deaf there" — three lines
-/// above a `return WebSocketTransport(...)` that Android has taken for some time.
-/// None of it is true now: `BithumanPlugin.kt` implements `audioStart` (it opens
-/// the mic EventChannel), `playSpeakerPCM` and `interrupt`, and `MicCapture.kt`
-/// captures on VOICE_COMMUNICATION with the platform AEC in MODE_IN_COMMUNICATION
-/// — which is the configuration `EchoProfile.android` is measured against.
+/// ★THE DECISION IS DATA NOW, AND IT LIVES IN `src/voice_protocol.dart`.
+/// This used to be an if-chain reading `Platform` from its own middle, wrapped
+/// in six paragraphs of prose about which target barges how — prose that was
+/// FALSE for months about Android and sat three lines above the branch that
+/// contradicted it. `kTransportRegistry` carries the same decision as a list of
+/// [TransportDescriptor]s in priority order, each with its capability record,
+/// and [pickTransportDescriptor] walks it. This function is left with the half
+/// a table cannot do: constructing the object.
 ///
-/// Read it off Android's own log rather than off this branch, the way an adoption
-/// claim is supposed to be proved: `[bhttfa] first delta` and `[bhdeliver]` are
-/// emitted by `bithuman_realtime.dart` and by nothing else. Android's graded
-/// conversation run (`conversation_android.normalized.log`, the one
-/// `EchoProfile.android` cites) carries 52 of each and zero `[webrtc]` lines.
+/// It reads `Platform` exactly once, here at the edge, and hands the result in
+/// as a field — so `transport_registry_test.dart` grades the routing table for
+/// EVERY target from any machine. The product app's own routing test is
+/// `skip: !Platform.isMacOS` and could never grade the other three outcomes.
 ///
-/// That matters beyond tidiness. Every target is meant to follow the SAME voice
-/// interaction model, one codebase serving all of them, and this factory is where
-/// that is true or false. A reader auditing "does every target barge the same
-/// way?" who believed this paragraph would have concluded Android runs libwebrtc's
-/// APM and a different VAD, and gone looking for a second implementation to unify.
-/// There is one: `server_vad` on this transport, the same event handler,
-/// everywhere. A wrong reason stops the next reader from looking —
-/// `scripts/check_platform_guards.sh` argues exactly that about `#if` reasons, and
-/// it is no less true of a docstring.
+/// Adding a 3rd transport: one [TransportDescriptor] before the unconditional
+/// tail, and one `case` below. No UI change, no change to the other transports.
 RealtimeTransport pickTransport({
   required String apiKey,
-  required BithumanAvatar avatar,
+  required VoiceAudioPort avatar,
   required String model,
   required String voice,
   required String systemPrompt,
@@ -564,41 +565,39 @@ RealtimeTransport pickTransport({
   String? supertonicAssets,
   String? transportOverride, // test injection; defaults to the dart-define
 }) {
-  if (localMode &&
-      (Platform.isMacOS || Platform.isIOS) &&
-      ggufPath != null &&
-      ggufPath.isNotEmpty) {
-    return LocalConverseTransport(
-      avatar: avatar,
-      ggufPath: ggufPath,
-      supertonicAssets: supertonicAssets,
-      voice: voice,
-      vadThreshold: vadThreshold,
-      systemPrompt: systemPrompt,
-    );
+  final chosen = pickTransportDescriptor(TransportRequest(
+    localMode: localMode,
+    hasLocalBrain: ggufPath != null && ggufPath.isNotEmpty,
+    platformHasLocalBrain: Platform.isMacOS || Platform.isIOS,
+    override: (transportOverride ?? _kTransportDefine).toLowerCase(),
+  ));
+  switch (chosen.slug) {
+    case 'local':
+      return LocalConverseTransport(
+        avatar: avatar,
+        ggufPath: ggufPath!,
+        supertonicAssets: supertonicAssets,
+        voice: voice,
+        vadThreshold: vadThreshold,
+        systemPrompt: systemPrompt,
+      );
+    case 'webrtc':
+      return WebRTCTransport(
+        apiKey: apiKey,
+        avatar: avatar,
+        model: model,
+        voice: voice,
+        systemPrompt: systemPrompt,
+        vadThreshold: vadThreshold,
+      );
+    default:
+      return WebSocketTransport(
+        apiKey: apiKey,
+        avatar: avatar,
+        model: model,
+        voice: voice,
+        systemPrompt: systemPrompt,
+        vadThreshold: vadThreshold,
+      );
   }
-  // Every platform takes the WebSocket transport by default: the plugin's native
-  // audio surface (speaker + echo-cancelled mic) exists on macOS, iOS AND Android,
-  // and the WebSocket path is the one whose bot PCM the avatar lipsyncs from
-  // sample-accurately. WebRTC stays an explicit opt-in A/B.
-  final wantWebrtc =
-      (transportOverride ?? _kTransportDefine).toLowerCase() == 'webrtc';
-  if (wantWebrtc) {
-    return WebRTCTransport(
-      apiKey: apiKey,
-      avatar: avatar,
-      model: model,
-      voice: voice,
-      systemPrompt: systemPrompt,
-      vadThreshold: vadThreshold,
-    );
-  }
-  return WebSocketTransport(
-    apiKey: apiKey,
-    avatar: avatar,
-    model: model,
-    voice: voice,
-    systemPrompt: systemPrompt,
-    vadThreshold: vadThreshold,
-  );
 }

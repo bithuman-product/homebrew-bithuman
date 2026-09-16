@@ -356,6 +356,59 @@ real pod build on a Mac — `flutter build macos` / `flutter build ios` in the a
 
 ---
 
+## Layer 0, the other half — the VOICE contract (`VoiceAudioPort`, `lib/src/voice_protocol.dart`)
+
+Render has had a typed Layer 0 all along. Voice did not: until this landed,
+`bithuman_realtime.dart` and `realtime_transport.dart` imported
+`package:bithuman/bithuman.dart` for exactly one reason — four constructors took
+`required BithumanAvatar avatar` — and the transport choice was an if-chain that
+read `Platform` from its own middle.
+
+That edge had a price, and the estate paid it in testability: "test the
+conversation" meant "build an avatar first". The product app's voice tests reach
+the code by installing a fake platform channel and loading a fake `.imx`; its
+routing test is `skip: !Platform.isMacOS`, in a repo with no CI, so the routing
+contract's four named outcomes were graded on at most one of them, never.
+
+Two symbols, the same shape as `src/engine_protocol.dart`:
+
+- **`VoiceAudioPort`** — the audio surface a transport drives (session verbs,
+  local-brain verbs, `interrupt`, `nativeLog`). `BithumanAvatar implements
+  VoiceAudioPort`; the clause adds no code, only the direction of the edge, which
+  now points **render → voice**. Every caller's `avatar: myAvatar` is unchanged.
+- **`TransportDescriptor` + `kTransportRegistry` + `pickTransportDescriptor`** —
+  the transport choice as data in priority order, each entry carrying its
+  capability record (`usesNativeAudioUnit`, `drivesLipsyncFromPcm`, `needsApiKey`,
+  `canMute`). The platform is read **once, at the edge**, in `pickTransport`, and
+  handed in as a `TransportRequest` field — which is what makes the whole matrix
+  gradeable for every target from any machine (`test/transport_registry_test.dart`
+  runs on the ubuntu runner).
+
+## Recipe: add a 3rd transport
+
+A new transport (say LiveKit) slots in with **no change** to the other two and no
+UI change:
+
+1. **`class LiveKitTransport implements RealtimeTransport`** in
+   `lib/realtime_transport.dart` — five streams, `muted`/`canMute`, `start`,
+   `stop`, `dispose`, `applySettings`, `sendText`. It takes a `VoiceAudioPort`,
+   never a `BithumanAvatar`.
+2. **One `TransportDescriptor`** in `lib/src/voice_protocol.dart` with its slug,
+   label, capability record and a top-level `selects` predicate; append it to
+   `kTransportRegistry` **before** the unconditional tail (order is priority).
+3. **One `case`** in `pickTransport`'s switch — the half a table cannot do.
+4. **Grade it**: `transport_registry_test.dart`'s matrix and the well-formedness
+   group pick the new entry up automatically; add the row that says which
+   requests must reach it, and give `canMute` a real answer (the UI hides the
+   mute control off that field, so a lie there is a control that does not work).
+
+**Done checklist:** implements `RealtimeTransport` · descriptor registered before
+the tail · `selects` is a top-level function (the registry is `const`) · one
+`case` · capability record matches the object · routing matrix asserts it. No
+edits to the other transports, to the engines, or to the UI.
+
+---
+
 ## Frozen contracts (never change across migrations)
 
 - **Engine slugs** (dual-accept): `expression2`/`embody`, `essence2`/`elevate`.

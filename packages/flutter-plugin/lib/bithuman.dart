@@ -12,11 +12,25 @@ import 'dart:typed_data' show Int16List, Uint8List;
 
 import 'package:flutter/services.dart';
 
+import 'src/voice_protocol.dart';
+
+/// The voice layer's port, re-exported: a caller that holds a `BithumanAvatar`
+/// can name what it is handing to a realtime session.
+export 'src/voice_protocol.dart' show VoiceAudioPort;
+
 const _channel = MethodChannel('ai.bithuman.avatar');
 
 /// One loaded avatar. Owns a native texture; render with
 /// `Texture(textureId: avatar.textureId)`.
-class BithumanAvatar {
+///
+/// ★THE VOICE LAYER DOES NOT IMPORT THIS FILE — this file declares that it
+/// serves the voice layer's port. [VoiceAudioPort] (`src/voice_protocol.dart`)
+/// names the audio surface a realtime transport drives; every one of its
+/// members was already here, so the `implements` clause below adds no code and
+/// no behaviour. What it adds is the direction of the dependency: render → voice
+/// rather than voice → render, which is what lets a conversation be tested with
+/// no engine, no texture and no device.
+class BithumanAvatar implements VoiceAudioPort {
   BithumanAvatar._(this.textureId);
 
   /// Flutter texture id — pass to `Texture(textureId: ...)`.
@@ -327,6 +341,7 @@ class BithumanAvatar {
   ///
   /// [vpioAgc] false turns Apple VP-IO's automatic gain OFF on the uplink (the
   /// device row in `EchoProfile` decides; Android ignores it).
+  @override
   Future<void> audioStart({int vadThreshold = 0, bool enableMic = true, bool vpioAgc = true}) async {
     if (_disposed) throw const BithumanAvatarException('avatar is disposed');
     // Bump BEFORE the await so the value native receives equals the one
@@ -344,6 +359,7 @@ class BithumanAvatar {
 
   /// Tear down the VP-IO audio engine. Mic tap stops; pending speaker
   /// buffers are discarded.
+  @override
   Future<void> audioStop() async {
     if (_disposed) return;
     await _channel.invokeMethod('audioStop', {'textureId': textureId});
@@ -370,6 +386,7 @@ class BithumanAvatar {
   /// avatar lipsync + speaker directly on-device. [ggufPath] is the local LLM
   /// .gguf; [supertonicAssets] is the Supertonic ONNX assets dir. The metered
   /// avatar render still needs BITHUMAN_API_SECRET set when the avatar loaded.
+  @override
   Future<void> localAudioStart({
     required String ggufPath,
     String? supertonicAssets,
@@ -389,6 +406,7 @@ class BithumanAvatar {
   }
 
   /// Tear down the local converse brain + audio engine.
+  @override
   Future<void> localAudioStop() async {
     if (_disposed) return;
     await _channel.invokeMethod('localAudioStop', {'textureId': textureId});
@@ -397,6 +415,7 @@ class BithumanAvatar {
   /// LOCAL mode: feed a typed user message to the on-device brain (same as a
   /// spoken turn — the agent replies with voice + avatar). Forwards to the
   /// active LocalConverseController's `ConverseSession.pushText`.
+  @override
   Future<void> localPushText(String text) async {
     if (_disposed) return;
     await _channel.invokeMethod('localPushText', {'text': text});
@@ -405,6 +424,7 @@ class BithumanAvatar {
   /// LOCAL mode: mute/unmute the local mic. Gates the mic→brain (STT) forward
   /// in the native RealtimeAudioIO; everything else (speaker, avatar) is
   /// untouched, so the user can mute themselves mid-conversation.
+  @override
   Future<void> localSetMuted(bool muted) async {
     if (_disposed) return;
     await _channel.invokeMethod('localSetMuted', {'muted': muted});
@@ -413,6 +433,7 @@ class BithumanAvatar {
   /// Converse brain events (local mode) for captions + status:
   /// `{"kind":"state","state":int}` (0 idle/1 listening/2 thinking/3 speaking)
   /// or `{"kind":"bot"|"user","text":String}`.
+  @override
   Stream<Map<dynamic, dynamic>> get converseEvents {
     final ch = EventChannel('ai.bithuman.avatar.converse/$textureId');
     return ch.receiveBroadcastStream().map((e) => e as Map);
@@ -425,6 +446,7 @@ class BithumanAvatar {
   /// Call from the Realtime session's `speech_started` handler so
   /// barge-in fires the instant the user opens their mouth, not at
   /// end-of-sentence.
+  @override
   Future<void> interrupt({String reason = 'app'}) async {
     if (_disposed) return;
     await _channel.invokeMethod('interrupt', {'textureId': textureId, 'reason': reason});
@@ -435,6 +457,7 @@ class BithumanAvatar {
   /// unified log only — not the console `devicectl` attaches — so every transport
   /// event an instrument must see (speech_started, a reply's first byte, ...) goes
   /// through here; the reader then has one stream with one clock.
+  @override
   Future<void> nativeLog(String line) async {
     if (_disposed) return;
     try { await _channel.invokeMethod('log', {'line': line}); } catch (_) {}
@@ -458,6 +481,7 @@ class BithumanAvatar {
   /// from the same chunk. The native side schedules the buffer on the
   /// VP-IO player node and simultaneously pushes a 16 kHz copy into
   /// the avatar runtime — they share a clock so A/V cannot drift.
+  @override
   Future<void> playSpeakerPCM(Uint8List pcm24kPcm16le) async {
     if (_disposed) throw const BithumanAvatarException('avatar is disposed');
     await _channel.invokeMethod('playSpeakerPCM', {
@@ -471,6 +495,7 @@ class BithumanAvatar {
   /// so the last word isn't clipped. Call ONLY after all of the turn's audio has
   /// been handed to [playSpeakerPCM] (defer past any client-side pacing), and not
   /// after a barge. Safe to call repeatedly; a no-op when nothing is pending.
+  @override
   Future<void> notifyTurnEnd() async {
     if (_disposed) return;
     await _channel.invokeMethod('notifyTurnEnd', {'textureId': textureId});
@@ -499,6 +524,7 @@ class BithumanAvatar {
   /// only between [audioStart] and [audioStop]. Forward the chunks
   /// straight to OpenAI Realtime — VP-IO has already removed the
   /// bot's voice from the signal.
+  @override
   Stream<Uint8List> get micStream {
     // Name MUST match the native FlutterEventChannel exactly, gen and all.
     final ch = EventChannel('ai.bithuman.avatar.mic/$textureId/$_micGen');
@@ -526,6 +552,7 @@ class BithumanAvatar {
   /// `onTrack` callback has fired (so the track is registered with
   /// FlutterWebRTCPlugin). Pass `trackId = remoteAudioTrack.id`.
   /// Throws if the app doesn't actually ship flutter_webrtc.
+  @override
   Future<void> attachWebrtcRemoteAudio(String trackId) async {
     if (_disposed) throw const BithumanAvatarException('avatar is disposed');
     await _channel.invokeMethod('attachWebrtcRemoteAudio', {
@@ -537,6 +564,7 @@ class BithumanAvatar {
   /// Reverse of [attachWebrtcRemoteAudio] — also flushes any in-
   /// flight lipsync chunks so the mouth returns to idle when the
   /// session ends.
+  @override
   Future<void> detachWebrtcRemoteAudio() async {
     if (_disposed) return;
     await _channel.invokeMethod('detachWebrtcRemoteAudio', {

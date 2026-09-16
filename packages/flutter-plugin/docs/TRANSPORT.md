@@ -5,6 +5,29 @@ plugin native audio. Companion tooling: `scripts/stress-webrtc-iphone.sh`._
 
 ## 1. Current state (who owns audio, per platform)
 
+> ★**2026-09-16 — THE "Transport" ROW OF THE TABLE BELOW IS STALE, AND THE CODE IS
+> NOW THE ONLY PLACE TO READ IT.** The factory routes **every** cloud platform —
+> Android, iOS and macOS — to `WebSocketTransport`; `WebRTCTransport` is reached
+> only by `--dart-define=BITHUMAN_TRANSPORT=webrtc`, an A/B opt-in. The table's
+> "iOS cloud → `WebRTCTransport`" and "Android cloud → `WebRTCTransport`" cells
+> describe the 2026-06 arrangement and have not been true for some time. The same
+> wrong claim lived in a docstring directly above the branch that contradicted it,
+> which is what a reader auditing "does every target barge the same way?" would
+> have believed.
+>
+> The decision is no longer prose anywhere: it is `kTransportRegistry` in
+> `lib/src/voice_protocol.dart`, one `TransportDescriptor` per transport in
+> priority order, and `test/transport_registry_test.dart` grades the whole matrix
+> on every push — including the Android and iOS rows, which no test could reach
+> before because the platform was read from inside the factory.
+>
+> **What this note does NOT claim.** Only the routing was re-read from the code.
+> The AEC / lipsync / A/V-onset rows below, and everything in §2, were measured
+> against the WebRTC path in 2026-06 and are not re-verified here. A row that
+> says "libwebrtc ADM" describes the transport it names, not necessarily the
+> transport that platform takes today.
+
+
 | | macOS cloud | iOS cloud | Android cloud | local (macOS/iOS) |
 |---|---|---|---|---|
 | Transport | `WebSocketTransport` (`bithuman_realtime.dart`) | `WebRTCTransport` (`openai_webrtc_session.dart`) | `WebRTCTransport` | `LocalConverseTransport` |

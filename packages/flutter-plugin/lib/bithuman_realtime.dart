@@ -1,4 +1,12 @@
-// bithuman_realtime — OpenAI Realtime session wired to the bitHuman avatar.
+// bithuman_realtime — OpenAI Realtime session wired to a voice audio port.
+//
+// ★IT USED TO SAY "wired to the bitHuman avatar", and it used to import one.
+// It never needed a texture: what it asks of [VoiceAudioPort] is an audio
+// unit (start/stop, mic in, agent PCM out, cut the agent off). Holding the
+// render type instead meant a conversation could not be tested without first
+// building an avatar. The port is declared in `src/voice_protocol.dart` and
+// `BithumanAvatar` implements it, so passing an avatar here is unchanged for
+// every caller — and a test can pass something that is not one.
 //
 // Audio I/O is owned by the plugin's native VP-IO graph (see
 // macos/Classes/RealtimeAudioIO.swift). This session is responsible for
@@ -27,9 +35,13 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 
-import 'bithuman.dart';
 import 'src/dev_levers.dart';
 import 'src/echo_profile.dart';
+import 'src/voice_protocol.dart';
+
+/// The voice layer's own Layer-0 contract, re-exported so a caller can name
+/// the type it hands in (and stand something else in its place).
+export 'src/voice_protocol.dart' show VoiceAudioPort;
 
 /// One Realtime session over a single WebSocket.
 ///
@@ -49,7 +61,10 @@ class BithumanRealtimeSession {
   }
 
   final String apiKey;
-  final BithumanAvatar avatar;
+
+  /// The audio unit this session drives. `BithumanAvatar` implements it, so
+  /// `avatar: myAvatar` is the same call it always was.
+  final VoiceAudioPort avatar;
   final String model;
   final String systemPrompt;
   final String voice;
