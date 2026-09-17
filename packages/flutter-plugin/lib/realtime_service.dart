@@ -106,9 +106,13 @@ class RealtimeService {
         )
         .timeout(_attemptTimeout);
 
-    final http.Response resp;
+    // Nullable local then a final alias: Dart's flow analysis cannot prove a
+    // `final` is unassigned on entry to the catch (the throw could in principle
+    // follow the assignment), so assigning one in both branches is a compile
+    // error — "Final variable 'resp' might already be assigned at this point."
+    http.Response? attempted;
     try {
-      resp = await send();
+      attempted = await send();
     } on TimeoutException {
       // Deliberately NOT retried: at 50 s the edge has already given up
       // upstream, so a second attempt cannot find a faster server — it only
@@ -119,8 +123,9 @@ class RealtimeService {
       // handover). One retry, no backoff — this is not a load signal.
       // ignore: avoid_print
       print('[realtime] ephemeral-token transport failure; one retry');
-      resp = await send();
+      attempted = await send();
     }
+    final resp = attempted;
 
     if (resp.statusCode != 200) {
       throw Exception('Ephemeral token mint failed (${resp.statusCode}): ${resp.body}');
