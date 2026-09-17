@@ -1,4 +1,39 @@
-## Unreleased — not tagged, not published
+## 2.6.6 — 2026-09-17
+
+Tag `flutter-plugin-v2.6.6`. **expression-2 on Apple rendered ZERO frames — and did it
+while the app talked out loud.** Two independent defects, either one sufficient on its own
+(#77). Every Apple app that takes its models from this plugin alone was affected: the Mac
+and, unfixed until this tag, the iPhone.
+
+| | what shipped | what happened |
+|---|---|---|
+| `{macos,ios}/bithuman.podspec` | `s.resources = ['Assets/embody']` | CocoaPods resolves a file pattern **relative to the podspec** — `<plugin>/<plat>/Assets/embody`. `scripts/bootstrap.sh` staged the embody CoreML members one level up. The glob matched **nothing**, and an empty CocoaPods file pattern is not an error, so the build was green and the app carried no expression-2 graphs at all. |
+| `Expression2Container.unpack` | shipped in this pod, **called by nothing** | A downloaded agent arrives as a packed `IMX\0` container, while `Expression2Engine.modelURL`/`resURL` only join a NAME onto `activeAgentDir` — so every per-identity member resolved to a path *inside a file*. essence-2 already expanded its own container; expression-2 on Apple did not. |
+
+**Measured on the owner's iPhone 15, on the customer path, before and after.** Same phone,
+same `A02HCY0444.imx` in the app's own Documents, same cold launch:
+
+| | before (`flutter-plugin-v2.6.5`) | **after (this tag)** |
+|---|---|---|
+| `setExpression2AgentDir` | `→ …/Documents/A02HCY0444.imx` (a FILE, stored verbatim) | `[embody] container expanded A02HCY0444.imx → …/Library/Caches/expression2-unpacked/A02HCY0444` |
+| shared graphs | `[embody] MISSING w2v_frontend_cpuAndNE.mlpackage in bundle` | all four compiled from the bundle; `dec_p2 per-identity decoder ACTIVE` |
+| warmUp | `warmUp FAILED — missing model(s)` / `produced no idle frame` | `warmUp done — ready (idle=yes)`, `idle painted — engine live` |
+| idle clip | `idle clip unavailable: no idle.mp4 for this identity` | `idle clip open (200 frames, streamed in place, wraps at the authored end)` |
+| `.mlpackage` in the shipped `.app` | **0** | **4** |
+
+★**A `find` for `*.mlpackage` returning non-zero is necessary and nowhere near
+sufficient** — the app launched, connected, listened and answered out loud in the broken
+state too. Only the picture was missing, which is why this survived: `bithuman-jarvis-app`
+carries its own Runner *"Bundle embody models"* phase, so the dead glob never showed
+there, and `bithuman-examples`' `app/avatar_chat` — the app on the phones and the Mac —
+has no such phase.
+
+A DIRECTORY agent path still passes through untouched; only a FILE is expanded, and an
+expansion that fails returns the path **unchanged** and logs why, so the engine keeps
+refusing loudly by name rather than quietly rendering a neighbouring identity.
+
+---
+
 
 **The Dart voice module stopped importing the render module.** `bithuman_realtime.dart`
 and `realtime_transport.dart` opened with `import 'bithuman.dart'` and four constructors
