@@ -30,7 +30,8 @@ pubspec.lock
 macos/Frameworks/*.xcframework
 ios/Frameworks/*.xcframework
 ios/Vendor/third_party
-Assets/embody/
+# staged per platform, because that is where each podspec globs it
+**/Assets/embody/
 
 # Staged engine SDK surfaces (M1) — copied per-clone by scripts/bootstrap.sh
 # from each engine repo (essence-2/sdk, …); never committed.
