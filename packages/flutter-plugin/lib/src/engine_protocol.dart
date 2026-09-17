@@ -12,8 +12,9 @@
 // `EngineDescriptor` entry.
 //
 // CLOUD-API NAMES (added without disturbing the frozen on-device slugs): the
-// public REST/cloud taxonomy uses HYPHENATED names — `expression-2`,
-// `essence-2-light`, `essence-2-mobile`. Each maps onto an on-device engine
+// public REST/cloud taxonomy uses HYPHENATED names — the current ones are
+// `expression-2` and `essence-2`; `essence-2-light` and `essence-2-mobile` are
+// RETIRED spellings of `essence-2` that stay accepted. Each maps onto an engine
 // and is carried here as an ADDITIONAL frozen alias (dual-accept widens to
 // multi-accept; the canonical + the legacy `embody` / `elevate` slugs keep
 // matching byte-for-byte). A slug none of them matches is unknown, and
@@ -64,14 +65,16 @@ const EngineDescriptor kExpression2 = EngineDescriptor(
   engineAbi: 1,
 );
 
-/// Essence 2 (elevate) — the on-device director-avatar (a2x) engine. This is the
-/// on-device leg of the cloud **light** tier, so the cloud names `essence-2-light`
-/// and `essence-2-mobile` (the App-Store-facing on-device name) both resolve here,
-/// as does the COMBINED creation name `essence-2` (model-release UX 2026-07-02:
-/// the platform stores `agents.model='essence-2'` verbatim and folds it onto the
-/// light family everywhere — the family this engine serves on-device).
-/// Aliases: `elevate` (legacy on-device slug, FROZEN) + the cloud light names +
-/// the combined name.
+/// Essence 2 — the on-device director-avatar (a2x) engine. **`essence-2` is the
+/// name**; write it and nothing else. The other three slugs below are RETIRED
+/// spellings kept only so links, share JWTs and stored rows minted under them
+/// keep resolving: `elevate` (the pre-launch on-device slug), `essence-2-light`
+/// (the retired tier name for this same engine — retired 2026-07-05, and the
+/// owner restated it on 2026-09-17: "retire lightxxx, it should be just called
+/// essence-2") and `essence-2-mobile` (an old App-Store-facing name).
+/// Accept all four, teach exactly one. The alias STRINGS are frozen wire values
+/// and must not be respelled — a slug none of them matches is unknown, and
+/// `engineDescriptorFor` returns null for it.
 const EngineDescriptor kEssence2 = EngineDescriptor(
   canonical: 'essence2',
   aliases: <String>['elevate', 'essence-2', 'essence-2-light', 'essence-2-mobile'],
