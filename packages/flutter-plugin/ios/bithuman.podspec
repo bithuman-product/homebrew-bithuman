@@ -92,7 +92,11 @@ Pod::Spec.new do |s|
   s.public_header_files = 'Classes/**/*.h', 'Engines/**/include/**/*.h'
   # Assets/embody — the per-agent embody CoreML models (the A42 demo bundle).
   # Expression2Runtime probes Bundle subdirectory "embody". Populated by
-  # scripts/bootstrap.sh (not committed).
+  # scripts/bootstrap.sh (not committed) at <plugin>/ios/Assets/embody — this
+  # pattern is resolved RELATIVE TO THIS PODSPEC, and bootstrap used to land the
+  # members one level up at <plugin>/Assets/embody, where this glob could never see
+  # them. An empty CocoaPods file pattern is not an error, so the app built green
+  # and shipped no expression-2 graphs at all.
   pod_resources = ['Assets/embody']
   # PLUS libessence2's iOS-DEVICE runtime resource bundles when essence2 is
   # vendored (the iOS metallib is per-platform — NOT the macOS one):

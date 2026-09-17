@@ -264,15 +264,17 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
     // dual-accept: "setExpression2AgentDir" is canonical; "setEmbodyAgentDir" stays
     // accepted forever (cross-boundary SDK↔app channel string contract).
     case "setExpression2AgentDir", "setEmbodyAgentDir":
-      // Gallery: point the expression-2 runtime at a DOWNLOADED per-agent model dir
-      // (student + audiotokenizer + canon). Pass null/"" to revert to the bundled
+      // Gallery: point the expression-2 runtime at a DOWNLOADED per-agent model —
+      // a DIRECTORY of members, or the packed `IMX\0` container the download
+      // endpoint vends, which is expanded here (see bhResolveExpression2AgentDir).
+      // Pass null/"" to revert to the bundled
       // default (A42). The shared w2v/taehv graphs always come from the app
       // bundle. Set BEFORE the next `load` (engine: expression2) so the new
       // Expression2Runtime warms from this dir. Both platforms: the expression-2
       // adapter is compiled for iOS and macOS alike, and a downloaded or pushed agent
       // is the ONLY way a phone can render anything but the bundled default.
       let dir = (call.arguments as? [String: Any])?["dir"] as? String
-      Expression2Engine.activeAgentDir = (dir?.isEmpty ?? true) ? nil : dir
+      Expression2Engine.activeAgentDir = bhResolveExpression2AgentDir(dir)
       NSLog("[BithumanAvatar] setExpression2AgentDir → %@", Expression2Engine.activeAgentDir ?? "<bundled default>")
       result(nil)
 
@@ -1965,6 +1967,54 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     latestPixelBuffer = nil
     pixelBufferLock.unlock()
     pixelBufferPool = nil
+  }
+}
+
+// ------- ADOPTION: expand a PACKED agent container (2026-09-17) -------
+// `Expression2Container.unpack` shipped in THIS pod and nothing on the plugin path
+// called it. A downloaded expression-2 agent arrives as a packed `IMX\0` container
+// (`<CODE>.imx`), while `Expression2Engine.modelURL` / `resURL` only ever join a NAME
+// onto `activeAgentDir` -- so a packed FILE resolved every per-identity member to a
+// path that cannot exist. Measured on echelon (macOS 26.6.2) 2026-09-16, with the
+// shared graphs supplied by hand so the refusal could not be blamed on them:
+//     [embody] decp2 members missing/unloadable -- REFUSING
+//     [embody] warmUp produced no idle frame
+// while dec_p2_v3_all.mlpackage, canon.f32 and idle.mp4 were all sitting inside the
+// container the app had been handed. essence-2 already expands its own container
+// (~/Library/Caches/essence2-unpacked/<sha>); expression-2 on Apple did not, and that
+// asymmetry -- not a missing member -- is why the macOS app rendered nothing.
+//
+// A DIRECTORY passes through untouched. Only a FILE is expanded, and it is expanded
+// FRESH: the unpacker states it does not cache, and that a caller wanting a cache must
+// own the staleness question with the container bytes in hand. An expansion that fails
+// returns the path UNCHANGED and says so, so the engine still refuses loudly by name
+// rather than silently rendering a neighbouring identity.
+fileprivate func bhResolveExpression2AgentDir(_ path: String?) -> String? {
+  guard let p = path, !p.isEmpty else { return nil }
+  var isDir: ObjCBool = false
+  guard FileManager.default.fileExists(atPath: p, isDirectory: &isDir) else { return p }
+  if isDir.boolValue { return p }
+  let url = URL(fileURLWithPath: p)
+  guard Expression2Container.isContainer(url) else {
+    NSLog("[embody] agent path %@ is a FILE but not an IMX container - passed through unchanged", p)
+    return p
+  }
+  let base = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first
+           ?? NSTemporaryDirectory()
+  let dest = URL(fileURLWithPath: base)
+    .appendingPathComponent("expression2-unpacked")
+    .appendingPathComponent(url.deletingPathExtension().lastPathComponent)
+  do {
+    try? FileManager.default.removeItem(at: dest)
+    try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+    let t0 = CFAbsoluteTimeGetCurrent()
+    let names = try Expression2Container.unpack(url, to: dest)
+    NSLog("[embody] container expanded %@ -> %@ (%d members, %.2fs)",
+          url.lastPathComponent, dest.path, names.count, CFAbsoluteTimeGetCurrent() - t0)
+    return dest.path
+  } catch {
+    NSLog("[embody] container expand FAILED for %@: %@ - path passed through unchanged; the engine refuses by name", p, "\(error)")
+    return p
   }
 }
 

@@ -26,7 +26,7 @@
 # embody-only via the ESSENCE2_AVAILABLE gate). A 3rd engine = one line in ENGINES.
 #
 # expression2 is SOURCE-ONLY: its bootstrap fetches the embody CoreML MODEL bundle
-# (no static lib), which the umbrella stages to Assets/embody — the FROZEN landing
+# (no static lib), which the umbrella stages to <plat>/Assets/embody — the FROZEN landing
 # Expression2Runtime/Expression2Engine probes via Bundle subdirectory "embody" and
 # the app's Runner "Bundle embody models" phase reads.
 #
@@ -38,7 +38,7 @@
 #     models load from ~/embody-ane at runtime; each engine SDK bootstrap runs
 #     in its own DEV mode.
 #
-# Nothing under <plat>/Frameworks/, <plat>/Engines/, or Assets/embody/ is
+# Nothing under <plat>/Frameworks/, <plat>/Engines/, or <plat>/Assets/embody/ is
 # committed. Re-running is safe. Apache-2.0; (c) bitHuman.
 
 set -euo pipefail
@@ -274,9 +274,29 @@ stage_expression2() {
     # Stage the embody CoreML models to Assets/embody (FROZEN landing) when the
     # engine bootstrap produced them (absent in DEV mode → runtime falls back).
     if [ -d "$sdk/Vendor/embody" ]; then
-        rm -rf "$PLUGIN_ROOT/Assets/embody"; mkdir -p "$PLUGIN_ROOT/Assets"
-        cp -R "$sdk/Vendor/embody" "$PLUGIN_ROOT/Assets/embody"
-        log "  staged embody models → Assets/embody ($(ls "$PLUGIN_ROOT/Assets/embody" | wc -l | tr -d ' ') items)"
+        # ONE LANDING PER PLATFORM, and it is the platform dir because that is where
+        # CocoaPods actually looks. `s.resources = ['Assets/embody']` in
+        # {macos,ios}/bithuman.podspec is resolved RELATIVE TO THE PODSPEC, i.e.
+        # <plugin>/<plat>/Assets/embody. This staged to <plugin>/Assets/embody, one
+        # level up, so the glob matched NOTHING — silently, because an empty CocoaPods
+        # file pattern is not an error. Measured on echelon 2026-09-16: a Release
+        # avatar_chat build's Pods-Runner-resources-Release-input-files.xcfilelist held
+        # five essence2 entries and zero embody ones, the shipped .app carried no
+        # .mlpackage at all, and the macOS app logged
+        #     [embody] MISSING w2v_frontend_cpuAndNE.mlpackage in bundle
+        #     [embody] warmUp FAILED - missing model(s)
+        # and rendered not one frame while talking normally. The iOS .app built the
+        # same evening carries the same nothing.
+        # (The product app hid this: bithuman-jarvis-app has its own Runner "Bundle
+        # embody models" phase, so the podspec's dead glob never showed there;
+        # app/avatar_chat - the app the phones and the Mac run - has no such phase.)
+        for plat in macos ios; do
+            rm -rf "$PLUGIN_ROOT/$plat/Assets/embody"; mkdir -p "$PLUGIN_ROOT/$plat/Assets"
+            # clonefile on APFS where it exists, so N platforms cost one copy on disk
+            cp -Rc "$sdk/Vendor/embody" "$PLUGIN_ROOT/$plat/Assets/embody" 2>/dev/null \
+                || cp -R "$sdk/Vendor/embody" "$PLUGIN_ROOT/$plat/Assets/embody"
+        done
+        log "  staged embody models → {macos,ios}/Assets/embody ($(ls "$PLUGIN_ROOT/macos/Assets/embody" | wc -l | tr -d ' ') items each)"
     else
         log "  no Vendor/embody (DEV mode) — embody loads from ~/embody-ane at runtime"
     fi
