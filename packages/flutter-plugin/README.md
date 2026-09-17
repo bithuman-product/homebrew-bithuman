@@ -17,10 +17,10 @@ Phase-4 asymmetric layout) to its own repo so the umbrella belongs to **neither*
 engine. The engines are now symmetric Layer-1 SDKs in their own repos, staged
 here by `scripts/bootstrap.sh`'s N-engine loop:
 
-- **expression2** (embody) — pure-Swift/CoreML, **SOURCE-ONLY** — from
+- **expression2** — pure-Swift/CoreML, **SOURCE-ONLY** — from
   [`models/expression-2/sdk`](https://github.com/bithuman-product/bithuman-models/tree/main/models/expression-2/sdk) in the `bithuman-models` engine monorepo (**REQUIRED**, the default engine).
-- **essence2** (Essence2 / a2x) — the `be_essence2_*` C ABI as a plain static
-  `libessence2.a` — from [`models/essence-2/sdk`](https://github.com/bithuman-product/bithuman-models/tree/main/models/essence-2/sdk) (**OPTIONAL**; a missing SDK / download degrades to embody-only via the `ESSENCE2_AVAILABLE` gate).
+- **essence2** — the `be_essence2_*` C ABI as a plain static
+  `libessence2.a` — from [`models/essence-2/sdk`](https://github.com/bithuman-product/bithuman-models/tree/main/models/essence-2/sdk) (**OPTIONAL**; a missing SDK / download degrades to expression-2-only via the `ESSENCE2_AVAILABLE` gate).
 
 The shared engine interface (`BithumanEngine`) + the Dart registry
 (`EngineDescriptor`/`kEngineRegistry`) come from Layer-0
@@ -32,7 +32,7 @@ half is git-dep'd and re-exported by `lib/engine_registry.dart`).
 
 The plugin resolves a (dual-accept) engine slug → an engine via
 `shared/Classes/EngineRegistry.swift` and drives whatever `any BithumanEngine`
-comes back **purely by `capabilities.driveModel`** — no `loadEmbody()`/
+comes back **purely by `capabilities.driveModel`** — no `loadExpression2()`/
 `loadEssence2()` hard-coding, no `engineKind == "essence2"` branches, no
 `avatar as? Essence2Runtime` downcast. `EngineRegistry.make(slug, ref)` is the
 **sole** place a concrete engine type is named (macOS-only). Both proven drive
@@ -41,7 +41,7 @@ loops are kept verbatim and selected by capability:
 - `.bufferedDisplayClock` (expression2) — producer buffers; a separate even 20 fps
   display tick; deep feed-ahead.
 - `.atomicSlotClock` (essence2) — a continuous slot clock; one atomic feed+pull
-  per tick (the byte-frozen a2x render path).
+  per tick (the byte-frozen essence-2 render path).
 
 ## INVARIANT #1 (the load-bearing constraint)
 
@@ -230,7 +230,7 @@ The session auto-reconnects WS drops with 1/2/4/8/16/30 s backoff (cap 30 s, 8 a
 
 | Platform | Status |
 | --- | --- |
-| macOS (Apple Silicon, 13.0+) | shipped — on-device expression-2 (CoreML/ANE) + optional on-device essence-2 (a2x) render + cloud/local brain |
+| macOS (Apple Silicon, 13.0+) | shipped — on-device expression-2 (CoreML/ANE) + optional on-device essence-2 render + cloud/local brain |
 | iOS (device, 16.0+) | cloud brain only — on-device avatar render is macOS-only today (`platforms: [macos]` in each engine manifest) |
 
 ## Set your Apple signing team
@@ -256,7 +256,7 @@ native deps into `<plat>/Frameworks/` + each engine under `<plat>/Engines/<engin
 - **`libconverse.xcframework`** — the on-device LOCAL-mode brain (llama.cpp +
   Supertonic). The ONE module-map xcframework (INVARIANT #1). Fetched from the
   `vendor-v1` embody Release.
-- **expression2** (REQUIRED) — its bootstrap fetches the embody CoreML model
+- **expression2** (REQUIRED) — its bootstrap fetches the expression-2 CoreML model
   bundle (the A42 demo). SOURCE-ONLY: no static lib. Adapter source →
   `Engines/expression2/Classes`; models → `Assets/embody`.
 - **essence2** (OPTIONAL) — its bootstrap fetches + sha-verifies the
@@ -264,7 +264,7 @@ native deps into `<plat>/Frameworks/` + each engine under `<plat>/Engines/<engin
   `LIBESSENCE2_SHA256` in `scripts/bootstrap.sh`, the same release
   `Package.swift`'s `essence2Tag` serves) and extracts the per-platform
   `libessence2.a` + resources → `Engines/essence2/{Classes,include,Vendor}`;
-  absent it, the build is byte-identical embody-only.
+  absent it, the build is byte-identical expression-2-only.
 
 macOS needs two Homebrew dylibs at link + runtime via `@rpath`:
 `brew install llama.cpp onnxruntime` (the app's xcconfig wires the `@rpath`). The
