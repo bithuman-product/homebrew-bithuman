@@ -40,9 +40,10 @@ import CoreVideo
 /// The aliases are the FROZEN dual-accept slugs (`embody` for expression2,
 /// `elevate` for essence2) — see the design's frozen-contracts section. Each
 /// engine's conformer ALSO carries its CLOUD-API name (`expression-2` for
-/// expression2; `essence-2-light` + `essence-2-mobile` for essence2) as an
-/// additional alias, so a slug arriving in the public/cloud taxonomy routes to
-/// the same on-device engine. A slug none of them matches is simply unknown —
+/// expression2; `essence-2` for essence2) plus that engine's RETIRED spellings
+/// (`essence-2-light`, `essence-2-mobile`) as additional aliases, so a slug
+/// arriving in the public/cloud taxonomy — current or retired — routes to the
+/// same on-device engine. Accept them all; write only the current name. A slug none of them matches is simply unknown —
 /// there is no third, "recognised but unservable" state on this surface.
 public struct EngineId: Hashable {
     public let canonical: String          // "expression2" | "essence2" | …

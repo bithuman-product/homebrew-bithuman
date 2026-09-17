@@ -41,11 +41,13 @@ enum EngineRegistry {
       id: EngineId(canonical: "expression2", aliases: ["embody", "expression-2"]),
       capabilities: .expression2),
     EngineRegistryDescriptor(
-      // essence2 aliases = frozen `elevate` + the cloud LIGHT-tier names + the
-      // COMBINED creation name `essence-2` (2026-07-02: agents.model stores it
-      // verbatim; the platform folds it onto the light family, whose on-device
-      // leg is this engine). Lockstep with Essence2Engine.id + the Dart
-      // kEssence2.
+      // `essence-2` IS the name — the other three are RETIRED spellings kept
+      // accepted so links, share JWTs and stored rows minted under them still
+      // resolve: `elevate` (pre-launch on-device slug), `essence-2-light` (the
+      // retired tier name for this same engine; owner 2026-09-17 "retire
+      // lightxxx, it should be just called essence-2") and `essence-2-mobile`
+      // (old App-Store name). Accept four, teach one. The strings are frozen
+      // wire values. Lockstep with Essence2Engine.id + the Dart kEssence2.
       id: EngineId(canonical: "essence2",
                    aliases: ["elevate", "essence-2", "essence-2-light", "essence-2-mobile"]),
       capabilities: .essence2),
@@ -83,8 +85,8 @@ enum EngineRegistry {
   static func make(_ slug: String, _ ref: AvatarRef) -> any BithumanEngine {
     #if ESSENCE2_AVAILABLE
     // Resolve through the registry so EVERY essence2 slug — the canonical, the
-    // frozen `elevate`, AND the cloud-API names `essence-2-light` /
-    // `essence-2-mobile` — lands here (not just an inline ["elevate"] list).
+    // frozen `elevate`, AND the retired `essence-2-light` / `essence-2-mobile`
+    // spellings — lands here (not just an inline ["elevate"] list).
     if canonical(for: slug) == "essence2" {
       // `ref.path` is the `.elevatedir`; `ref.motionDir` the actor .bhx (nil =
       // engine default). Set BEFORE init (Essence2Engine reads the statics).
