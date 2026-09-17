@@ -14,10 +14,17 @@
 // COMPILE-TIME proof as much as a runtime one: put `BithumanAvatar` back on
 // those constructors and this file does not compile.
 //
-// ★THE EXACT PARTITION. Reverting the edge (the `implements VoiceAudioPort`
-// clause, or the four parameter types) reddens this file and
-// `transport_registry_test.dart` and leaves avatar_fit / echo_profile /
-// essence2_catalog green — they never touch the voice layer.
+// ★THE EXACT PARTITION, MEASURED (scripts/ci/mutate_voice_render_edge.py M5,
+// graded per test FILE on 2026-09-16 — not asserted from reading). Dropping the
+// `implements VoiceAudioPort` clause reddens exactly four files: this one, and
+// the three `test/e2e/` files, which pass a REAL `BithumanAvatar` in and are
+// therefore the backward-compatibility half of the same claim. It leaves
+// avatar_fit / echo_profile / essence2_catalog green — they never touch voice —
+// AND it leaves `transport_registry_test.dart` green, because that file drives
+// the whole routing table through `FakeVoicePort` and never names the render
+// class at all. An earlier draft of this header claimed the registry test goes
+// red here; it does not, and a partition claim nobody ran is the same species of
+// defect as the factory docstring this change deleted.
 //
 // Run: flutter test test/voice_port_test.dart
 //

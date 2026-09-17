@@ -69,6 +69,63 @@ rule("R3b every one of the %d protocol members exists on the texture" % len(memb
      len(members) >= 12 and not missing,
      "declared in the protocol but absent from the plugin: " + ", ".join(missing or ["<protocol has too few members to be the real surface>"]))
 
+# ── R4: the DART voice layer does not import the DART render layer ───────────
+# The Swift rules above hold the native half of this boundary. The Dart half was
+# open until 2026-09-16: `bithuman_realtime.dart` and `realtime_transport.dart`
+# imported `package:bithuman/bithuman.dart` for exactly one reason — four
+# constructors took `required BithumanAvatar avatar` — so "test the conversation"
+# meant "build an avatar first". The port (`lib/src/voice_protocol.dart`) turned
+# that edge around. These rules are what stop it growing back, and unlike the
+# Swift rules they ARE also compiled: `flutter test` builds every one of these
+# libraries on the ubuntu runner in *flutter plugin tests*.
+L = root / "packages/flutter-plugin/lib"
+VOICE = ("bithuman_realtime.dart", "realtime_transport.dart",
+         "openai_webrtc_session.dart", "src/voice_protocol.dart")
+
+def render_imports(text):
+    out = []
+    for line in text.splitlines():
+        t = line.strip()
+        if not (t.startswith("import ") or t.startswith("export ")):
+            continue  # a COMMENT naming the file is not an edge
+        if "'package:bithuman/bithuman.dart'" in t or "'bithuman.dart'" in t:
+            out.append(t)
+    return out
+
+offenders = []
+for name in VOICE:
+    offenders += ["%s: %s" % (name, i) for i in render_imports((L / name).read_text(encoding="utf-8"))]
+rule("R4a the dart voice layer imports no render library", not offenders,
+     "; ".join(offenders))
+
+avatar_src = (L / "bithuman.dart").read_text(encoding="utf-8")
+rule("R4b the render class serves the voice port",
+     re.search(r"^class BithumanAvatar implements VoiceAudioPort \{", avatar_src, re.M) is not None,
+     "bithuman.dart must declare 'class BithumanAvatar implements VoiceAudioPort {' — "
+     "without it the edge is merely absent, and every caller passing an avatar breaks")
+
+# Every place the voice layer names the thing it drives must name the PORT. Five
+# sites: three transport constructors, pickTransport, and the session field.
+# ★COUNT CODE, NOT PROSE. The first draft of this rule counted the whole file and
+# went red on its own explanatory comment ("the four constructors took
+# `required BithumanAvatar avatar`"), which is a header, not an edge. A guard that
+# grades documentation is the defect this boundary already has a history of.
+def code_lines(name):
+    out = []
+    for line in (L / name).read_text(encoding="utf-8").splitlines():
+        t = line.strip()
+        if t.startswith("//") or t.startswith("///"):
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+DECL = ("realtime_transport.dart", "bithuman_realtime.dart")
+ports = sum(code_lines(n).count("VoiceAudioPort avatar") for n in DECL)
+stale = sum(code_lines(n).count("BithumanAvatar avatar") for n in DECL)
+rule("R4c all 5 voice-side avatar declarations are the port, none the render class",
+     ports == 5 and stale == 0,
+     "found %d port declarations (want 5) and %d render-class declarations (want 0)" % (ports, stale))
+
 print("voice/render edge: %d rules graded, %d failed" % (graded, len(fails)))
 sys.exit(1 if fails else 0)
 PY

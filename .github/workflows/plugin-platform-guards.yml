@@ -128,8 +128,14 @@ jobs:
         run: |
           set -u
           C=packages/flutter-plugin/shared/Classes
+          L=packages/flutter-plugin/lib
           cp $C/RealtimeAudioIO.swift /tmp/a.bak; cp $C/BithumanAvatarPlugin.swift /tmp/b.bak
-          restore() { cp /tmp/a.bak $C/RealtimeAudioIO.swift; cp /tmp/b.bak $C/BithumanAvatarPlugin.swift; }
+          # M5-M7 mutate the DART half of the same boundary, so the restore has to
+          # cover it too — otherwise the first dart mutation leaks into every
+          # later arm and the partition it reports is not the one it drew.
+          cp $L/realtime_transport.dart /tmp/c.bak; cp $L/bithuman.dart /tmp/d.bak
+          restore() { cp /tmp/a.bak $C/RealtimeAudioIO.swift; cp /tmp/b.bak $C/BithumanAvatarPlugin.swift; \
+                      cp /tmp/c.bak $L/realtime_transport.dart; cp /tmp/d.bak $L/bithuman.dart; }
           mutate() { python3 scripts/ci/mutate_voice_render_edge.py "$1"; }
           grade() {
             label="$1"; shift
@@ -147,4 +153,7 @@ jobs:
           mutate M2; grade "M2 audioStart binds a texture in its guard again" R2
           mutate M3; grade "M3 AvatarTexture stops declaring the conformance" R3a
           mutate M4; grade "M4 a protocol member vanishes from the texture" R3b
+          mutate M5; grade "M5 the dart voice layer imports render again" R4a
+          mutate M6; grade "M6 the render class stops serving the voice port" R4b
+          mutate M7; grade "M7 a voice declaration drifts back to the render class" R4c
           ./scripts/check_voice_render_edge.sh
