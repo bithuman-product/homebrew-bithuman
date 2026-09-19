@@ -100,20 +100,23 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 
 # The bithuman-models revision whose engine ADAPTER SOURCE (models/*/sdk/Classes)
 # this pod compiles. A full 40-hex commit sha — never a branch.
-# 6bed5ee7a = 2026-09-16, the tree the essence2-v1.8.0 / v2.6.4 Apple builds ran on
-# — bithuman-models #774, the commit that stops a barge-in rewinding the driver
-# video to frame 0, and the exact tree apple-xcframework.yml built the pinned
+# 92d9d9d56 = 2026-09-19, the tree the essence2-v1.9.0 Apple build ran on
+# — bithuman-models #944 + #948: the donor-only head and the lip contour on the
+# borrow field reach a published engine for the first time (v1.8.0 measured a
+# 9.8% synthesized mouth and a silent ellipse; v1.9.0 reads 0.0/0.0 and names
+# its mask), and the native CoreML director binds `lip_delivery` from the
+# bundle's lip template — the exact tree apple-xcframework.yml built the pinned
 # engine from.
-BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-6bed5ee7a8a4f0a674cdc47f00c93ee420d69b5d}"
+BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-92d9d9d569f96e61116f2881b65116c43b3bc0ff}"
 
 # The essence-2 Apple ENGINE + its runtime RESOURCES. One release carries both.
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
 # `libessence2.xcframework.zip` binaryTarget checksum and the release's own
 # resources sidecar. Passed to the engine SDK bootstrap explicitly below.
-LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.8.0}"
-LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-06be42fec2b194752214e7ae16fa2bbb5de75d358e5de977c8e2549a9ca58348}"
-LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.8.0}"
-LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-cc3a5150b059497f18fc0de5aa31c9b790a60090d2f6c6b7cf1c446f8e76a2b4}"
+LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.9.0}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-8c35d48257bb3abf7fae80d52a29a957e094f04175c46254d1e8d758c2d925e4}"
+LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.9.0}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-72ffc3f6370e1ef934975e4e060301830f69fc453ba2ca1afae812937eb89e5e}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so
