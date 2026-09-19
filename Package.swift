@@ -624,32 +624,32 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // The onnxruntime archive is carried forward BYTE-IDENTICAL (same release
 // asset, digest re-measured after upload), so its checksum does not move.
 // ---------------------------------------------------------------------------
-// ★ ROLLED 2026-09-19 ONTO essence2-v1.9.0 — THE TWO MASKS AGREE ON APPLE, AND
-// THE PUBLISHED ENGINE STOPS DELIVERING A PARTLY SYNTHESIZED MOUTH.
-// bithuman-models #944 + #948 (main 92d9d9d56). Measured on the v1.8.0
-// bytes (the slice this file pinned until now) with the engine's own per-pixel
-// census: synth_w 0.0978 mean / 0.9991 max over 717 composed frames on
-// A23KSG5258 — ~9.8% of the mouth band GENERATED on average, some pixels
-// fully generated — and no delivery-mask line at all (the silent ELLIPSE).
-// The donor-only head (a0f581ce5) and the native lip contour on the borrow
-// field (72ac39e81) both post-date the v1.8.0 tag: v1.9.0 is the first
-// published engine that carries them, and it reads 0.0 / 0.0.
+// ★ ROLLED 2026-09-19 ONTO essence2-v1.9.0 — THE PUBLISHED ENGINE STOPS
+// DELIVERING A PARTLY GENERATED MOUTH, AND ITS TWO MOUTH MASKS AGREE.
+// bithuman-models #944 + #948 (main 92d9d9d56). Measured on the v1.8.0 bytes
+// (the slice this file pinned until now) with the engine's own per-pixel
+// census: 0.0978 mean / 0.9991 max generated share over 717 rendered frames on
+// A23KSG5258 — ~9.8% of the mouth band generated on average, some pixels fully
+// generated — and no mouth-mask line on the log at all (the silent ELLIPSE).
+// The source-only head (a0f581ce5) and the native lip contour (72ac39e81) both
+// post-date the v1.8.0 tag: v1.9.0 is the first published engine that carries
+// them, and it reads 0.0 / 0.0.
 //
-// And the reader half: the native CoreML director now binds a 5th input
+// And the reader half: the bundle's native CoreML model now takes a 5th input
 // `lip_delivery` from the bundle's `lip_template.v1.json` — the same contour
-// TeethPass shrinks its borrow window by, now applied to the graph's OWN
-// compose alpha, the mask that actually draws the elliptical region on the
-// chin. A bundle whose director is still the 4-input package beside a template
-// (every door bundle today) is REFUSED by name and falls back to onnxruntime:
-// same picture, the reason on the log, until the door re-distributes bound
-// packages. Four states, each named on stderr; none silent.
+// the teeth path already uses, now applied to the model's OWN blend mask, the
+// one that actually draws the elliptical region on the chin. A bundle whose
+// CoreML model is still the 4-input package beside a template (every served
+// bundle today) is REFUSED by name and rendered through onnxruntime instead:
+// same picture, the reason on the log, until bundles are re-published with
+// the 5-input package. Four states, each named on stderr; none silent.
 //
-// GRADED ON THE PUBLISHED SLICE, the same probe, the same door container and
+// GRADED ON THE PUBLISHED SLICE, the same probe, the same container and
 // drive, three arms (bithuman-models
 // proof/evidence/apple_lipdel_reader_20260919/ and the #948 body):
-//     bound package + template     lip_delivery: BOUND  | LIP CONTOUR | 0.0 / 0.0 | 717 frames, passthrough 0
-//     bound package, no template   lip_delivery: ONES   | ELLIPSE     | 0.0 / 0.0 | 717 / 0
-//     the door as served (4-input) REFUSED -> onnxruntime | LIP CONTOUR | 0.0 / 0.0 | 717 / 0
+//     5-input package + template   lip_delivery: BOUND   | LIP CONTOUR | 0.0 / 0.0 | 717 frames, none skipped
+//     5-input package, no template lip_delivery: ONES    | ELLIPSE     | 0.0 / 0.0 | 717 / none skipped
+//     as served today (4-input)    REFUSED -> onnxruntime | LIP CONTOUR | 0.0 / 0.0 | 717 / none skipped
 // The archive was re-downloaded ANONYMOUSLY from this tap after upload and
 // re-hashed to 8c35d482… against its sidecar AND the checksum below.
 // onnxruntime is carried forward byte-identical again.
