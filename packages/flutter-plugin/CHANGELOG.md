@@ -1,21 +1,22 @@
 ## 2.6.7 — 2026-09-19
 
 Tag `flutter-plugin-v2.6.7`. **Both Apple paths move to `essence2-v1.9.0` — the first published
-engine whose mouth is 100% borrowed, and whose native director reads the lip contour.**
+engine whose mouth is 100% taken from the source video, and whose native CoreML model reads the
+lip contour.**
 
 Measured on the `essence2-v1.8.0` bytes this plugin pinned until now, with the engine's own
-per-pixel census on A23KSG5258 (bithuman-models #944): `synth_w` **0.0978 mean / 0.9991 max**
-over 717 composed frames — ~9.8% of the mouth band generated on average, some pixels fully
-generated — and no delivery-mask line at all (the silent ELLIPSE). The donor-only head and the
-native lip contour on the borrow field both post-date the v1.8.0 tag. `essence2-v1.9.0` reads
-**0.0 / 0.0** and names its mask on every session.
+per-pixel census on A23KSG5258 (bithuman-models #944): generated share **0.0978 mean / 0.9991
+max** over 717 rendered frames — ~9.8% of the mouth band generated on average, some pixels fully
+generated — and no mouth-mask line at all (the silent ELLIPSE). The source-only head and the
+native lip contour both post-date the v1.8.0 tag. `essence2-v1.9.0` reads **0.0 / 0.0** and names
+its mask on every session.
 
-And the reader (#948): the bundle's native CoreML director now binds a 5th input `lip_delivery`
-from `lip_template.v1.json`, so the graph's OWN compose alpha — the mask that draws the
-elliptical region on the chin — is shrunk by the same contour TeethPass borrows inside. A bundle
-whose director is still the 4-input package beside a template (every door bundle today) is
-REFUSED by name and rendered through onnxruntime instead: same picture, the reason on the log,
-until the door re-distributes bound packages.
+And the reader (#948): the bundle's native CoreML model now takes a 5th input `lip_delivery` from
+`lip_template.v1.json`, so the model's OWN blend mask — the one that draws the elliptical region on
+the chin — is shrunk by the same contour the teeth path already uses. A bundle whose CoreML model is
+still the 4-input package beside a template (every served bundle today) is REFUSED by name and
+rendered through onnxruntime instead: same picture, the reason on the log, until bundles are
+re-published with the 5-input package.
 
 NO PLUGIN SOURCE CHANGE. `LIBESSENCE2_*` and `BITHUMAN_MODELS_REF` in `scripts/bootstrap.sh` move
 with `Package.swift`'s `essence2Tag` + checksum in one commit (`check-apple-engine-pin.sh` A1..A5).
