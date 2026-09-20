@@ -84,6 +84,26 @@ dependencies {
     // `Essence2Avatar.idle` and a meter that refuses without a credential rather than
     // rendering free.
     //
+    // 0.5.12 (public on Central since 2026-09-19, lastUpdated 20260919172817): ESSENCE 2
+    // DRAWS THE MOUTH WITH THE IDENTITY'S OWN LIP CONTOUR. Every Android AAR before it
+    // drew that region as a wider ellipse — not for want of the contour (the engine has
+    // carried the bind since 0.5.11) but because the Android publishing step rewrote each
+    // identity's model onto a mouth tile whose shape the load-time bind does not
+    // recognise, so on Android alone the bind declined and the wider region is what a
+    // customer saw. 0.5.12 publishes the plain student form for the Android row and the
+    // bind takes. Measured through the PUBLISHED bytes on an SM-S936U1 rendering
+    // A23KSG5258: the engine reports the lip contour bound at load (20 verts, feather
+    // 6.0 px) and that the wider region is not reachable in that session, its refusal
+    // line — which IS compiled into the shipped library, so the path can decline — never
+    // fires, and the mouth is still taken entirely from the identity's own recorded
+    // texture (0.000000 mean / 0.000000 max generated share over 62 rendered frames).
+    // Measured on the pin itself, 2026-09-20: Gradle resolves this coordinate from
+    // repo1.maven.org, a release APK built against it carries lible_jni.so byte-identical
+    // (sha256 083ee4e5950ba3da…) to the one inside Central's AAR, and that library answers
+    // `strings … lip_delivery` 4 where 0.5.10's answers 0. AAR sha256
+    // 8512fc644bcbed156d5656409082faf0e02eabbbf699e4e757d35213995823ac (12,090,958 B) ==
+    // Central's own .sha256 sidecar, fetched anonymously.
+    //
     // ★ THE PIN MOVES ONLY AFTER CENTRAL SERVES THE VERSION, NEVER AFTER A LOCAL PUBLISH.
     // `mavenLocal()` is in the repository list below mavenCentral(), and measured
     // 2026-09-16 it cannot SHADOW a version Central serves — a poisoned ~/.m2 holding a
@@ -91,8 +111,8 @@ dependencies {
     // supply a version Central LACKS, which is how plugin 2.4.0 came to import a class
     // Central's 0.4.6 did not have: `publishToMavenLocal` plus a pin bump compiles green
     // while no customer can resolve it. This pin was moved only once repo1.maven.org
-    // served 0.5.10.
-    implementation 'ai.bithuman:essence2-android:0.5.10'
+    // served 0.5.12 (fetched anonymously 2026-09-20; the sha256 above is the sidecar's).
+    implementation 'ai.bithuman:essence2-android:0.5.12'
     implementation 'com.qualcomm.qti:qnn-litert-delegate:2.49.0'
     implementation 'com.qualcomm.qti:qnn-runtime:2.49.0'
 }
