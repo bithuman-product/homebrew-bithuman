@@ -148,6 +148,16 @@ jobs:
           sys.exit(1 if red else 0)
           PY
 
+      # ★THE SHIPPED SLICES DRAW THE LIP CONTOUR, NOT THE GRAPH'S ELLIPSE
+      # (2026-09-20). essence2-v1.8.0 was re-hosted here with 0 `lip_delivery`
+      # in every slice — the ellipse core — and nothing on this road asked; the
+      # CLI and Android coordinates shipped the same defect the same week.
+      # scripts/check-xcframework-contour.sh reads the bind's one spelling off
+      # each libessence2.a (raw bytes on stdin) and refuses at 0. Measured on
+      # this repo's published archives: v1.8.0 REFUSED x3, v1.9.0 7 x3 passes.
+      - name: Every slice carries the lip-contour bind (lip_delivery) — the ellipse core is not re-hosted
+        run: bash scripts/check-xcframework-contour.sh src/libessence2.xcframework.zip
+
       - name: The SwiftPM checksum the manifest will pin
         run: |
           set -euo pipefail
