@@ -13,9 +13,10 @@
 # the SHIPPED bytes for the bind. This is that read for the Apple package: the
 # one spelling the bind cannot be built without, `lip_delivery` (the ORT input
 # the template is fed through and the `[le] … LIP CONTOUR` load line),
-# counted in each libessence2.a slice. A `[borrow] delivery mask: LIP CONTOUR`
-# string is NOT that fact — the ellipse cores spell it too (the teeth borrow
-# mask, a different mask).
+# counted in each libessence2.a slice. ★AND ONLY THAT SPELLING: a slice that
+# merely says `LIP CONTOUR` somewhere is NOT the fact — the ellipse slices
+# spell that too, in a line about a DIFFERENT mask (the teeth stage's), which
+# is exactly how a `grep "LIP CONTOUR"` reads green on the defect.
 #
 # Measured on the PUBLISHED archives of this repo, every slice:
 #   essence2-v1.8.0  lip_delivery=0 x3   (the ellipse; REFUSED here)
