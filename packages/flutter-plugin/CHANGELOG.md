@@ -1,3 +1,31 @@
+## 2.6.8 — unreleased — Essence 2 on Android draws the mouth with the identity's own lip contour
+
+`ai.bithuman:essence2-android` **0.5.10 → 0.5.12** (public on Maven Central since
+2026-09-19, `lastUpdated` 20260919172817). Until 0.5.12 every Android AAR drew that region
+as a wider ellipse — not for want of the contour (the engine has carried the bind since
+0.5.11) but because the Android publishing step rewrote each identity's model onto a mouth
+tile whose shape the load-time bind does not recognise, so on Android alone the bind
+declined. 0.5.12 publishes the plain student form for the Android row and the bind takes.
+
+Measured through the **published** bytes, on an SM-S936U1 rendering `A23KSG5258`: the
+engine reports the lip contour bound at load (20 verts, feather 6.0 px) and that the wider
+region is not reachable in that session; its refusal line — which **is** compiled into the
+shipped library, so the path can decline — never fires; and the mouth is still taken
+entirely from the identity's own recorded texture, **0.000000 mean / 0.000000 max**
+generated share over 62 rendered frames.
+
+Measured on the pin itself, 2026-09-20, from this repository: Gradle resolves
+`ai.bithuman:essence2-android:0.5.12` from repo1.maven.org, a release APK built against it
+carries `lible_jni.so` **byte-identical** (sha256 `083ee4e5950ba3da…`) to the one inside
+Central's AAR, and that library answers `strings … lip_delivery` **4** where 0.5.10's
+answers **0**.
+
+**No plugin source change.** AAR sha256
+`8512fc644bcbed156d5656409082faf0e02eabbbf699e4e757d35213995823ac` (12,090,958 B) ==
+Central's own `.sha256` sidecar. An app reaches this only through a published tag: the
+example app pins `flutter-plugin-v2.6.6`, so its Essence 2 build keeps the older mouth
+until a tag carrying this pin is published and that ref moves.
+
 ## 2.6.7 — 2026-09-19
 
 Tag `flutter-plugin-v2.6.7`. **Both Apple paths move to `essence2-v1.9.0` — the first published
