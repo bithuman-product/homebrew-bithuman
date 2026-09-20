@@ -387,8 +387,8 @@ class BithumanCli < Formula
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.24/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "943120f60b52348ad5ef496cd7f386a9248edefbbbdfbff9d1ad7bc39cc4c879"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.25/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "06b9f2e79c4fc5d0db5055f8ed6e2738a633e500af8286ff04ffc8f89598c196"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
