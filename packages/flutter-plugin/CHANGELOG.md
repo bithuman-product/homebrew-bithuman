@@ -1,4 +1,8 @@
-## 2.6.8 — unreleased — Essence 2 on Android draws the mouth with the identity's own lip contour
+## 2.6.8 — 2026-09-20 — Essence 2 on Android draws the mouth with the identity's own lip contour
+
+Tag `flutter-plugin-v2.6.8`. **An app that pins this tag gets the mouth drawn by the
+identity's own lip contour**; `flutter-plugin-v2.6.7` and earlier resolve an engine that
+draws it as a wider ellipse.
 
 `ai.bithuman:essence2-android` **0.5.10 → 0.5.12** (public on Maven Central since
 2026-09-19, `lastUpdated` 20260919172817). Until 0.5.12 every Android AAR drew that region
@@ -22,9 +26,10 @@ answers **0**.
 
 **No plugin source change.** AAR sha256
 `8512fc644bcbed156d5656409082faf0e02eabbbf699e4e757d35213995823ac` (12,090,958 B) ==
-Central's own `.sha256` sidecar. An app reaches this only through a published tag: the
-example app pins `flutter-plugin-v2.6.6`, so its Essence 2 build keeps the older mouth
-until a tag carrying this pin is published and that ref moves.
+Central's own `.sha256` sidecar. An app reaches this only through a published tag, which
+is what `flutter-plugin-v2.6.8` is for: the example app moves its `ref:` from
+`flutter-plugin-v2.6.6` to this tag, and until an app moves its own ref it keeps
+resolving whatever engine its pinned tag named.
 
 ## 2.6.7 — 2026-09-19
 
