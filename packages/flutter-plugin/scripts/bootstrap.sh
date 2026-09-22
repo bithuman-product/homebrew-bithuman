@@ -112,10 +112,34 @@ BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-92d9d9d569f96e61116f2881b65116c43b3b
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
 # `libessence2.xcframework.zip` binaryTarget checksum and the release's own
 # resources sidecar. Passed to the engine SDK bootstrap explicitly below.
-LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.9.0}"
-LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-8c35d48257bb3abf7fae80d52a29a957e094f04175c46254d1e8d758c2d925e4}"
-LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.9.0}"
-LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-72ffc3f6370e1ef934975e4e060301830f69fc453ba2ca1afae812937eb89e5e}"
+LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.10.0}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-a8c6271afe594f723c5797f1608fe790b5d168eff8ce6e9342733a064bc10ea4}"
+LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.10.0}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-66ba4867caac0cc6bc02c154a5d1009abf352ad9ec2dedb1b08482b5a6a3b13d}"
+
+# The UnifiedModelHeader module, as a plain static .a per slice.
+#
+# ★WHY A POD THAT NEVER WRITES `import UnifiedModelHeader` HAS TO STAGE IT.
+# From essence2-v1.10.0 `libessence2.a` no longer DEFINES the UnifiedModelHeader
+# symbols — it was libtool'd from the engine's whole Swift closure and that
+# closure carried them, which made any app that linked BOTH published Apple
+# products collide on 112 duplicate symbols. The archive now REFERENCES them
+# (14 on ios-arm64 / macos-arm64, 6 on the simulator), so whatever links
+# libessence2.a must also link something that defines them, or the Runner app
+# fails at its FINAL link with
+#     "static UnifiedModelHeader.EngineLoaderRegistry.shared.getter : …",
+#       referenced from: libessence2.a[5](UnifiedEngineDispatch.o)
+# — a failure this pod's own build never shows, because a pod is compiled, not
+# linked.
+#
+# It goes in beside libessence2.a as a PLAIN STATIC LIB, which is exactly what
+# INVARIANT #1 in both podspecs demands and what their
+# `Engines/*/Vendor/*.a` glob already picks up — so neither podspec changes.
+# The bytes come from the same public tap release the SwiftPM
+# `UnifiedModelHeaderBinary` binaryTarget pins, at `expression2Tag`; the digest
+# below is that binaryTarget's checksum, and a mismatch is a refusal.
+UMH_RELEASE="${UMH_RELEASE:-v2.6.3}"
+UMH_SHA256="${UMH_SHA256:-a8bf748cd564dc1348eb3c8f789fbc1e79077d34bdacb7755c5135c4abc744a5}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so
@@ -307,8 +331,44 @@ stage_expression2() {
 # ------------------------------------------------- engine #2: essence2 (OPTIONAL)
 # Stage one platform's pod surface from the essence-2 SDK, IF that platform's
 # slice (its libessence2.a) exists. Classes + header travel with the slice.
-stage_essence2_plat() {  # $1=plat, $2=slice .a path, $3=resources dir, $4=sdk path
-    local plat="$1" a="$2" res="$3" sdk="$4"
+# Download UnifiedModelHeader.xcframework ONCE per run and hand out slices.
+# Anonymous: the asset is on the public tap, the same one the SwiftPM
+# binaryTarget reads. Digest PINNED above and checked here — a 200 means a
+# server answered, not that the bytes are the bytes.
+UMH_XCF_DIR=""
+fetch_umh_xcframework() {
+    [ -n "$UMH_XCF_DIR" ] && return 0
+    command -v curl  >/dev/null 2>&1 || { warn "no curl — cannot stage UnifiedModelHeader"; return 1; }
+    command -v unzip >/dev/null 2>&1 || { warn "no unzip — cannot stage UnifiedModelHeader"; return 1; }
+    local dl; dl="$(mktemp -d)"
+    local url="https://github.com/bithuman-product/homebrew-bithuman/releases/download/$UMH_RELEASE/UnifiedModelHeader.xcframework.zip"
+    curl -fsSL --retry 2 -o "$dl/umh.zip" "$url" || { warn "could not fetch $url"; return 1; }
+    local got; got="$(shasum -a 256 "$dl/umh.zip" | cut -d' ' -f1)"
+    [ "$got" = "$UMH_SHA256" ] || die "sha256 MISMATCH for UnifiedModelHeader.xcframework.zip — refusing to install
+  expected $UMH_SHA256
+  actual   $got"
+    unzip -q -o "$dl/umh.zip" -d "$dl" || { warn "could not unzip UnifiedModelHeader.xcframework.zip"; return 1; }
+    [ -d "$dl/UnifiedModelHeader.xcframework" ] || { warn "unexpected archive shape"; return 1; }
+    UMH_XCF_DIR="$dl/UnifiedModelHeader.xcframework"
+    log "  UnifiedModelHeader.xcframework verified against the pinned digest ($got)"
+    return 0
+}
+
+# $1 = xcframework slice id, $2 = destination .a
+stage_umh_slice() {
+    local slice="$1" dest="$2"
+    fetch_umh_xcframework || return 1
+    local bin="$UMH_XCF_DIR/$slice/UnifiedModelHeader.framework/UnifiedModelHeader"
+    [ -f "$bin" ] || { warn "UnifiedModelHeader.xcframework has no $slice slice"; return 1; }
+    # It is already a static archive (`libtool -static` over one object in
+    # models/expression-2/sdk/scripts/build-xcframework.sh), so this is a copy
+    # under a name the podspec glob recognises — not a repack.
+    cp "$bin" "$dest"
+    return 0
+}
+
+stage_essence2_plat() {  # $1=plat, $2=slice .a path, $3=resources dir, $4=sdk path, $5=UMH slice id
+    local plat="$1" a="$2" res="$3" sdk="$4" umh_slice="$5"
     [ -f "$a" ] || return 0
     local base="$PLUGIN_ROOT/$plat/Engines/essence2"
     rm -rf "$base"; mkdir -p "$base/Classes" "$base/include" "$base/Vendor"
@@ -316,6 +376,31 @@ stage_essence2_plat() {  # $1=plat, $2=slice .a path, $3=resources dir, $4=sdk p
     cp "$sdk"/include/*.h      "$base/include/"
     cp "$a" "$base/Vendor/libessence2.a"
     [ -d "$res" ] && cp -R "$res" "$base/Vendor/essence2-resources"
+    # ★REFUSE RATHER THAN STAGE HALF AN ENGINE. An archive that references
+    # UnifiedModelHeader with nothing beside it that defines those symbols is a
+    # pod that installs cleanly and breaks the app's final link — the failure
+    # lands on the customer's build, far from here. Only slices that actually
+    # need it are gated: `nm -u` on the staged bytes decides, so an older
+    # self-contained libessence2.a still stages exactly as before.
+    # ★ASK THE ARCHIVE, AND ASK IT CORRECTLY. Two readings of this test were
+    # measured wrong on echelon 2026-09-21 before it settled, and both fail in
+    # the dangerous direction: `grep -q` exits early, awk takes SIGPIPE, and
+    # under this script's `set -o pipefail` the pipeline reports 141, i.e.
+    # "needs nothing" on an archive that needs fourteen; and `nm -gu` alone
+    # reads 14 on the OLD self-contained slice too, because nm lists a symbol as
+    # undefined in the MEMBER that references it even when another member
+    # defines it — staging the module beside THAT archive is the
+    # 112-duplicate-symbol failure this change exists to remove. So: count, and
+    # subtract what the archive defines for itself.
+    _umh_syms () { nm $1 "$base/Vendor/libessence2.a" 2>/dev/null \
+                   | awk '{print $NF}' | grep '^_\$s18UnifiedModelHeader' | sort -u; }
+    local umh_need
+    umh_need=$(comm -23 <(_umh_syms -gu) <(_umh_syms '-g --defined-only') | wc -l | tr -d ' ')
+    if [ "${umh_need:-0}" -gt 0 ]; then
+        stage_umh_slice "$umh_slice" "$base/Vendor/libUnifiedModelHeader.a" \
+          || die "libessence2.a ($plat) REFERENCES UnifiedModelHeader and the module could not be staged from $UMH_RELEASE — the app would fail to link. Set UMH_RELEASE/UMH_SHA256, or restore network access."
+        log "  staged UnifiedModelHeader ($umh_slice) → $plat/Engines/essence2/Vendor/libUnifiedModelHeader.a ($umh_need symbols the engine archive no longer defines)"
+    fi
     log "  staged essence2 → $plat/Engines/essence2 (Classes + be_essence2.h + libessence2.a + resources)"
 }
 
@@ -351,8 +436,11 @@ stage_essence2() {
         warn "essence2 SDK produced no libessence2.a — essence2 disabled (embody-only)"
         return 0
     fi
-    stage_essence2_plat macos "$mac_a" "$res" "$sdk"
-    stage_essence2_plat ios   "$ios_a" "$res" "$sdk"   # iOS device slice only when present (human-gated)
+    # The UMH slice id matches the libessence2 slice the SDK bootstrap extracted:
+    # macos-arm64 for macOS, ios-arm64 for iOS (that bootstrap takes the DEVICE
+    # slice only, never *-simulator).
+    stage_essence2_plat macos "$mac_a" "$res" "$sdk" macos-arm64
+    stage_essence2_plat ios   "$ios_a" "$res" "$sdk" ios-arm64   # iOS device slice only when present (human-gated)
 }
 
 # ---------------------------------------------------- platform detection
