@@ -1,12 +1,11 @@
 <!--
 SPDX-License-Identifier: Apache-2.0
-title: bitHuman — on-device voice chat for macOS
+title: bithuman CLI — live, talking avatars from your terminal
 maintainer: bitHuman Inc.
 homepage: https://www.bithuman.ai
-project_type: cli, swift-library
-platform: macOS 26+, Apple Silicon
-runtime: 100% on-device (no network calls, no API keys)
-keywords: voice-chat, on-device, local-llm, voice-cloning, lip-sync, avatar, agents, swift, macos, privacy-first
+project_type: cli
+platform: macOS 14+ (Apple Silicon) via Homebrew; Linux x86_64 via install.sh
+keywords: avatar, lip-sync, livekit, voice-agent, cli, mcp, realtime
 -->
 
 <p align="center">
@@ -18,266 +17,119 @@ keywords: voice-chat, on-device, local-llm, voice-cloning, lip-sync, avatar, age
 <h1 align="center">bithuman</h1>
 
 <p align="center">
-  <strong>Talk to your Mac. Or type. 100% on-device.</strong><br>
-  Voice + lip-synced avatar chat — private, fast, no cloud.<br>
+  <strong>One command, a live talking avatar in your browser.</strong><br>
   Made by <a href="https://www.bithuman.ai">bitHuman</a>.
 </p>
 
 <p align="center">
   <a href="#install"><img alt="brew install" src="https://img.shields.io/badge/brew-install%20bithuman--cli-orange?style=flat-square"></a>
-  <a href="#"><img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-blue?style=flat-square"></a>
-  <a href="#"><img alt="Apple Silicon" src="https://img.shields.io/badge/Apple%20Silicon-only-green?style=flat-square"></a>
-  <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-lightgrey?style=flat-square"></a>
+  <a href="#install"><img alt="macOS + Linux" src="https://img.shields.io/badge/macOS%20arm64%20%7C%20Linux%20x86__64-blue?style=flat-square"></a>
+  <a href="https://docs.bithuman.ai"><img alt="docs" src="https://img.shields.io/badge/docs-bithuman.ai-lightgrey?style=flat-square"></a>
 </p>
 
 ---
 
 ## What it does
 
-`bithuman` turns your Mac into a real-time conversational assistant.
-Speak, type, or both — it transcribes, thinks, and replies out loud. In
-**video mode**, a small floating face in a circular window moves its
-lips in sync with the bot's voice. You can interrupt mid-sentence and
-it cuts off within ~50 ms.
+`bithuman run <avatar>` stands up the whole stack — an embedded LiveKit server,
+the render engine, and a conversation brain — and opens your browser to a live,
+talking, lip-synced avatar. You speak, it answers, and you can interrupt it.
 
-**Everything runs locally.** No data leaves your machine. No API keys.
-No cloud round-trip. Works offline once the models are cached.
+The conversation brain comes **with your account**, so there is no separate
+OpenAI key to configure. Sessions are billed to your bitHuman credits.
 
-> Previously known as `bitchat`, then `bithuman-cli`, then briefly
-> `bithuman`. The formula name is `bithuman-cli`; the binary it installs
-> is `bithuman`, so you still type `bithuman run`. (The `-cli` suffix is a
-> Homebrew package name only — the CLI is not distributed on PyPI, and that
-> name does not resolve there.) `brew install bithuman` still resolves via a
-> deprecated alias. If you have the legacy
-> `bitchat` formula installed, run
-> `brew uninstall bitchat && brew untap bithuman-product/bitchat`,
-> then follow the install steps below.
+```sh
+bithuman login                    # sign in once
+bithuman run nova                 # a showcase avatar, downloaded on first use
+bithuman run ./my-avatar.imx      # your own model, rendered on this machine
+```
 
 ## Install
 
-Requires **macOS 26 (Tahoe) or later** on **Apple Silicon (M3+)** — the avatar engine refuses pre-M3 silicon at runtime.
+**macOS (Apple Silicon)** — via this tap:
 
 ```sh
 brew tap bithuman-product/bithuman
 brew trust bithuman-product/bithuman   # Homebrew 6+ gates third-party taps; skip on older brew
-brew install bithuman-cli   # `brew install bithuman` works as a deprecated alias
-bithuman                    # voice (default)
-bithuman video              # voice + animated face
+brew install bithuman-cli              # `brew install bithuman` works as a deprecated alias
+bithuman doctor                        # host + auth + cache sanity check
 ```
 
-That's it. First launch downloads the models (a few GB depending on mode)
-to `~/.cache/huggingface/hub/`. Every launch after is offline.
-
-## Three modes
-
-| Mode | What you get | First-run download |
-|---|---|---|
-| `text` | Typed chat in the terminal. Pipe-friendly: `echo "hi" \| bithuman text`. | ~2 GB |
-| `voice` *(default)* | Spoken conversation through your speakers. Voice cloning from a 10 s clip. | ~3 GB |
-| `video` | Voice + a floating circular window with a talking face. 8 bundled agents, drop-in face swap, voice gallery, prompt editor. | ~7 GB |
+**Linux x86_64** — the formula is macOS-only; use the installer or the tarball:
 
 ```sh
-bithuman                                  # voice — pure audio chat
-bithuman text                             # text-only repl
-bithuman video                            # video chat with the default agent
-bithuman video --image ~/Desktop/me.jpg   # video chat with your face
+curl -fsSL https://install.bithuman.ai | sh
 ```
 
-## ✨ Video mode — the centerpiece
+> The Homebrew package is named `bithuman-cli`; the binary it installs is
+> `bithuman`, so you type `bithuman run`. The `-cli` suffix is a package name
+> only.
+>
+> **This CLI is not distributed on PyPI**, and `bithuman-cli` is not a pip
+> coordinate for it — that name does not resolve there. (`pip install bithuman`
+> is the Python SDK *library*, a different artifact; it puts no `bithuman`
+> command on your PATH.)
 
-`bithuman video` opens a small floating circular avatar window.
-**Right-click the avatar** to customize.
+## The commands
 
-### 8 bundled agents
+The surface is deliberately small — one name per task. `bithuman --help` lists
+them, and `bithuman <command> --help` carries a copy-pasteable `EXAMPLES:` block.
 
-Pick a persona and the avatar's portrait, voice, and personality all swap
-together. **Diego** is the default for fresh users — laid-back, neutral,
-easy to talk to.
-
-| Agent | Vibe |
+| command | what it does |
 |---|---|
-| **Diego** | laid-back roommate coach |
-| **Nova** | energetic millennial storyteller |
-| **Einstein** | warm physics mentor with simple analogies |
-| **Riya** | confident-interview communication coach |
-| **Lena** | bold stand-up comic for stage-presence drills |
-| **Rae** | charismatic late-night talk-show host |
-| **Dr. Maya** | seasoned ethics advisor |
-| **Mason** | calm pricing strategist for creators |
+| `run` (alias `chat`) | Live, talking avatar in the browser. Takes a showcase slug, a local `.imx` path, or one of your agent codes. |
+| `list` (alias `avatars`) | The showcase catalogue, and with `--mine` the agents on your account. |
+| `pull` | Download a model; prints the cached `.imx` path. |
+| `open` (alias `info`) | Model metadata. |
+| `render` | Offline render to MP4 from an `.imx` + an audio file. Needs `ffmpeg` on PATH (or `$BITHUMAN_FFMPEG`). |
+| `account` | Who the credential belongs to, the plan, the balance, and the spend behind it. |
+| `login` / `logout` | Sign in and out. |
+| `doctor` | Install health. Exit 0 iff ready. |
+| `engine` | Manage the bundled render engine. |
+| `mcp` | Built-in MCP server over stdio, for MCP clients. |
+| `completion` | Shell completions for bash, zsh, fish, elvish, powershell. |
 
-### Customize anything
+Every command takes `--json` and follows sysexits exit codes, so it scripts
+cleanly. `bithuman __schema` prints the entire command / flag / exit-code tree
+plus the MCP tool catalogue as one JSON document — that is the authoritative
+description of the surface, generated from the binary itself.
 
-Right-click the avatar window:
+## For agents and LLMs
 
-- **Choose agent…** — 2-column gallery; click a card to apply.
-- **Change image…** — pick a portrait from disk **or just drag-drop it
-  onto the avatar**. The face animates through your portrait after a
-  ~5 s encode.
-- **Change voice…** — gallery of 9 voices grouped Feminine / Masculine.
-  Click any card to audition; **Save** commits.
-- **Change prompt…** — clean editor with 6 starter templates (Companion,
-  Coach, Tutor, Storyteller, Coding buddy, Calm listener). Tweak before
-  saving.
-
-### Status at a glance
-
-A colored ring around the avatar tells you what it's doing:
-
-| Color | State |
-|---|---|
-| 🩵 cyan | listening |
-| 🟣 violet | thinking |
-| 🟠 amber | speaking |
-
-A label below echoes the same.
-
-### Quiet by design
-
-The avatar holds its idle motion via a small in-memory loop — after ~10 s
-of warm-up the GPU drops to near-zero usage until you speak again. Leave
-bithuman running for hours without spinning the fans or draining the
-battery.
-
-## Talk *or* type
-
-Speak after `🎙️ Listening`. Or just **type a message in the terminal and
-hit Enter** — handy when the room is loud or you want to be precise. Both
-go through the same turn flow; the bot replies the same way.
-
-Cut in by speaking while the bot is replying — it stops within ~50 ms
-(audio + avatar both). Cmd-Q, Ctrl-C, or right-click → "Quit bitHuman"
-all shut down cleanly.
-
-## Quick start
-
-```sh
-bithuman voice --voice Aiden              # voice mode: Qwen3 preset speaker
-bithuman voice --voice ~/voices/me.wav    # voice mode: clone your own voice (auto-transcribed)
-bithuman video --voice am_michael         # video mode: Kokoro preset speaker
-bithuman voice --locale ja-JP             # listen + reply in Japanese
-bithuman text --prompt "Be a deadpan ship's computer."
-bithuman video --image ~/Desktop/me.jpg   # your face, default voice
-echo "summarise this:" | bithuman text    # use as a shell pipe
-```
-
-| flag | what it does |
-|---|---|
-| `--locale <bcp47>` | ASR + TTS language (default `en-US`). Examples: `en-US`, `ja-JP`, `zh-CN`, `es-ES`, `fr-FR`. |
-| `--voice <preset\|path>` | Pick the bot's voice. Accepted values differ by mode (the two modes use different TTS engines): **voice mode** takes a Qwen3 preset (`Ryan`, `Aiden`, `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`, `Eric`) **or a path** to a 10–20 s mono audio file, which is cloned and auto-transcribed. **video mode** takes a Kokoro preset only (`af_heart`, `af_alloy`, `af_aoede`, `af_kore`, `am_adam`, `am_michael`, `am_echo`, `bf_emma`, `bm_george`); cloning isn't supported in video mode (the avatar engine needs the GPU, so video uses a smaller TTS that doesn't clone). |
-| `--image <preset\|path>` | (video mode) Bundled portrait preset (`Alice`, `Marco`, `Captain`, `Nia`, `Riley`) or a path to JPG/PNG/HEIC. Defaults to the active agent's portrait. |
-| `--prompt <text\|@path>` | Override the system prompt. Inline string or `@/path/to/file.txt`. |
-| `-h`, `--help` | Show usage. |
-
-## Why bitHuman?
-
-- **Truly local.** No API keys, no per-token billing, no audio leaving
-  your Mac. If your laptop's offline, bithuman still works.
-- **Real-time, with barge-in.** The bot stops within ~50 ms of you
-  starting to speak — both audio and the avatar's mouth.
-- **Voice cloning out of the box.** Drop in a 10-second clip and
-  bithuman uses it as the bot's voice (voice mode).
-- **Drop-in face swap.** Drag any portrait onto the avatar and it
-  becomes the new face after a quick on-device encode (video mode). No
-  retraining, no upload.
-- **Quiet when idle.** The fans don't spin while you're not talking.
-- **Apache 2.0** code + bundled model weights.
-
-## What's powering it
-
-| | Layer |
-|---|---|
-| Speech-to-text | Apple's built-in `Speech` framework |
-| Language model | Local 2-billion-parameter LLM (4-bit quantized) |
-| Voice synthesis | Two local TTS engines: Qwen3-TTS in voice mode (voice-cloning capable), Kokoro in video mode (preset voices only — lighter, coexists with the avatar GPU pipeline) |
-| Avatar animation | bitHuman expression engine (lip-sync at 25 FPS) |
-
-Working set on a 24 GB M-series MacBook Pro:
-
-- text mode: ~2.5 GB
-- voice mode: ~4 GB
-- video mode: ~8 GB
-
-No swap pressure during normal conversation in any mode.
-
-## For developers
-
-bithuman ships as a Swift library too — `bitHumanKit` — embeddable
-via Swift Package Manager. Build a custom voice / video assistant in a
-few lines:
-
-```swift
-import bitHumanKit
-
-var config = VoiceChatConfig()
-config.localeIdentifier = "en-US"
-config.systemPrompt = "You are a deadpan ship's computer. One sentence."
-config.voice = .preset("Aiden")
-// or .clone(referenceAudio: someURL, transcript: "...")
-
-let chat = VoiceChat(config: config)
-try await chat.start()
-
-// Optional: drive a SwiftUI avatar window
-// (see the dev repo for the FramePump + AvatarWindow setup)
-```
-
-Library access is currently invitation-only while the SDK stabilises.
-Open an issue at
-[bithuman-product/homebrew-bithuman/issues](https://github.com/bithuman-product/homebrew-bithuman/issues)
-if you'd like access.
-
-## Tips
-
-- **Set `BITHUMAN_VERBOSE=1`** in your shell if you want to see
-  model-loading internals (tensor counts, dtype breakdowns) while
-  debugging. Silent by default.
-- **First launch downloads ~3–7 GB of models** depending on mode. Plan
-  for it on a slow connection — the rest of bithuman then works
-  offline.
-
-## About bitHuman
-
-bithuman is built and maintained by
-[**bitHuman**](https://www.bithuman.ai), the team behind real-time
-on-device avatar engines. We make local-first voice and avatar AI feel
-as good as the cloud services you're used to — without sending your
-audio anywhere.
-
-bithuman is one piece of the bitHuman product family, alongside the
-Mac, iPad, and iPhone reference apps.
-
-- 🌐 [www.bithuman.ai](https://www.bithuman.ai)
-- 📦 [github.com/bithuman-product](https://github.com/bithuman-product)
-- 🍎 Reference apps (Mac / iPad / iPhone): built on the public Swift SDK —
-  see [homebrew-bithuman Examples](https://github.com/bithuman-product/homebrew-bithuman/tree/main/Examples)
-
-## Contributing & source
-
-This repo (`bithuman-product/homebrew-bithuman`) hosts the **release artefacts** — the Homebrew formula and notarised binaries. To embed the underlying SDK (`bitHumanKit`) in your own Mac/iPad/iPhone app, head to [`homebrew-bithuman`](https://github.com/bithuman-product/homebrew-bithuman), which is the public SwiftPM distribution.
+This repo publishes [`llms.txt`](llms.txt), a structured manifest aimed at AI
+coding assistants discovering and invoking bithuman. Agents should start there,
+then call `bithuman __schema` for the machine-readable surface.
 
 ## Docs
 
-Full SDK and CLI documentation: **[docs.bithuman.ai](https://docs.bithuman.ai)**.
+Full CLI and SDK documentation: **[docs.bithuman.ai](https://docs.bithuman.ai)**.
 
 - [bithuman CLI reference](https://docs.bithuman.ai/cli/overview)
-- [Swift SDK overview](https://docs.bithuman.ai/sdk/swift) — embed in your own Mac/iPad/iPhone app
-- [Authentication](https://docs.bithuman.ai/getting-started/authentication) — only needed for avatar mode (audio-only is unmetered, no key required)
+- [Authentication](https://docs.bithuman.ai/getting-started/authentication)
 - [Pricing & credits](https://docs.bithuman.ai/getting-started/pricing)
 
-## Agents and LLMs
+## What this repo is
 
-This repo publishes [`llms.txt`](llms.txt) — a structured manifest aimed
-at AI coding assistants discovering and using bithuman. Agents
-trying to install or invoke bithuman on a user's machine should
-start there.
+`bithuman-product/homebrew-bithuman` hosts the **release artefacts** — the
+Homebrew formula, the install script, and the notarised per-target binaries
+attached to each `cli-v*` release.
 
-## License
+The published CLI binary is a proprietary artifact: it statically links the
+bitHuman engine and vendors model weights, so the formula declares
+`license :cannot_represent` rather than a single SPDX identifier. The files in
+*this repository* (formula, scripts, docs) are Apache 2.0 — see
+[`LICENSE`](LICENSE).
 
-Apache 2.0. See [`LICENSE`](LICENSE).
+## About bitHuman
+
+Built and maintained by [**bitHuman**](https://www.bithuman.ai), the team behind
+real-time avatar engines.
+
+- 🌐 [www.bithuman.ai](https://www.bithuman.ai)
+- 📦 [github.com/bithuman-product](https://github.com/bithuman-product)
 
 ---
 
 <p align="center">
-  Made with ❤️ by <a href="https://www.bithuman.ai"><strong>bitHuman</strong></a>.<br>
-  <sub>Local-first voice & avatar AI for the post-cloud era.</sub>
+  Made with ❤️ by <a href="https://www.bithuman.ai"><strong>bitHuman</strong></a>.
 </p>
