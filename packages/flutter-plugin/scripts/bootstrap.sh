@@ -100,22 +100,28 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 
 # The bithuman-models revision whose engine ADAPTER SOURCE (models/*/sdk/Classes)
 # this pod compiles. A full 40-hex commit sha — never a branch.
-# 92d9d9d56 = 2026-09-19, the tree the essence2-v1.9.0 Apple build ran on
-# — bithuman-models #944 + #948: the source-only head and the native lip contour
-# reach a published engine for the first time (v1.8.0 measured a 9.8% generated
-# mouth and a silent ellipse; v1.9.0 reads 0.0/0.0 and names its mask), and the
-# bundle's native CoreML model takes `lip_delivery` from the bundle's lip
-# template — the exact tree apple-xcframework.yml built the pinned engine from.
-BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-92d9d9d569f96e61116f2881b65116c43b3bc0ff}"
+# 05e443da9 = 2026-09-22, the tree the essence2-v1.10.0 Apple build ran on
+# — bithuman-models #1082: libessence2.a stops carrying the UnifiedModelHeader
+# objects, which is what made an app taking both published Apple products
+# collide on 112 duplicate symbols. VERIFIED, not assumed: the annotated tag
+# essence2-apple-v1.10.0 dereferences to exactly this commit, and the release it
+# cut reads `UnifiedModelHeader defined=0` on all three slices.
+# ★THIS SHA IS WHY THE UnifiedModelHeader STAGING BELOW IS NOT OPTIONAL: the
+# archive this tree produces REFERENCES that module (14 symbols on ios-arm64 and
+# macos-arm64, 6 on the simulator) instead of defining it.
+# (It read 92d9d9d56 — the essence2-v1.9.0 tree — until this bump. That pin is
+# what decides which engine ADAPTER SOURCE the pod compiles, so it moves with
+# the engine or the pod compiles one release's Swift against another's bytes.)
+BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-05e443da9c684d015572061bb4017dac1d4ecfa6}"
 
 # The essence-2 Apple ENGINE + its runtime RESOURCES. One release carries both.
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
 # `libessence2.xcframework.zip` binaryTarget checksum and the release's own
 # resources sidecar. Passed to the engine SDK bootstrap explicitly below.
 LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.10.0}"
-LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-a8c6271afe594f723c5797f1608fe790b5d168eff8ce6e9342733a064bc10ea4}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-eacbbfdb99f0cb53765822db8cdbd7c0fed9e00bd6f9457a46e5d1831df57e1b}"
 LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.10.0}"
-LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-66ba4867caac0cc6bc02c154a5d1009abf352ad9ec2dedb1b08482b5a6a3b13d}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-fa9bfc79eca9a7f82da1bd0bdd4fc968c161ae41016eb3fb3000ea2c8cfd9b46}"
 
 # The UnifiedModelHeader module, as a plain static .a per slice.
 #
