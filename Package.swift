@@ -680,13 +680,26 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // ABI as the published framework — without that, 3 `…vau` addressor symbols
 // stay unresolvable against a framework that exports `…vgZ` getters.
 //
-// ★ THE CHECKSUM BELOW IS THE ONE `swift package compute-checksum` PRINTS FOR
-// THE ARCHIVE THE RELEASE ACTUALLY ATTACHES. The value here was computed on
-// the echelon build of bithuman-models main; if the release is cut through
-// .github/workflows/publish-essence2-apple.yml (the path that exists, and the
-// one that re-hashes against the builder's sidecar), re-pin this line to the
-// checksum that workflow prints before merging. A manifest pinned to bytes
-// that were never uploaded resolves for nobody.
+// ★ THE CHECKSUM BELOW IS THE ONE THE RELEASE ACTUALLY ATTACHES, AND IT WAS
+// RE-PINNED ONCE THOSE BYTES EXISTED. It first carried a8c6271a…, the digest of
+// a build on echelon — the same sources, a different machine, 179,379,244 B
+// against the release's 170,996,285 B. These archives are not byte-reproducible
+// across hosts, so a manifest pinned to a developer's copy resolves for nobody.
+// The value now is what bithuman-models cut for essence2-apple-v1.10.0
+// (commit 05e443da9): its own `libessence2.xcframework.zip.sha256` sidecar,
+// re-measured after download, and equal to `swift package compute-checksum` on
+// the downloaded file. The tap's publish-essence2-apple.yml re-hosts THAT file
+// byte-for-byte and refuses on a mismatch, so the tap asset carries this digest
+// too.
+//
+// GRADED ON THE RELEASED BYTES before this line moved — re-downloaded, re-hashed
+// to eacbbfdb… against the sidecar, unzipped and read with `nm`:
+//     slice                 UMH defined   colliding   referenced   unmet
+//     ios-arm64                       0           0           14       0
+//     ios-arm64-simulator             0           0            6       0
+//     macos-arm64                     0           0           14       0
+// and all eleven app links of tools/check-essence2-expression2-link.sh green on
+// them (both link shapes, all three slices, plus Essence2 alone at 0 undefined).
 //
 // onnxruntime is carried forward byte-identical once more — the SAME release
 // asset, so its checksum does not move; it must be attached to this tag too,
@@ -842,7 +855,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "a8c6271afe594f723c5797f1608fe790b5d168eff8ce6e9342733a064bc10ea4"
+            checksum: "eacbbfdb99f0cb53765822db8cdbd7c0fed9e00bd6f9457a46e5d1831df57e1b"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
