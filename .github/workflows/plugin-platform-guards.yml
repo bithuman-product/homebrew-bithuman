@@ -13,6 +13,9 @@ on:
       - 'packages/flutter-plugin/macos/Classes/**'
       - 'packages/flutter-plugin/lib/**'
       - 'packages/flutter-plugin/android/src/**'
+      - 'packages/flutter-plugin/android/build.gradle'
+      - 'scripts/check_android_coordinates_on_central.sh'
+      - 'scripts/pom_dependencies.py'
       - 'scripts/check_platform_guards.sh'
       - 'scripts/check_dev_levers.sh'
       - 'scripts/prove_dev_levers_release.sh'
@@ -29,6 +32,9 @@ on:
       - 'packages/flutter-plugin/macos/Classes/**'
       - 'packages/flutter-plugin/lib/**'
       - 'packages/flutter-plugin/android/src/**'
+      - 'packages/flutter-plugin/android/build.gradle'
+      - 'scripts/check_android_coordinates_on_central.sh'
+      - 'scripts/pom_dependencies.py'
       - 'scripts/check_platform_guards.sh'
       - 'scripts/check_dev_levers.sh'
       - 'scripts/prove_dev_levers_release.sh'
@@ -59,6 +65,47 @@ jobs:
           fi
           cp /tmp/guard.bak "$F"
           ./scripts/check_platform_guards.sh
+
+  # ── "RESOLVES FROM CENTRAL ALONE": the claim, graded against the registry ────────────
+  # 2026-09-22: the Android header told every reader that expression-2 "needs google()
+  # beside mavenCentral(): its LiteRT dependency lives on Google's Maven only." True at
+  # 0.3.0. Dead from 0.3.1 — three minors and six months before anyone noticed, because
+  # nothing graded it. A prose claim about a registry belongs to the registry.
+  android-coordinates-on-central:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: every pinned coordinate and every transitive dep is on Maven Central
+        run: ./scripts/check_android_coordinates_on_central.sh
+      - name: Positive control from history — the 0.3.0 pin MUST go red on litert
+        run: |
+          set -u
+          # Not a synthetic mutant: the exact pin whose transitive
+          # com.google.ai.edge.litert:litert (404 on Central) made the old note TRUE.
+          # If this passes, the check cannot see the rot it exists to catch.
+          T=$(mktemp -d)
+          sed 's|ai.bithuman:expression2-android:[0-9.]*|ai.bithuman:expression2-android:0.3.0|' \
+            packages/flutter-plugin/android/build.gradle > "$T/hist.gradle"
+          if ./scripts/check_android_coordinates_on_central.sh "$T/hist.gradle" > "$T/out" 2>&1; then
+            echo "::error::the 0.3.0 pin PASSED — the check is not looking at transitives"
+            cat "$T/out"; exit 1
+          fi
+          grep -q 'com.google.ai.edge.litert:litert' "$T/out" || {
+            echo "::error::it went red, but not on litert — it is failing for another reason"
+            cat "$T/out"; exit 1; }
+          echo "control fires, and names the right coordinate:"
+          grep 'NOT ON CENTRAL' "$T/out"
+      - name: Negative control — a version Central does not serve MUST go red
+        run: |
+          set -u
+          T=$(mktemp -d)
+          sed 's|ai.bithuman:essence2-android:[0-9.]*|ai.bithuman:essence2-android:99.99.99|' \
+            packages/flutter-plugin/android/build.gradle > "$T/ghost.gradle"
+          if ./scripts/check_android_coordinates_on_central.sh "$T/ghost.gradle" >/dev/null 2>&1; then
+            echo "::error::an unpublished pin PASSED — the check is not looking"; exit 1
+          fi
+          echo "control fires: unpublished pin"
 
   # ── DEV LEVERS: one door per language, and a release build has no key ──────────────────
   # 2026-09-15/16: a persistent Android sysprop (our A/V sync marker) painted white frames on

@@ -2,10 +2,21 @@
 //
 // The engines are the PUBLISHED `ai.bithuman:expression2-android` and
 // `ai.bithuman:essence2-android` AARs from Maven Central, so a fresh clone builds with no
-// private SDK and no vendor bundle. expression-2 needs google() beside mavenCentral():
-// its LiteRT dependency lives on Google's Maven only. The two Qualcomm coordinates are
-// the Hexagon NPU delegate that SDK loads when the SoC has one (Snapdragon); elsewhere
-// they are inert. essence-2 resolves from Central alone.
+// private SDK and no vendor bundle. BOTH engines resolve from mavenCentral() alone.
+// google() stays in the lists below for AGP's own tooling (aapt2 and the build tools),
+// NOT to resolve an engine.
+//
+// ★ It used to be otherwise, and the old note here outlived the fact. expression-2
+// carried a transitive `com.google.ai.edge.litert:litert` — which is 404 on Central, so
+// google() really was load-bearing — in 0.3.0 and in 0.3.0 ONLY. Every POM Central
+// serves from 0.3.1 onward declares kotlin-stdlib and nothing else, the pinned 0.4.7
+// included. The claim was three minors dead before it was deleted.
+//
+// The two Qualcomm coordinates below are the Hexagon NPU delegate the SDK loads when the
+// SoC has one (Snapdragon); elsewhere they are inert. They are declared BY HAND because
+// 0.4.7's POM does not carry them — Central's 0.4.8 POM is the first that does, so this
+// pair must be revisited, not merely inherited, whenever the expression-2 pin moves.
+// Both are on Central. essence-2 resolves from Central alone.
 //
 // ★ The pin is 0.4.7, which the presenter needs: `Expression2IdleLoop` (the idle clip
 // decoded in place, `next(bitmap)`) exists from 0.4.7 ONLY. Central's 0.4.6 — built
