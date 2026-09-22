@@ -62,6 +62,19 @@
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
+  # ★2026-09-22: THE PIN MOVES FORWARD to cli-v2.7.0 (bithuman 65e4d5b54, both halves
+  # from that ONE commit; engine pin essence1-v3.1.3-e2.32 = bithuman-models 2d3fdd7db,
+  # libessence 2.11.6 ABI 7).
+  # ★A MINOR BUMP, NOT A PATCH, AND THE NUMBER IS THE WARNING. 2.7.0 DELETES five
+  # top-level commands and nine aliases: `talk inspect download get ls browse gallery
+  # credits agents-md whoami usage init __man` and `engine update` now exit 2 with
+  # `unrecognized subcommand`. Measured by executing every candidate name against both
+  # published binaries: cli-v2.6.26 answered to 32 names, cli-v2.7.0 answers to 19, and
+  # for the first time `--help`, `completion bash` and `__schema` all agree on that 19.
+  # ★AND ONE CHANGE IS QUIET RATHER THAN LOUD: `usage --limit` defaulted to 50 rows;
+  # its replacement `account --limit` defaults to 10. A script that parsed the default
+  # window silently sees ten. `--limit 50` restores it.
+  # Superseded description, kept for the record: cli-v2.6.21 (2026-09-16).
   # ★2026-09-16: THE PIN MOVES FORWARD to cli-v2.6.21 (bithuman 9167c111b, both halves
   # from that ONE commit; engine pin essence1-v3.1.3-e2.24 = bithuman-models 8bd9a35c3).
   # ★WHAT A CUSTOMER GETS THAT THEY DID NOT HAVE: `bithuman run` on an expression-2
@@ -387,8 +400,8 @@ class BithumanCli < Formula
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.6.26/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "9897d1553ea425a8ba253747a1feee76ede530db0f1e9c66b17757739a6db04a"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.7.0/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "806569b35aa3e248d57d61a4329d078746ec29c4f34b68ea7dba24f135dc44a7"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
