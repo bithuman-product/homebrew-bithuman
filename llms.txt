@@ -46,6 +46,6 @@ login`). No `pip install` needed for chat.
 - `bithuman pull <slug>`: download a model; prints the cached `.imx` path.
 - `bithuman info <model.imx> --json`: model metadata.
 - `bithuman render <model.imx> -a in.wav -o out.mp4`: offline MP4 (Linux-only encoder).
-- `bithuman whoami --json` / `bithuman account --json`: identity, plan, credits.
+- `bithuman account --json`: identity, plan, credits.
 - `bithuman mcp`: built-in MCP server over stdio (JSON-RPC) for MCP clients —
   cloud tools (TTS, agents, dynamics, embed, webhooks, credits) + local tools.
