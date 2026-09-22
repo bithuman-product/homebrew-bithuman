@@ -22,13 +22,17 @@
 //                              `import Expression2`. FOUR binaryTargets ride
 //                              under it now, not three — see UnifiedModelHeader.
 //   - Essence2                 essence-2 engine alone, archives on tag
-//                              essence2-v1.5.1 — read `essence2Tag` below, never
+//                              essence2-v1.10.0 — read `essence2Tag` below, never
 //                              this sentence, for where the bytes are; it has
 //                              been wrong before. `import Essence2` works since
 //                              essence2-v1.2.0 (the archive's module map declares both
 //                              `Essence2` and `CLibEssence2` over one header;
-//                              `import CLibEssence2` still works). Two
-//                              binaryTargets ride under it and BOTH are needed.
+//                              `import CLibEssence2` still works). THREE
+//                              binaryTargets ride under it since
+//                              essence2-v1.10.0 and every one is needed — the
+//                              third is UnifiedModelHeader, which the engine
+//                              archive stopped carrying so that an app can take
+//                              this product and `Expression2` at once.
 //   - BithumanEngineProtocol   source-only Layer-0 engine interface.
 //                              `import BithumanEngineProtocol`.
 //
@@ -107,7 +111,7 @@
 //                  render out of the box; it can now be handed one.
 //   - Essence2     Layer-1 essence-2 engine for Apple platforms (iOS device,
 //                  iOS Simulator, macOS — all arm64). Its archives ship on tag
-//                  essence2-v1.5.1; `essence2Tag` below is the value that
+//                  essence2-v1.10.0; `essence2Tag` below is the value that
 //                  decides, and this line is a copy of it that has drifted before.
 //                  ★ TWO MODULE NAMES, ONE HEADER. What this product vends is
 //                  the engine's 15-function C interface, not a Swift type. Since
@@ -257,51 +261,58 @@
 //   https://docs.bithuman.ai/sdk/swift — this block points at it rather than
 //   growing a second copy that drifts.
 //
-//   ★ NO *MODULE* CLASH, BUT A REAL *SYMBOL* CLASH — AND THIS BLOCK USED TO
-//   SAY "Depend on it alongside either of the others", WHICH IS FALSE ON THE
-//   iOS DEVICE AND ON macOS. The module half is still true: `Essence2` carries
-//   no Swift module (both of its modules are Clang modules over one C header),
-//   so it cannot be taken twice. The LINK half was never checked, and it fails.
-//
-//   MEASURED 2026-09-08 on the published bytes of `essence2-v1.4.0` +
-//   `v2.6.0`, four arms of ONE executable link that differ by one flag or one
-//   slice (tools/check-essence2-expression2-link.sh reproduces all four):
-//
-//       slice                 UnifiedModelHeader.framework   rc   duplicate symbols
-//       ios-arm64             linked                          1   116
-//       ios-arm64             NOT linked                      0     0   <- control
-//       macos-arm64           linked                          1   116
-//       ios-arm64-simulator   linked                          0     0   <- control
+//   ★ `Expression2` + `Essence2` IN ONE APP IS FIXED IN essence2-v1.10.0, AND
+//   THE FIX IS TWO HALVES THAT ONLY WORK TOGETHER. Through essence2-v1.9.0 an
+//   app that took both products could not link: `libessence2.a` was libtool'd
+//   from the engine's whole library closure and that closure DEFINED the
+//   UnifiedModelHeader symbols, while the `Expression2` product forces every
+//   consumer to link `UnifiedModelHeader.xcframework` (it is in that product's
+//   `targets:` below, and it must be — the engine's .swiftinterface imports the
+//   module). `ld` exits 1 on the overlap:
 //
 //       duplicate symbol 'type metadata for UnifiedModelHeader.EngineResolver' in:
 //           …/UnifiedModelHeader.xcframework/ios-arm64/UnifiedModelHeader[2](UnifiedModelHeader.o)
 //           …/libessence2.xcframework/ios-arm64/libessence2.a[4](EngineResolver.o)
 //
-//   WHY. `libessence2.a` is libtool'd from the engine's whole library closure,
-//   and that closure INCLUDES the UnifiedModelHeader objects. `nm -g` on the
-//   published archives counts UnifiedModelHeader symbols DEFINED in every
-//   slice — ios-arm64 317, ios-arm64-simulator 317, macos-arm64 321 — against
-//   122 defined by `UnifiedModelHeader.xcframework` itself and 0 for a
-//   nonsense control token. The `Expression2` product forces every consumer to
-//   link that framework (it is in the product's `targets:` below, and it must
-//   be: the engine's .swiftinterface imports the module). So
-//   `Expression2` + `Essence2` in one app is a link failure on the device.
+//   MEASURED 2026-09-21 on echelon (macOS 26.6.2 / Xcode 26.3), `nm -g` per
+//   slice over the mangling prefix `_$s18UnifiedModelHeader`, defined only:
 //
-//   ★ A GREEN `swift build` DOES NOT SEE THIS, and neither does the package
+//       UnifiedModelHeader symbols   ios-arm64   ios-sim   macos-arm64
+//       DEFINED by essence2-v1.9.0        247       247        247
+//       DEFINED by essence2-v1.10.0         0         0          0
+//       defined by the framework          118       118        118
+//       ⟹ colliding                       112       112        112  ->  0
+//       REFERENCED by v1.10.0              14         6         14
+//       …of those NOT in the framework      0         0          0
+//
+//   and the same day, ELEVEN REAL APP LINKS through
+//   tools/check-essence2-expression2-link.sh (which now runs both link shapes
+//   on all three slices, and an Essence2-ONLY app besides):
+//
+//       app                    slice        load         v1.9.0        v1.10.0
+//       Expression2+Essence2   ios-arm64    lazy         rc1 dup113    rc0
+//       Expression2+Essence2   ios-arm64    force both   rc1 dup113    rc0
+//       Expression2+Essence2   macos-arm64  lazy         rc0           rc0
+//       Expression2+Essence2   macos-arm64  force both   rc1 dup113    rc0
+//       Expression2+Essence2   ios-sim      lazy         rc0           rc0
+//       Expression2+Essence2   ios-sim      force both   rc1 dup113    rc0
+//       Essence2 alone         all three    force        rc0           rc0, 0 undefined
+//
+//   ★ AND THE SECOND HALF IS WHY THIS TOOK A REPUBLISH AND NOT A ONE-LINE
+//   PATCH: once the archive stops DEFINING those symbols it REFERENCES them,
+//   so an Essence2-ONLY app needs the framework too. That is exactly what the
+//   `Essence2` product's `targets:` now carries. Ship one half without the
+//   other and you trade 112 duplicate symbols for 14 undefined ones:
+//       "static UnifiedModelHeader.EngineLoaderRegistry.shared.getter : …",
+//         referenced from: libessence2.a[5](UnifiedEngineDispatch.o)
+//   (measured, both slices, with the product change reverted).
+//
+//   ★ A GREEN `swift build` NEVER SAW ANY OF THIS, and neither does the package
 //   matrix a CI usually runs: a library TARGET is compiled, never linked, so
 //   `xcodebuild -destination 'generic/platform=iOS' build` on a package that
 //   takes BOTH products exits 0. The collision only fires at an APP's final
-//   link. Nor does a Simulator-only CI see it — the simulator arm above is
-//   green on bytes that carry the same 317 definitions.
-//
-//   ★ THE WORKAROUND UNTIL THE ENGINE IS REBUILT: link `Expression2` and
-//   `Essence2` and do NOT let `UnifiedModelHeader.framework` reach the final
-//   link (an Xcode target can drop it; a pure-SwiftPM app cannot, because the
-//   product list below carries it). The ROOT fix is in the engine build —
-//   `models/essence-2/engine/light/apple/build-xcframework.sh` must stop
-//   libtool'ing the UnifiedModelHeader objects into the archive, and the
-//   `Essence2` product must then take the `UnifiedModelHeader` binaryTarget so
-//   an Essence2-only consumer still resolves — and it needs a republish.
+//   link — and, as the table shows, only in some link shapes, so a single
+//   passing app was never evidence either.
 //
 //   The one NAME `Essence2` can still collide with is a Swift module also
 //   called `Essence2` in your own graph — the private engine repository has
@@ -653,7 +664,34 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // The archive was re-downloaded ANONYMOUSLY from this tap after upload and
 // re-hashed to 8c35d482… against its sidecar AND the checksum below.
 // onnxruntime is carried forward byte-identical again.
-let essence2Tag = "essence2-v1.9.0"
+// ---------------------------------------------------------------------------
+// ★ ROLLED ONTO essence2-v1.10.0 — THE ARCHIVE STOPS CARRYING THE
+// UnifiedModelHeader OBJECTS, WHICH IS WHAT MADE `Expression2` + `Essence2` IN
+// ONE APP A LINK FAILURE. The whole measurement, both halves and the eleven
+// app links that grade them, are in the essence-2 section of the header above;
+// the second half is the `UnifiedModelHeaderBinary` entry in the `Essence2`
+// product below, and NEITHER HALF SHIPS ALONE.
+//
+// Engine change: models/essence-2/engine/light/apple/build-xcframework.sh now
+// drops the 4 `UnifiedModelHeader.build/*.o` objects from the libtool filelist
+// of every slice (and refuses to build if it matches none, so the filter can
+// never silently become a no-op), and models/_shared/swift/UnifiedModelHeader
+// is compiled `-enable-library-evolution` so a source consumer speaks the same
+// ABI as the published framework — without that, 3 `…vau` addressor symbols
+// stay unresolvable against a framework that exports `…vgZ` getters.
+//
+// ★ THE CHECKSUM BELOW IS THE ONE `swift package compute-checksum` PRINTS FOR
+// THE ARCHIVE THE RELEASE ACTUALLY ATTACHES. The value here was computed on
+// the echelon build of bithuman-models main; if the release is cut through
+// .github/workflows/publish-essence2-apple.yml (the path that exists, and the
+// one that re-hashes against the builder's sidecar), re-pin this line to the
+// checksum that workflow prints before merging. A manifest pinned to bytes
+// that were never uploaded resolves for nobody.
+//
+// onnxruntime is carried forward byte-identical once more — the SAME release
+// asset, so its checksum does not move; it must be attached to this tag too,
+// because `essence2Base` is the tag both URLs are read from.
+let essence2Tag = "essence2-v1.10.0"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -714,7 +752,28 @@ let package = Package(
         // See the essence-2 section in the header for the whole shape, for why
         // the second target is not optional, for the model format this engine
         // opens, and for the runtime resources this does not give you.
-        .library(name: "Essence2", targets: ["libessence2", "onnxruntime"]),
+        //
+        // ★ THE THIRD TARGET IS THE OTHER HALF OF THE essence2-v1.10.0 FIX AND
+        // IS NOT OPTIONAL EITHER. From v1.10.0 `libessence2.a` no longer
+        // DEFINES the UnifiedModelHeader symbols — that is what stopped an app
+        // taking `Expression2` + `Essence2` from colliding on 112 of them — so
+        // it REFERENCES them instead: 14 on ios-arm64 and macos-arm64, 6 on the
+        // simulator. Without `UnifiedModelHeaderBinary` here, an Essence2-ONLY
+        // app links against nothing that defines them:
+        //     Undefined symbols for architecture arm64:
+        //       "static UnifiedModelHeader.EngineLoaderRegistry.shared.getter : …",
+        //         referenced from: libessence2.a[5](UnifiedEngineDispatch.o)
+        // MEASURED 2026-09-21, both slices, on the v1.10.0 bytes with this
+        // entry removed (tools/check-essence2-expression2-link.sh arms
+        // E2ONLY_DEV_no_umh / E2ONLY_MAC_no_umh: rc=1, 14 undefined each; with
+        // it, rc=0 and 0 undefined on all three slices).
+        //
+        // It costs an `Essence2`-only consumer nothing it did not already pay:
+        // the SAME binaryTarget is what the `Expression2` product above lists,
+        // so an app taking both products resolves ONE copy of it. And it is
+        // already in this manifest at `expression2Tag` — no new coordinate, no
+        // new download for anyone taking both.
+        .library(name: "Essence2", targets: ["libessence2", "onnxruntime", "UnifiedModelHeaderBinary"]),
     ],
     targets: [
         .binaryTarget(
@@ -783,7 +842,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "8c35d48257bb3abf7fae80d52a29a957e094f04175c46254d1e8d758c2d925e4"
+            checksum: "a8c6271afe594f723c5797f1608fe790b5d168eff8ce6e9342733a064bc10ea4"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
