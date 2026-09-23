@@ -184,6 +184,12 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             "pipStart", "pipStop", "fitWindowToCanvas", "setExpression2AgentDir",
             "attachWebrtcRemoteAudio", "detachWebrtcRemoteAudio" -> result.success(null)
 
+            // A container FILE is not expanded on Android: the SDK fetches an identity's
+            // members by code through the download door (see load). `isModelContainer`
+            // falls through to notImplemented, which the Dart side reads as "cannot tell".
+            "unpackModelContainer" -> result.error("unsupported",
+                "Android loads an identity by code (BithumanAvatar.load); a container file is not expanded on this platform", null)
+
             "dispose" -> { call.argument<Number>("textureId")?.let { destroy(it.toLong()) }; result.success(null) }
             else -> result.notImplemented()
         }

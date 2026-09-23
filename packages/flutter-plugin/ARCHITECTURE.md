@@ -334,8 +334,8 @@ runner). No edits to the other transports, to the Realtime client, or to the UI.
 ## The `ai.bithuman.avatar` channel — which half is voice
 
 One method channel carries two modules. This is the **measured** split (2026-09-16,
-from `BithumanAvatarPlugin.swift`'s `handle(_:result:)`): **28 `case` labels, 29 verb
-names** — `setExpression2AgentDir`/`setEmbodyAgentDir` share a label. Each verb is
+from `BithumanAvatarPlugin.swift`'s `handle(_:result:)`; +2 in 2.6.11): **30 `case` labels,
+31 verb names** — `setExpression2AgentDir`/`setEmbodyAgentDir` share a label. Each verb is
 classed by the native state its handler actually touches (`textures` /
 `registrarTextures` / PiP ⇒ render; `audioIOs` / `micChannels` / `converseControllers`
 / `AVCaptureDevice` ⇒ voice), not by its name.
@@ -348,7 +348,7 @@ anyone adding a verb decides which column it lands in before writing it.
 | **voice only** | 11 | `audioStart` · `audioStop` · `interrupt` · `playSpeakerPCM` · `micPermissionStatus` · `requestMicPermission` · `isLocalModeSupported` · `localAudioStart` · `localAudioStop` · `localPushText` · `localSetMuted` |
 | **render only** | 12 | `load` · `frameSize` · `isReady` · `setDisplayMode` · `setIdleHold` · `engineVersion` · `setExpression2AgentDir` · `setEmbodyAgentDir` · `pushAudio` · `pipAvailable` · `pipStart` · `pipStop` |
 | **both** | 4 | `dispose` (tears down a texture *and* its audio IO) · `notifyTurnEnd` (a voice event that flushes the render tail) · `attachWebrtcRemoteAudio` · `detachWebrtcRemoteAudio` (remote audio → the render lipsync queue) |
-| **neither** | 2 | `fitWindowToCanvas` (window chrome — belongs with the UI module) · `log` |
+| **neither** | 4 | `fitWindowToCanvas` (window chrome — belongs with the UI module) · `log` · `unpackModelContainer` · `isModelContainer` (2.6.11: the engine expands/recognises a downloaded identity file — install, not render or voice) |
 
 `audioStart` is in the voice column *because the texture read is now optional*: it
 resolves `textures[textureId]` into a nil-legal `LipsyncSink` and no longer refuses

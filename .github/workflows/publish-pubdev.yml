@@ -84,10 +84,13 @@ jobs:
       # The container reader in lib/ is a function we named, so the symbol is
       # enough.
       #
-      # ★EXPECTED TO BE RED TODAY. That is the point: the reader is still
-      # present (see the note above it in lib/bithuman.dart). It goes green when
-      # the unpack moves into the engine's compiled bytes and the Dart
-      # implementation is deleted — not by weakening this step.
+      # ★GREEN SINCE 2.6.11, AND IT MUST STAY THAT WAY BY THE RIGHT MEANS. The
+      # Dart reader was deleted and the engine expands the container
+      # (`unpackModelContainer` on the platform channel). This step stays as
+      # the door: a reader that comes back is refused here before publishing,
+      # never admitted by weakening it. NOTE: the reader lived in this public
+      # repository's history from 2026-06-30 (32e0bb4) to 2.6.11 and is carried
+      # by every tag cut in that window; deletion is mitigation, not erasure.
       - name: "PREFLIGHT: no proprietary container reader in the published source"
         run: |
           set -euo pipefail

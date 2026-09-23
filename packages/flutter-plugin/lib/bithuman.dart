@@ -649,7 +649,10 @@ Future<String> downloadExpression2Agent(
   final safe = code.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
   final destDir = Directory('$cacheDir/$safe');
   final marker = File('${destDir.path}/student_v4_forward_frame_cpuAndNE.mlpackage/Manifest.json');
-  if (await marker.exists()) return destDir.path;   // already installed
+  final decoder = File('${destDir.path}/$_kExpression2Decoder');
+  // Installed = the engine can start it. A bundle without the per-identity
+  // decoder is one the engine refuses, so it is re-fetched rather than re-used.
+  if (await marker.exists() && await decoder.exists()) return destDir.path;
 
   final uri = Uri.parse(bundleUrl);
   if (uri.scheme != 'https') {
@@ -706,21 +709,35 @@ Future<String> downloadExpression2Agent(
   if (!await marker.exists()) {
     throw BithumanAvatarException('expression-2 bundle missing student model after extract');
   }
+  if (!await decoder.exists()) {
+    throw BithumanAvatarException(
+        'expression-2 bundle has no $_kExpression2Decoder — it predates the engine this '
+        'plugin pins, which refuses it; fetch the identity from '
+        'GET /v1/agent/{code}/model/download?model=expression-2 instead');
+  }
   return destDir.path;
 }
 
+/// The per-identity pixel decoder every identity the pinned engine starts
+/// carries. Its absence is the one reason a downloaded identity installs and
+/// then renders nothing, so both installers check it.
+const String _kExpression2Decoder = 'dec_p2_v3_all.mlpackage/Manifest.json';
+
 /// Download + install a downloadable ON-DEVICE expression-2 **`.avatar`** (the
-/// self-describing identity container: a zip of manifest.json + student +
-/// audiotokenizer + canon.f32 + idle.mp4) into `<cacheDir>/<code>/` and return
-/// that directory. See docs/MODEL_FORMAT.md.
+/// self-describing identity: manifest.json + student + audiotokenizer +
+/// dec_p2_v3_all + canon.f32 + idle.mp4, as bitHuman's container — what
+/// `GET /v1/agent/{code}/model/download?model=expression-2` serves — or as a
+/// legacy zip) into `<cacheDir>/<code>/` and return that directory. See
+/// docs/MODEL_FORMAT.md.
 ///
 /// vs the legacy [downloadExpression2Agent] (.tar.gz): this verifies the package on
-/// install — `unzip` CRC-checks every entry (catches a truncated/corrupt
-/// download), then the manifest is checked for format + `requires_engine_abi`
-/// compatibility with the app's bundled engine ([engineAbi]) + the required
-/// per-identity files. A mismatch throws instead of loading a broken identity.
-/// https-only + optional host allow-list; cache-aware (keyed on manifest.json so
-/// a legacy tar-cache re-installs as a verified `.avatar`).
+/// install — the container is expanded by the native engine (a zip by `unzip`,
+/// which CRC-checks every entry), then the manifest is checked for format +
+/// `requires_engine_abi` compatibility with the app's bundled engine
+/// ([engineAbi]) + the required per-identity files, the decoder included. A
+/// mismatch throws instead of loading a broken identity. https-only + optional
+/// host allow-list; cache-aware (keyed on manifest.json + the decoder, so an
+/// earlier install the engine refuses is fetched again).
 Future<String> downloadExpression2Avatar(
   String code,
   String avatarUrl,
@@ -733,7 +750,12 @@ Future<String> downloadExpression2Avatar(
   final destDir = Directory('$cacheDir/$safe');
   final marker = File('${destDir.path}/manifest.json');
   final student = File('${destDir.path}/student_v4_forward_frame_cpuAndNE.mlpackage/Manifest.json');
-  if (await marker.exists() && await student.exists()) return destDir.path;   // already installed
+  final decoder = File('${destDir.path}/$_kExpression2Decoder');
+  // Installed = the engine can start it. An earlier install without the
+  // per-identity decoder is re-fetched, not re-used: the engine refuses it.
+  if (await marker.exists() && await student.exists() && await decoder.exists()) {
+    return destDir.path;
+  }
 
   final uri = Uri.parse(avatarUrl);
   if (uri.scheme != 'https') {
@@ -774,11 +796,11 @@ Future<String> downloadExpression2Avatar(
     client.close(force: true);
   }
 
-  // Extract into a fresh staging dir. ★ ACCEPTS BOTH container forms: sniff the
-  // leading bytes — bitHuman's own container unpacks to the same on-disk layout
-  // the zip path produced; else the legacy zip path
-  // (`unzip` CRC-checks each entry → a corrupt/truncated download fails there).
-  // Rollout is reversible: every shipped zip `.avatar` keeps loading unchanged.
+  // Extract into a fresh staging dir. ★ ACCEPTS BOTH container forms: a zip
+  // goes through the system `unzip` (which CRC-checks each entry, so a
+  // corrupt/truncated download fails there); anything else is handed to the
+  // native engine, which owns bitHuman's own container and expands it to the
+  // same on-disk layout. This package never parses that container itself.
   final stageDir = Directory('${destDir.path}.tmp');
   if (await stageDir.exists()) await stageDir.delete(recursive: true);
   await stageDir.create(recursive: true);
@@ -811,6 +833,7 @@ Future<String> downloadExpression2Avatar(
   for (final f in const [
     'student_v4_forward_frame_cpuAndNE.mlpackage/Manifest.json',
     'audiotokenizer_cpuAndNE.mlpackage/Manifest.json',
+    _kExpression2Decoder,
     'canon.f32',
   ]) {
     if (!await File('${stageDir.path}/$f').exists()) { await reject('avatar missing required file: $f'); }
@@ -927,18 +950,16 @@ Future<String> downloadAgentImx(
       rethrow;
     }
     await tmp.rename(local.path);
-    // Validate the downloaded file before returning. An .imx must
-    // begin with bitHuman's container marker and be at least a few MB.
+    // Validate the downloaded file before returning: at least a few MB, and —
+    // where the native engine can tell — one of bitHuman's containers. The
+    // engine owns the format; this package asks it rather than knowing it.
     final size = await local.length();
     if (size < 1024 * 1024) {
       await local.delete();
       throw BithumanAvatarException(
           'downloaded .imx is suspiciously small: $size bytes');
     }
-    final magic = await local.openRead(0, 4).first;
-    if (magic.length < 4 ||
-        magic[0] != 0x49 || magic[1] != 0x4D ||
-        magic[2] != 0x58 || magic[3] != 0x00) {
+    if (await _isModelContainer(local.path) == false) {
       await local.delete();
       throw BithumanAvatarException(
           'downloaded .imx is not a bitHuman container');
@@ -1175,140 +1196,58 @@ Future<String?> nativeEngineVersion() async {
 
 
 // ── on-device avatar container — consumer accept-both ────────────────────────
-// The on-device `.model`/`.avatar` may arrive as a zip archive or as bitHuman's
-// own single-file container. Both reconstruct the SAME on-disk layout, so every
+// The on-device `.avatar` may arrive as a zip archive or as bitHuman's own
+// single-file container. Both expand to the SAME on-disk layout, so every
 // downstream reader (the Expression2Engine load path keyed on `activeAgentDir`)
 // is unchanged either way.
 //
-// ★THE CONTAINER FORMAT IS PROPRIETARY AND IS NOT DESCRIBED HERE.
-// Owner ruling 2026-09-16: it is closed source and stays in a private repo.
-// This file is in a PUBLIC repository and is the source pub.dev would publish,
-// so the byte layout that used to be written out in this comment is gone.
-//
-// ★AND THE READER BELOW STILL HAS TO GO — it is a second implementation of a
-// format whose one implementation belongs in compiled bytes. The fix is NOT to
-// rewrite it in Swift or Kotlin: ios/Classes and shared/Classes are in this
-// same public repo, so that would move the disclosure, not end it. The fix is
-// to call the ENGINE, which already reads the container inside the xcframework
-// and the AAR. Concretely: give the engine SDKs an unpack entry point beside
-// the existing `AvatarRef(path:)` — which today wants an ALREADY-EXPANDED
-// directory, and that is the only reason this Dart code exists at all — expose
-// it on the platform channel, and delete everything below.
-//
-// Until that lands, `.github/workflows/publish-pubdev.yml` REFUSES to publish
-// this package at all. See the preflight step there: it is deliberately red
-// while the reader exists, because publishing is the irreversible act.
+// ★THE CONTAINER FORMAT IS PROPRIETARY (owner ruling 2026-09-16): closed source,
+// private repositories only. This file is in a PUBLIC repository, so it carries
+// no reader and no description of the format. The container is expanded by the
+// ENGINE, whose compiled code already reads it (`unpackModelContainer` on the
+// platform channel); this package only tells a zip — a public format — from
+// "not a zip" and hands the latter over.
 
-const List<int> _imxMagic = [0x49, 0x4D, 0x58, 0x00];
-const int _imxVersion = 2;
-
-/// Extract an on-device avatar/model container into [dir]. Sniffs the leading
-/// bytes: bitHuman's own container → [_unpackImxContainer]; else the legacy zip
-/// path (`unzip`, which CRC-checks every entry). Throws on failure.
-Future<void> _extractAvatarContainer(File archive, Directory dir) async {
-  final raf = await archive.open();
-  List<int> head;
+/// True when [file] starts with a PKZIP local-file header (a public format).
+Future<bool> _isZip(File file) async {
+  final raf = await file.open();
   try {
-    head = await raf.read(4);
+    final h = await raf.read(4);
+    return h.length == 4 && h[0] == 0x50 && h[1] == 0x4B && h[2] == 0x03 && h[3] == 0x04;
   } finally {
     await raf.close();
   }
-  final isImx = head.length == 4 &&
-      head[0] == _imxMagic[0] && head[1] == _imxMagic[1] &&
-      head[2] == _imxMagic[2] && head[3] == _imxMagic[3];
-  if (isImx) {
-    await _unpackImxContainer(archive, dir);
+}
+
+/// Asks the native engine whether [path] is one of bitHuman's containers.
+/// Null when this platform's engine cannot tell (it loads identities by code);
+/// the load itself then refuses a bad file by name.
+Future<bool?> _isModelContainer(String path) async {
+  try {
+    return await _channel.invokeMethod<bool>('isModelContainer', {'path': path});
+  } on MissingPluginException {
+    return null;
+  }
+}
+
+/// Expand an on-device avatar/model archive into [dir]: a zip through the
+/// system `unzip` (which CRC-checks every entry), anything else through the
+/// native engine. Throws on failure.
+Future<void> _extractAvatarContainer(File archive, Directory dir) async {
+  if (await _isZip(archive)) {
+    final r = await Process.run('unzip', ['-qq', archive.path, '-d', dir.path]);
+    if (r.exitCode != 0) {
+      throw 'unzip exit ${r.exitCode}: ${r.stderr}';
+    }
     return;
   }
-  final r = await Process.run('unzip', ['-qq', archive.path, '-d', dir.path]);
-  if (r.exitCode != 0) {
-    throw 'unzip exit ${r.exitCode}: ${r.stderr}';
-  }
-}
-
-/// Unpack a single-file avatar container into [dir], reconstructing the
-/// `.mlpackage` directory trees from the flattened member names.
-/// ★Proprietary format — see the note above; this belongs in compiled bytes.
-Future<void> _unpackImxContainer(File archive, Directory dir) async {
-  final raf = await archive.open();
   try {
-    int le16(List<int> b, int o) => b[o] | (b[o + 1] << 8);
-    int le64(List<int> b, int o) {
-      var v = 0;
-      for (var i = 0; i < 8; i++) {
-        v |= b[o + i] << (8 * i);
-      }
-      return v;
-    }
-
-    final headD = await raf.read(8);
-    if (headD.length != 8) throw 'avatar container: file too small';
-    if (!(headD[0] == _imxMagic[0] && headD[1] == _imxMagic[1] &&
-          headD[2] == _imxMagic[2] && headD[3] == _imxMagic[3])) {
-      throw 'avatar container: not a bitHuman container';
-    }
-    final version = le16(headD, 4);
-    if (version != _imxVersion) throw 'avatar container: unsupported version';
-    final count = le16(headD, 6);
-
-    // Parse the member index.
-    final entries = <_ImxEntry>[];
-    var cursor = 8;
-    for (var i = 0; i < count; i++) {
-      await raf.setPosition(cursor);
-      final lenD = await raf.read(2);
-      if (lenD.length != 2) throw 'avatar container: truncated index';
-      final nameLen = le16(lenD, 0);
-      cursor += 2;
-      await raf.setPosition(cursor);
-      final nameD = await raf.read(nameLen);
-      if (nameD.length != nameLen) throw 'avatar container: truncated index';
-      final name = utf8.decode(nameD);
-      cursor += nameLen;
-      await raf.setPosition(cursor);
-      final osD = await raf.read(16);
-      if (osD.length != 16) throw 'avatar container: truncated index';
-      final off = le64(osD, 0), size = le64(osD, 8);
-      cursor += 16;
-      // Reject path traversal (defensive — the producer never emits "..").
-      if (name.startsWith('/') || name.contains('..')) {
-        throw 'avatar container: unsafe member name';
-      }
-      entries.add(_ImxEntry(name, off, size));
-    }
-
-    // Stream each payload to its reconstructed on-disk path (sorted by name, to
-    // match Swift's `toc.keys.sorted()` write order — irrelevant to bytes, kept
-    // for deterministic behaviour).
-    entries.sort((a, b) => a.name.compareTo(b.name));
-    const chunkCap = 1 << 20;
-    for (final e in entries) {
-      final dest = File('${dir.path}/${e.name}');
-      await dest.parent.create(recursive: true);
-      final sink = dest.openWrite();
-      try {
-        await raf.setPosition(e.offset);
-        var remaining = e.size;
-        while (remaining > 0) {
-          final want = remaining < chunkCap ? remaining : chunkCap;
-          final chunk = await raf.read(want);
-          if (chunk.isEmpty) throw 'avatar container: truncated reading ${e.name}';
-          sink.add(chunk);
-          remaining -= chunk.length;
-        }
-      } finally {
-        await sink.close();
-      }
-    }
-  } finally {
-    await raf.close();
+    await _channel.invokeMethod<int>(
+        'unpackModelContainer', {'path': archive.path, 'dir': dir.path});
+  } on MissingPluginException {
+    throw 'this platform does not expand an avatar container on the device '
+        '(Android loads an identity by code; see BithumanAvatar.load)';
+  } on PlatformException catch (e) {
+    throw '${e.code}: ${e.message ?? ''}';
   }
 }
-
-class _ImxEntry {
-  final String name;
-  final int offset;
-  final int size;
-  const _ImxEntry(this.name, this.offset, this.size);
-}
-

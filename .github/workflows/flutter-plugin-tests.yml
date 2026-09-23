@@ -87,21 +87,21 @@ jobs:
       # proprietary and stays in a private repo. This repository is PUBLIC and
       # pub.dev would publish `lib/` AS SOURCE.
       #
-      # ★A RATCHET, NOT A CLIFF. One reader exists today and its removal needs
-      # an engine-side unpack entry point (see the note above it in
-      # lib/bithuman.dart) — so the count is baselined and may only SHRINK. A
-      # SECOND file gaining one is refused by name. It screens for OUR OWN
-      # symbol, never for the layout: naming the format here to detect the
-      # format would be the disclosure it prevents.
+      # ★A RATCHET AT ZERO (2.6.11). The one Dart reader was deleted; the
+      # container is expanded by the native engine (`unpackModelContainer` on
+      # the platform channel). The baseline is 0 and may not rise: a file that
+      # gains a reader again is refused by name. It screens for OUR OWN symbol,
+      # never for the layout: naming the format here to detect the format would
+      # be the disclosure it prevents.
       - name: no NEW file parses the avatar container
         run: |
           set -euo pipefail
-          BASELINE=1
+          BASELINE=0
           N=$(grep -rl "_unpackImxContainer" lib/ 2>/dev/null | wc -l | tr -d " ")
           echo "files parsing the container in lib/: $N (baseline $BASELINE)"
           grep -rl "_unpackImxContainer" lib/ 2>/dev/null || true
           if [ "$N" -gt "$BASELINE" ]; then
-            echo "::error::a NEW file parses the proprietary avatar container. This is a RATCHET: the one reader that exists today is expected and baselined, a SECOND one is not. The one implementation belongs in the engine's compiled bytes, not in this public repo — and not rewritten into ios/Classes or shared/Classes, which are in it too. Do not raise BASELINE to make this pass."
+            echo "::error::a file in lib/ parses the proprietary avatar container again. This is a RATCHET at zero: the Dart reader was deleted in 2.6.11 and the engine expands the container (unpackModelContainer). The one implementation belongs in the engine's compiled bytes, not in this public repo — and not rewritten into ios/Classes or shared/Classes, which are in it too. Do not raise BASELINE to make this pass."
             exit 1
           fi
           if [ "$N" -lt "$BASELINE" ]; then
