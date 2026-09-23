@@ -18,11 +18,11 @@
 //     product 'Expression' ... not found in package 'homebrew-bithuman'
 //
 //   - bitHumanKit              binary umbrella, tag v2.4.0. `import bitHumanKit`.
-//   - Expression2              expression-2 engine alone, tag v2.6.4.
+//   - Expression2              expression-2 engine alone, tag v2.6.5.
 //                              `import Expression2`. FOUR binaryTargets ride
 //                              under it now, not three — see UnifiedModelHeader.
 //   - Essence2                 essence-2 engine alone, archives on tag
-//                              essence2-v1.10.0 — read `essence2Tag` below, never
+//                              essence2-v1.11.0 — read `essence2Tag` below, never
 //                              this sentence, for where the bytes are; it has
 //                              been wrong before. `import Essence2` works since
 //                              essence2-v1.2.0 (the archive's module map declares both
@@ -74,7 +74,7 @@
 //                  `Bithuman.create(modelPath:)`. The `Bithuman` ACTOR is real;
 //                  "the portable libessence C++ runtime" was not.
 //   - Expression2  Layer-1 expression-2 avatar engine, pure Swift + CoreML.
-//                  Published at tag v2.6.4 (see `expression2Tag` below).
+//                  Published at tag v2.6.5 (see `expression2Tag` below).
 //                  v2.6.4 (2026-09-23): a macOS APP can embed it. Through
 //                  v2.6.3 every macOS slice was a SHALLOW framework, which
 //                  `swift build` links and Xcode's app validation refuses
@@ -122,7 +122,7 @@
 //                  render out of the box; it can now be handed one.
 //   - Essence2     Layer-1 essence-2 engine for Apple platforms (iOS device,
 //                  iOS Simulator, macOS — all arm64). Its archives ship on tag
-//                  essence2-v1.10.0; `essence2Tag` below is the value that
+//                  essence2-v1.11.0; `essence2Tag` below is the value that
 //                  decides, and this line is a copy of it that has drifted before.
 //                  ★ TWO MODULE NAMES, ONE HEADER. What this product vends is
 //                  the engine's 15-function C interface, not a Swift type. Since
@@ -428,7 +428,7 @@
 //
 // RELEASE NOTE:
 //   `bitHumanKit` (the umbrella, tag v2.4.0) and `Expression2` + its binary
-//   `BithumanEngineProtocol` + `UnifiedModelHeader` (tag v2.6.4) ship today.
+//   `BithumanEngineProtocol` + `UnifiedModelHeader` (tag v2.6.5) ship today.
 //   ★ v2.6.1 EXISTS FOR ONE REASON: the archives on v2.6.0 named an
 //   enterprise-only tier that no public artifact may name. Counted with
 //   `strings -a` reading each file as raw bytes on stdin, V12+V13 over every
@@ -489,7 +489,7 @@ let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/release
 // tag the consumer's `from:` picks and then reads absolute URLs out of the
 // manifest it finds there — the asset does not have to live on the resolved tag.
 // ---------------------------------------------------------------------------
-let expression2Tag = "v2.6.4"
+let expression2Tag = "v2.6.5"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 
@@ -727,7 +727,36 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // onnxruntime is carried forward byte-identical once more — the SAME release
 // asset, so its checksum does not move; it must be attached to this tag too,
 // because `essence2Base` is the tag both URLs are read from.
-let essence2Tag = "essence2-v1.10.0"
+// ---------------------------------------------------------------------------
+// ★ ROLLED 2026-09-23 ONTO essence2-v1.11.0 + Expression2 v2.6.5 (package tag v2.14.2) —
+// SELF-HOSTED SESSIONS BILL TALKING TIME ONLY, AND EXPRESSION 2 ON APPLE IS METERED AT ALL.
+// Owner rulings 2026-09-23: idle is free everywhere; a session the service authenticated
+// keeps rendering through an outage for 300 s of RENDERED frames, then refuses retryably
+// until the service answers, and the outage's usage is claimed then; a credential the
+// service never vouched for renders nothing. bithuman-models #1132 + #1165 (both engines)
+// and #1144 (BITHUMAN_API_KEY read as a deprecated alias of BITHUMAN_API_SECRET), #1125
+// (the Metal teeth compositor releases a session's buffers), #1183 (Expression2's create
+// names a metering refusal instead of blaming CoreML). Expression2 v2.6.4 had NO session
+// meter; v2.6.5 does (`Expression2Credential.set`, `Expression2Engine.meteringRefusal`,
+// `shutdown()`), and a Release build refuses without a credential.
+//
+// essence2-v1.11.0 is bithuman-models essence2-apple-v1.11.0 (295e3aaf2), built and
+// graded by apple-xcframework.yml (run 35824196849) and re-hosted here byte-for-byte by
+// publish-essence2-apple.yml: libessence2.xcframework.zip sha256 08511e16…, its checksum
+// below. Expression2 v2.6.5 was built on echelon (Xcode 26.3) from bithuman-models
+// ec9a3ab83 by publish-apple-release.sh --build; its three checksums above are the
+// sidecars of those files.
+//
+// MEASURED ON THESE BYTES before the pin moved: a NEW App-template app depending on this
+// package links for macOS, iOS Simulator and iOS device on Xcode 26.3 (echelon) and on
+// the newest hosted Xcode 26.6 / Swift 6.3.3 (apple-candidate-consumer.yml run
+// 35848154472); a real metered macOS session per engine: talk 15 s / idle 130 s /
+// talk 10 s bills talking 25.5 s (essence-2) and 23.4 s (expression-2) with the idle
+// beat at talking 0.0; unreachable service at first contact renders 0 frames on both;
+// the 300 s grace refuses at 7,500 frames since the last ack and resumes on reconnect,
+// the outage claimed as accrued. iPhone 15 floor series on these bytes: see the
+// release notes. onnxruntime is carried forward byte-identical again.
+let essence2Tag = "essence2-v1.11.0"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -872,17 +901,17 @@ let package = Package(
         .binaryTarget(
             name: "Expression2Binary",
             url: "\(expression2Base)/Expression2.xcframework.zip",
-            checksum: "644d192d29fb32f80a5ddd03cbf131b828432b93fecc15a623144c1398f2b302"
+            checksum: "f1fb6775deca2884739432cb0f0c8d85173234c7f1137c3b8a01dd96ac84c732"
         ),
         .binaryTarget(
             name: "BithumanEngineProtocolBinary",
             url: "\(expression2Base)/BithumanEngineProtocol.xcframework.zip",
-            checksum: "a980483a92d5eb8900c76f0f6391ec2eb66b30992ecefa61ab0f0e5f4b9a033c"
+            checksum: "1dcb82534267ccb59f3f46681b202d3d1029eb40ef667a953e1f9669be11fe5f"
         ),
         .binaryTarget(
             name: "UnifiedModelHeaderBinary",
             url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
-            checksum: "eb5fde201bd122200332f656ba6049b494bbb6a2dc50ebd5906f11f2b4a01a41"
+            checksum: "5e3e56a0a1895cb8f9277aee921d7ac30b7318d0fe75e78688f5223507e70c03"
         ),
         // The essence-2 engine itself. The target name matches the xcframework
         // inside the archive; the MODULES it vends are `CLibEssence2` and, since
@@ -891,7 +920,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "eacbbfdb99f0cb53765822db8cdbd7c0fed9e00bd6f9457a46e5d1831df57e1b"
+            checksum: "08511e1632bfa5b99f67b78c7f43baefbf292d9bf15c07ca5ef18b48f06631c1"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
