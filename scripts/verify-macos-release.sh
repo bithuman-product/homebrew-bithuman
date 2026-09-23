@@ -112,13 +112,53 @@ fi
 echo "== run the quarantined binary (the customer's first launch) =="
 # This is the assertion that actually matters. An ad-hoc binary dies here with
 # rc=137 (SIGKILL) and prints nothing.
+#
+# ★AND ON A MAC WITH A CONSOLE USER IT NEVER RETURNS AT ALL (measured on
+# echelon 2026-09-23, the cli-v2.7.1 cut). There Gatekeeper does not decide
+# alone: syspolicyd logs `Found console users` and then `Prompt shown (…),
+# waiting for response`, and the launch sits in _dyld_start until a human
+# clicks. The notarized Developer ID binary waited 14 min before it was killed
+# by PID; this script had no timeout, so the release rail hung with the host's
+# measure lock held. alpharetta (no console user) had passed the same step in
+# 19 s. So the launch is bounded, and when it is still waiting the verdict is
+# read from what Gatekeeper ALREADY DECIDED for this launch, in its own log:
+#   evaluateScanResult 0, team G64NFNZX84, id bithuman, Prompt (5, …) ->
+#       ACCEPTED: the Developer ID + notarization passed; the prompt is macOS
+#       asking a person to confirm opening a downloaded tool (measured);
+#   evaluateScanResult 1 or 2 (the ad-hoc control on echelon read 1, then
+#       Prompt (6, …) "cannot verify") -> FAIL, as before.
+# A bounded wait with no decision in the log is a FAIL too: a gate that cannot
+# see is not a pass.
+LAUNCH_TIMEOUT="${VERIFY_MACOS_LAUNCH_TIMEOUT:-90}"
+T0="$(date '+%Y-%m-%d %H:%M:%S')"
 set +e
-OUT="$("$BIN" --version 2>&1)"
-RC=$?
+"$BIN" --version > "$WORK/launch.out" 2>&1 &
+LPID=$!
+waited=0
+while kill -0 "$LPID" 2>/dev/null && [ "$waited" -lt "$LAUNCH_TIMEOUT" ]; do sleep 1; waited=$((waited+1)); done
+if kill -0 "$LPID" 2>/dev/null; then
+  kill "$LPID" 2>/dev/null; wait "$LPID" 2>/dev/null
+  RC=timeout
+else
+  wait "$LPID"; RC=$?
+fi
 set -e
+OUT="$(cat "$WORK/launch.out")"
 echo "$OUT"
-echo "run rc=$RC"
-if [ "$RC" -ne 0 ]; then
+echo "run rc=$RC (waited ${waited}s, bound ${LAUNCH_TIMEOUT}s)"
+if [ "$RC" = timeout ]; then
+  GK="$(/usr/bin/log show --start "$T0" --style compact \
+          --predicate 'process == "syspolicyd" AND subsystem == "com.apple.syspolicy.exec"' 2>/dev/null \
+        | grep -E 'evaluateScanResult|Prompt shown' | grep -F '(id: bithuman)' || true)"
+  echo "$GK" | sed 's/^/  gatekeeper| /'
+  if printf '%s\n' "$GK" | grep -qE 'evaluateScanResult: 0, .*\(team: G64NFNZX84\), \(id: bithuman\)' \
+     && printf '%s\n' "$GK" | grep -qE 'Prompt shown \(5, '; then
+    echo "verify-macos: quarantined first launch ACCEPTED by Gatekeeper (evaluateScanResult 0, Developer ID G64NFNZX84, notarized) — a console user is logged in, so macOS asked them to confirm opening a downloaded tool and the run could not finish unattended"
+  else
+    echo "verify-macos: FAIL -- the quarantined launch did not return in ${LAUNCH_TIMEOUT}s and Gatekeeper's log shows no ACCEPT (evaluateScanResult 0, team G64NFNZX84) for it" >&2
+    fail=1
+  fi
+elif [ "$RC" -ne 0 ]; then
   echo "verify-macos: FAIL -- quarantined binary did not run (rc=$RC)" >&2
   fail=1
 fi
