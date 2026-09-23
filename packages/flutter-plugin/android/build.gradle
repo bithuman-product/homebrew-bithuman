@@ -130,7 +130,7 @@ dependencies {
     // UnsatisfiedLinkError at the first create() (measured on a Galaxy S25+). A Flutter
     // release build always includes the default file, so this plugin was not exposed; the
     // pin moves so the plugin carries the current engine. Engine output unchanged: same
-    // handset proof as 0.5.12 (LIP CONTOUR bound, synth_w 0/0, passthrough 0).
+    // handset proof as 0.5.12 (lip contour bound, generated mouth share 0/0).
     implementation 'ai.bithuman:essence2-android:0.5.13'
 }
 
