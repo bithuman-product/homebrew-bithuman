@@ -11,7 +11,7 @@
 //   Essence2Credential.set(apiSecret)
 //   let engine = try await Essence2Engine.create(identity: identityURL)
 //   engine.feed(samples16kHz)                 // Float, mono, 16 kHz
-//   while let f = engine.pull() { show(f.frame, engine.width, engine.height) }
+//   while let f = engine.pull() { show(f.frame, engine.width, engine.height) }   // B, G, R bytes
 //   engine.interrupt()                        // barge-in: rides on the current frame
 //   engine.shutdown()
 //
@@ -165,7 +165,8 @@ public final class Essence2Engine: @unchecked Sendable {
         if pendingOffset == pending.count { pending.removeAll(keepingCapacity: true); pendingOffset = 0 }
     }
 
-    /// The next frame (RGB, height*width*3) and whether it is a speech frame; nil when none is ready.
+    /// The next frame (height*width*3 bytes in B, G, R order) and whether it is a speech frame;
+    /// nil when none is ready.
     /// Returns nil while metering refuses — `meteringRefusal` then carries the engine's sentence.
     public func pull() -> (frame: [UInt8], speech: Bool)? {
         lock.lock(); defer { lock.unlock() }
@@ -183,7 +184,7 @@ public final class Essence2Engine: @unchecked Sendable {
         return (Array(buffer.prefix(Int(n))), speech)
     }
 
-    /// The next idle frame into `buffer` (RGB). Returns bytes written; 0 means keep showing the
+    /// The next idle frame into `out` (B, G, R). Returns bytes written; 0 means keep showing the
     /// frame you have (it never means "show something else").
     public func idle(into out: inout [UInt8]) -> Int {
         lock.lock(); defer { lock.unlock() }
