@@ -18,7 +18,7 @@
 //     product 'Expression' ... not found in package 'homebrew-bithuman'
 //
 //   - bitHumanKit              binary umbrella, tag v2.4.0. `import bitHumanKit`.
-//   - Expression2              expression-2 engine alone, tag v2.6.3.
+//   - Expression2              expression-2 engine alone, tag v2.6.4.
 //                              `import Expression2`. FOUR binaryTargets ride
 //                              under it now, not three — see UnifiedModelHeader.
 //   - Essence2                 essence-2 engine alone, archives on tag
@@ -74,7 +74,18 @@
 //                  `Bithuman.create(modelPath:)`. The `Bithuman` ACTOR is real;
 //                  "the portable libessence C++ runtime" was not.
 //   - Expression2  Layer-1 expression-2 avatar engine, pure Swift + CoreML.
-//                  Published at tag v2.6.3 (see `expression2Tag` below).
+//                  Published at tag v2.6.4 (see `expression2Tag` below).
+//                  v2.6.4 (2026-09-23): a macOS APP can embed it. Through
+//                  v2.6.3 every macOS slice was a SHALLOW framework, which
+//                  `swift build` links and Xcode's app validation refuses
+//                  ("the platform does not use shallow bundles") — a new
+//                  macOS App-template project taking this product (or
+//                  `Essence2`, which carries UnifiedModelHeader) was BUILD
+//                  FAILED. The macOS slices are versioned bundles now; iOS and
+//                  the simulator stay shallow. And a release build no longer
+//                  writes probe files to /tmp or honours the engine's
+//                  fault-injection variable. Public surface unchanged: the
+//                  .swiftinterface files are identical to v2.6.3.
 //                  v2.6.3 (2026-09-16): the idle clip plays whole, decoded in
 //                  place — `idleLoop: [[UInt8]]` is DELETED from the public
 //                  surface (a consumer naming it does not compile; take
@@ -344,6 +355,18 @@
 //   macOS:   M3+ Apple Silicon, macOS 26 (Tahoe)
 //   iPad:    iPad Pro M4+, 16 GB unified memory, iPadOS 26
 //   iPhone:  iPhone 16 Pro+ (A18 Pro), iOS 26
+// ★★ THE iPHONE HALF IS SUPERSEDED FOR `Essence2` FROM essence2-v1.9.0 — read
+//   this first. The iPhone 16 Pro refusal recorded below was measured on
+//   essence2-v1.4.0 – v1.5.x. In the ios-arm64 slice of essence2-v1.10.0 (the
+//   engine `essence2Tag` pins) the one remaining sentence reads, by `strings -a`
+//   on 2026-09-23: "the expression-1 Expression actor (MLX DiT) requires iPhone
+//   16 Pro or later (A18 Pro+). This gate is expression-1's alone: it is NOT a
+//   bitHuman-SDK-wide device floor, and it does NOT apply to essence-2 or
+//   expression-2, which carry no device gate." An iPhone 15 was measured
+//   rendering Essence 2 at 1920x1080 (docs.bithuman.ai/sdk/performance). The
+//   macOS slice still carries "requires Apple M3 or later" (1 occurrence), so
+//   the Mac floor below stands. The history is kept because a project resolved
+//   to an older tag still behaves the way it describes.
 // ★ That floor grades bitHumanKit AND `Essence2` ON iOS — NOT `Expression2`.
 //   Expression2 is a separate binary with its own CoreML requirements and is
 //   not gated by HardwareCheck; this block used to say the floor graded
@@ -405,7 +428,7 @@
 //
 // RELEASE NOTE:
 //   `bitHumanKit` (the umbrella, tag v2.4.0) and `Expression2` + its binary
-//   `BithumanEngineProtocol` + `UnifiedModelHeader` (tag v2.6.3) ship today.
+//   `BithumanEngineProtocol` + `UnifiedModelHeader` (tag v2.6.4) ship today.
 //   ★ v2.6.1 EXISTS FOR ONE REASON: the archives on v2.6.0 named an
 //   enterprise-only tier that no public artifact may name. Counted with
 //   `strings -a` reading each file as raw bytes on stdin, V12+V13 over every
@@ -466,7 +489,7 @@ let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/release
 // tag the consumer's `from:` picks and then reads absolute URLs out of the
 // manifest it finds there — the asset does not have to live on the resolved tag.
 // ---------------------------------------------------------------------------
-let expression2Tag = "v2.6.3"
+let expression2Tag = "v2.6.4"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 
@@ -786,7 +809,20 @@ let package = Package(
         // so an app taking both products resolves ONE copy of it. And it is
         // already in this manifest at `expression2Tag` — no new coordinate, no
         // new download for anyone taking both.
-        .library(name: "Essence2", targets: ["libessence2", "onnxruntime", "UnifiedModelHeaderBinary"]),
+        //
+        // ★ AND A FOURTH, WHICH IS NOT A BINARY AT ALL: `Essence2LinkSettings`.
+        // `libessence2.a` is a STATIC C/C++/Objective-C++ archive, and a static
+        // archive records none of the Apple libraries it calls, so until 2.14.1
+        // every app taking this product compiled and then FAILED ITS FINAL LINK
+        // with hundreds of undefined symbols (`std::__1::…`, `_VTDecompression…`,
+        // `_BNNSFilter…`, `_OBJC_CLASS_$_MLModel`) until the developer added four
+        // link settings by hand — which docs.bithuman.ai had to teach as a
+        // required step. MEASURED 2026-09-23 on alpharetta (Xcode 26.4.1), a new
+        // App-template project taking `Essence2` from 2.14.0: ** BUILD FAILED **
+        // on exactly those symbols. A binaryTarget cannot carry linkerSettings; a
+        // source target can, and SwiftPM hands them to the final link of every
+        // app that takes this product. So the four settings live here, once.
+        .library(name: "Essence2", targets: ["libessence2", "onnxruntime", "UnifiedModelHeaderBinary", "Essence2LinkSettings"]),
     ],
     targets: [
         .binaryTarget(
@@ -836,17 +872,17 @@ let package = Package(
         .binaryTarget(
             name: "Expression2Binary",
             url: "\(expression2Base)/Expression2.xcframework.zip",
-            checksum: "3722710998831779acc33e5f1c8e60a8af6ef6879764c26d9f1cbae717b78aea"
+            checksum: "644d192d29fb32f80a5ddd03cbf131b828432b93fecc15a623144c1398f2b302"
         ),
         .binaryTarget(
             name: "BithumanEngineProtocolBinary",
             url: "\(expression2Base)/BithumanEngineProtocol.xcframework.zip",
-            checksum: "ee58694d6bd7663047750702f21a51ace1a35bfe421403349e001885b6678641"
+            checksum: "a980483a92d5eb8900c76f0f6391ec2eb66b30992ecefa61ab0f0e5f4b9a033c"
         ),
         .binaryTarget(
             name: "UnifiedModelHeaderBinary",
             url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
-            checksum: "a8bf748cd564dc1348eb3c8f789fbc1e79077d34bdacb7755c5135c4abc744a5"
+            checksum: "eb5fde201bd122200332f656ba6049b494bbb6a2dc50ebd5906f11f2b4a01a41"
         ),
         // The essence-2 engine itself. The target name matches the xcframework
         // inside the archive; the MODULES it vends are `CLibEssence2` and, since
@@ -861,6 +897,24 @@ let package = Package(
         // Runtime symbols are undefined at the app's final link (measured — see
         // the essence-2 section in the header). Re-hosted here unchanged so it
         // can be fetched without credentials.
+        // The Apple libraries libessence2.a calls, declared where SwiftPM can
+        // pass them to the app's final link (see the `Essence2` product). Each
+        // was dropped on its own from a working link to see what it is for:
+        //   c++           316 undefined — the C++ standard library
+        //   VideoToolbox    5 undefined — `_VTDecompressionSession…`
+        //   Accelerate     27 undefined — `_BNNSFilter…`, `_cblas_sgemm…`
+        //   CoreML          5 undefined — `_OBJC_CLASS_$_MLModel` and siblings
+        // Safe settings, not unsafeFlags, so a version-pinned consumer takes them.
+        .target(
+            name: "Essence2LinkSettings",
+            path: "Sources/Essence2LinkSettings",
+            linkerSettings: [
+                .linkedLibrary("c++"),
+                .linkedFramework("VideoToolbox"),
+                .linkedFramework("Accelerate"),
+                .linkedFramework("CoreML"),
+            ]
+        ),
         .binaryTarget(
             name: "onnxruntime",
             url: "\(essence2Base)/onnxruntime.xcframework.zip",
