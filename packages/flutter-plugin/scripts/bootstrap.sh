@@ -112,16 +112,21 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # (It read 92d9d9d56 — the essence2-v1.9.0 tree — until this bump. That pin is
 # what decides which engine ADAPTER SOURCE the pod compiles, so it moves with
 # the engine or the pod compiles one release's Swift against another's bytes.)
-BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-05e443da9c684d015572061bb4017dac1d4ecfa6}"
+# ★MOVED 2026-09-23 to ec9a3ab83 — the tree Expression2 v2.6.5 was built from, which also
+# carries the essence2-v1.11.0 engine sources (essence2-apple-v1.11.0 = 295e3aaf2, an
+# ancestor; no Apple-engine source changed between them): the first Apple session meter
+# for Expression 2 (#1165), talking-time billing + the 300 s online grace on both engines,
+# the BITHUMAN_API_KEY alias (#1144), and create() naming a metering refusal (#1183).
+BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-ec9a3ab83244422b066aed20100e9236be57ebed}"
 
 # The essence-2 Apple ENGINE + its runtime RESOURCES. One release carries both.
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
 # `libessence2.xcframework.zip` binaryTarget checksum and the release's own
 # resources sidecar. Passed to the engine SDK bootstrap explicitly below.
-LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.10.0}"
-LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-eacbbfdb99f0cb53765822db8cdbd7c0fed9e00bd6f9457a46e5d1831df57e1b}"
-LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.10.0}"
-LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-fa9bfc79eca9a7f82da1bd0bdd4fc968c161ae41016eb3fb3000ea2c8cfd9b46}"
+LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.11.0}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-08511e1632bfa5b99f67b78c7f43baefbf292d9bf15c07ca5ef18b48f06631c1}"
+LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.11.0}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-3024f45530176b888ee3944a5c5460c9cd2a2eb563f9c72b1674419f14ed1058}"
 
 # The UnifiedModelHeader module, as a plain static .a per slice.
 #
@@ -149,8 +154,8 @@ LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-fa9bfc79eca9a7f82d
 # UnifiedModelHeader bytes — nothing compared them. scripts/check-apple-engine-pin.sh
 # now does (A6): these two values must equal `expression2Tag` and the
 # UnifiedModelHeaderBinary checksum in Package.swift.
-UMH_RELEASE="${UMH_RELEASE:-v2.6.4}"
-UMH_SHA256="${UMH_SHA256:-eb5fde201bd122200332f656ba6049b494bbb6a2dc50ebd5906f11f2b4a01a41}"
+UMH_RELEASE="${UMH_RELEASE:-v2.6.5}"
+UMH_SHA256="${UMH_SHA256:-5e3e56a0a1895cb8f9277aee921d7ac30b7318d0fe75e78688f5223507e70c03}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so
