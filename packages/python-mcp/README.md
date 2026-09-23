@@ -53,14 +53,14 @@ The server exposes **22 tools**, each mapping to one documented REST endpoint
 
 ## Setup
 
-You need an API secret from the [Developer Dashboard](https://www.bithuman.ai/#developer).
+You need an API secret from [Developer → API Secrets](https://www.bithuman.ai/developer/api-keys).
 
 Published on PyPI as [`bithuman-mcp`](https://pypi.org/project/bithuman-mcp/).
 The easiest way to run it is with [`uvx`](https://docs.astral.sh/uv/)
 (recommended for MCP clients), or `pip install bithuman-mcp`.
 
 ```bash
-BITHUMAN_API_SECRET=bh-... uvx bithuman-mcp
+BITHUMAN_API_SECRET="<your API secret>" uvx bithuman-mcp
 ```
 
 ## Use with Claude Desktop / Claude Code

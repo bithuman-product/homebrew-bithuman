@@ -34,4 +34,4 @@ What problem does this solve, or what gap does it fill?
 
 - [ ] My change is focused (one example, one doc page, one fix)
 - [ ] I matched the surrounding tone and formatting
-- [ ] I'm not committing API keys, model weights, or other secrets
+- [ ] I'm not committing API secrets, model weights, or other credentials

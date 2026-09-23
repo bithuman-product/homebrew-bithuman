@@ -5,8 +5,9 @@ REST API (https://api.bithuman.ai). Every tool maps to one documented endpoint
 (see https://docs.bithuman.ai/api/overview and the OpenAPI spec at
 https://docs.bithuman.ai/api/openapi.yaml).
 
-Auth: set BITHUMAN_API_SECRET in the environment (get one at
-https://www.bithuman.ai/#developer). The server never logs or echoes it.
+Auth: set BITHUMAN_API_SECRET — your API secret — in the environment (get one
+at https://www.bithuman.ai/developer/api-keys). BITHUMAN_API_KEY is still read
+as a deprecated alias. The server never logs or echoes either.
 
 Transport: stdio by default (works with Claude Desktop / Claude Code / Cursor).
 Set BITHUMAN_MCP_TRANSPORT=streamable-http to serve over HTTP instead.
@@ -24,7 +25,20 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 API_BASE = os.environ.get("BITHUMAN_API_BASE", "https://api.bithuman.ai").rstrip("/")
-API_SECRET = os.environ.get("BITHUMAN_API_SECRET", "")
+def _api_secret() -> str:
+    """BITHUMAN_API_SECRET, else the deprecated alias BITHUMAN_API_KEY (names only in any message)."""
+    secret = os.environ.get("BITHUMAN_API_SECRET", "").strip()
+    alias = os.environ.get("BITHUMAN_API_KEY", "").strip()
+    if secret and alias and secret != alias:
+        print("bithuman-mcp: BITHUMAN_API_SECRET and BITHUMAN_API_KEY differ; using BITHUMAN_API_SECRET",
+              file=sys.stderr)
+    if not secret and alias:
+        print("bithuman-mcp: BITHUMAN_API_KEY is a deprecated alias; set BITHUMAN_API_SECRET instead",
+              file=sys.stderr)
+    return secret or alias
+
+
+API_SECRET = _api_secret()
 TIMEOUT = float(os.environ.get("BITHUMAN_MCP_TIMEOUT", "120"))
 # Public status feed (https://status.bithuman.ai) — no auth, no credits.
 STATUS_URL = os.environ.get("BITHUMAN_STATUS_URL", "https://status.bithuman.ai/status.json")
@@ -48,9 +62,9 @@ def _client() -> httpx.AsyncClient:
     """A configured async HTTP client with the api-secret header attached."""
     if not API_SECRET:
         raise RuntimeError(
-            "BITHUMAN_API_SECRET is not set. Get one at "
-            "https://www.bithuman.ai/#developer and export it before starting "
-            "the MCP server."
+            "BITHUMAN_API_SECRET is not set. Get an API secret at "
+            "https://www.bithuman.ai/developer/api-keys and export it before "
+            "starting the MCP server."
         )
     return httpx.AsyncClient(
         base_url=API_BASE,

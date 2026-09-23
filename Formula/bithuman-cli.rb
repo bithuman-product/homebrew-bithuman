@@ -42,7 +42,7 @@
 #
 # Two brain paths:
 #   * Cloud (default) — OPENAI_API_KEY for the OpenAI Realtime brain.
-#   * On-device — set BITHUMAN_LOCAL=1, no API key needed. Requires the
+#   * On-device — set BITHUMAN_LOCAL=1, no OpenAI key needed. Requires the
 #     whisper.cpp / llama.cpp / Supertonic Python deps; the exact line is
 #     in `caveats` below and is resolved against live PyPI by the CLI repo's
 #     scripts/check-printed-install-coordinates.sh.
@@ -539,9 +539,10 @@ class BithumanCli < Formula
         ~860 MB models auto-download from HuggingFace on first run.
         Docs: https://docs.bithuman.ai/guides/local-mode
 
-      Avatar metering needs a free bitHuman API key — get one at
-      https://www.bithuman.ai/#developer and export it:
-        export BITHUMAN_API_KEY=...
+      Avatar metering needs a free bitHuman API secret. Sign in once:
+        bithuman login
+      or, for CI, get one at https://www.bithuman.ai/developer/api-keys and:
+        export BITHUMAN_API_SECRET=...
 
       Offline tooling:
         bithuman info   avatar.imx                       # inspect .imx

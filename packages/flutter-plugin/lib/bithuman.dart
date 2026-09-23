@@ -90,7 +90,7 @@ class BithumanAvatar implements VoiceHost {
 
   /// Load a model from a local file path.
   ///
-  /// Pass [apiSecret] (your bitHuman developer secret) to authenticate the
+  /// Pass [apiSecret] (your bitHuman API secret) to authenticate the
   /// metered engine before any frames are produced. The public-release
   /// libessence requires this — without a successful auth the runtime stays
   /// in the unauthenticated state and `pull_frame` returns no frames (black
@@ -385,7 +385,8 @@ class BithumanAvatar implements VoiceHost {
   /// same VP-IO audio + avatar Texture as [audioStart]; the brain feeds the
   /// avatar lipsync + speaker directly on-device. [ggufPath] is the local LLM
   /// .gguf; [supertonicAssets] is the Supertonic ONNX assets dir. The metered
-  /// avatar render still needs BITHUMAN_API_SECRET set when the avatar loaded.
+  /// avatar render still needs your API secret — the `apiSecret:` passed to
+  /// [load] (or BITHUMAN_API_SECRET in the process environment).
   @override
   Future<void> localAudioStart({
     required String ggufPath,

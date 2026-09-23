@@ -1,6 +1,6 @@
 # bitHuman SDK -- AI Agent Discovery
 
-bitHuman is a real-time avatar animation platform. You push audio in, and get lip-synced video frames out at 25 FPS. Two avatar models are available: Essence (CPU, pre-built `.imx` files) and Expression (GPU or Apple Silicon M3+, any face image). Integration surfaces include a Python SDK, a Swift SDK (Apple native), a CLI, and a REST API. All require an API secret from [www.bithuman.ai](https://www.bithuman.ai/#developer).
+bitHuman is a real-time avatar animation platform. You push audio in, and get lip-synced video frames out at 25 FPS. Two avatar models are available: Essence (CPU, pre-built `.imx` files) and Expression (GPU or Apple Silicon M3+, any face image). Integration surfaces include a Python SDK, a Swift SDK (Apple native), a CLI, and a REST API. All require an API secret from [www.bithuman.ai/developer/api-keys](https://www.bithuman.ai/developer/api-keys).
 
 ## SDK / Tool Decision Tree
 
@@ -50,7 +50,8 @@ export BITHUMAN_API_SECRET=your_secret
 
 // In code:
 import bitHumanKit
-// Set BITHUMAN_API_KEY env var or pass via config
+// Your API secret: read BITHUMAN_API_SECRET into config.apiKey
+// (bitHumanKit 2.4.0's field keeps its published name). Essence2: be_essence2_set_api_secret().
 ```
 
 ### CLI (no code)
@@ -61,7 +62,7 @@ curl -fsSL https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/
 # Or macOS Homebrew
 brew install bithuman-product/bithuman/bithuman-cli
 
-bithuman init        # first-time setup (API key, brain, default avatar)
+bithuman login       # sign in once: stores a per-device API secret
 bithuman run         # live, lip-synced avatar in your browser
 ```
 
@@ -140,13 +141,13 @@ All requests require `api-secret: YOUR_SECRET` header.
 
 | Command | Purpose |
 |---|---|
-| `bithuman init` | First-time setup wizard (API key, brain, default avatar) |
+| `bithuman login` | Sign in through the browser; stores a per-device API secret in `~/.bithuman/config` |
 | `bithuman run [model]` | Run the live avatar — embedded LiveKit + brain + browser UI at `http://127.0.0.1:8088` |
 | `bithuman render <model> -a <audio> -o out.mp4` | Offline render a lip-synced MP4 |
 | `bithuman pull <slug>` | Download a showcase avatar into the local cache |
 | `bithuman list` | Browse showcase avatars + cache state |
 | `bithuman info <model>` | Show `.imx` model metadata |
-| `bithuman doctor` | Host capability check (versions, RAM, API key, brain) |
+| `bithuman doctor` | Host capability check (versions, RAM, API secret, brain) |
 
 ## Common Patterns
 
@@ -294,7 +295,7 @@ homebrew-bithuman/
 | Resource | URL |
 |---|---|
 | Documentation | https://docs.bithuman.ai |
-| API keys | https://www.bithuman.ai/#developer |
+| API secrets | https://www.bithuman.ai/developer/api-keys |
 | OpenAPI spec | https://docs.bithuman.ai/api/openapi.yaml |
 | LLM-optimized docs | https://docs.bithuman.ai/llms.txt |
 | Full LLM docs | https://docs.bithuman.ai/llms-full.txt |
@@ -307,10 +308,10 @@ homebrew-bithuman/
 ## What NOT To Do
 
 - **The SDK internals are closed-source.** Consume the binary distributions only: SwiftPM `homebrew-bithuman` for Swift, `pip install bithuman` for Python, Maven `ai.bithuman:sdk` for Kotlin, the CLI installer for the binary. Do not attempt to fetch SDK source.
-- **Do NOT hardcode API keys** in source files. Always use environment variables (`BITHUMAN_API_SECRET` for Python/REST/CLI, `BITHUMAN_API_KEY` for Swift).
+- **Do NOT hardcode your API secret** in source files, or pass it on a command line. Use the environment: `BITHUMAN_API_SECRET`, on every surface.
 - **Do NOT pin Swift SDK below 0.8.1** -- earlier versions have breaking API changes.
 - **Do NOT use `figure_id`** -- it is deprecated. Use `agent_code` everywhere.
-- **Do NOT use `BITHUMAN_API_KEY` in Python code** -- use `BITHUMAN_API_SECRET`. The `_API_KEY` name is a legacy alias.
+- **Do NOT write BITHUMAN_API_KEY anywhere new** -- use `BITHUMAN_API_SECRET`. BITHUMAN_API_KEY is still read as a deprecated alias by the CLI, but not by every SDK.
 - **Do NOT try to run Expression models on CPU** -- they require NVIDIA GPU or Apple Silicon M3+. The SDK raises `ExpressionModelNotSupported`, not a crash, but your code should handle it.
 - **Do NOT poll agent generation status faster than every 5 seconds**.
 
@@ -329,9 +330,8 @@ Check balance: `GET https://api.bithuman.ai/v2/credit-summaries` with `api-secre
 
 | Variable | Used by | Purpose |
 |---|---|---|
-| `BITHUMAN_API_SECRET` | Python, REST, CLI, LiveKit | Primary API credential |
-| `BITHUMAN_API_KEY` | Swift SDK | API credential for Apple platforms |
-| `BITHUMAN_RUNTIME_TOKEN` | Python | Pre-minted JWT (alternative to API secret) |
+| `BITHUMAN_API_SECRET` | Python, REST, CLI, LiveKit, Essence 2 (Apple, Android) | Your API secret — the one credential |
+| `BITHUMAN_LICENSE_FILE` | engine | Path to an offline licence (Business/Enterprise) |
 | `BITHUMAN_VERBOSE` | Python | Enable debug logging |
 
 ## Two Models Compared
