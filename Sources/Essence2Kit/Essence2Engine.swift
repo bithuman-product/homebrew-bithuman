@@ -110,7 +110,8 @@ public final class Essence2Engine: @unchecked Sendable {
     public static func create(identity: URL,
                               resourcesDirectory: URL? = nil,
                               readyTimeout: Double = 300) async throws -> Essence2Engine {
-        let res = try await (resourcesDirectory ?? Essence2Resources.ensure())
+        let res: URL
+        if let given = resourcesDirectory { res = given } else { res = try await Essence2Resources.ensure() }
         Essence2Resources.point(at: res)
         var h: be_essence2_handle? = nil
         let rc = identity.path.withCString { be_essence2_create($0, nil, 0, &h) }
@@ -209,7 +210,7 @@ public final class Essence2Engine: @unchecked Sendable {
         var buf = [CChar](repeating: 0, count: 512)
         var failures: Int64 = 0
         guard be_essence2_render_status(handle, &buf, Int32(buf.count), &failures) != 0 else { return nil }
-        let r = String(cString: buf)
+        let r = Essence2Engine.text(buf)
         return r.isEmpty ? "the Essence 2 runtime stopped (\(failures) failure(s))" : r
     }
 
@@ -222,11 +223,16 @@ public final class Essence2Engine: @unchecked Sendable {
         return (Int(w), Int(h))
     }
 
+    /// A NUL-terminated C buffer as UTF-8 text.
+    static func text(_ buf: [CChar]) -> String {
+        String(decoding: buf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    }
+
     private static func lastRefusal() -> String? {
         var buf = [CChar](repeating: 0, count: 1024)
         let n = be_essence2_last_refusal(&buf, Int32(buf.count))
         guard n > 0 else { return nil }
-        return String(cString: buf)
+        return Essence2Engine.text(buf)
     }
 }
 
