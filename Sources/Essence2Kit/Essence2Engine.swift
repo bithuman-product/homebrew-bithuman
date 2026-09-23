@@ -30,12 +30,23 @@ import Essence2
 public enum Essence2Credential {
     public static func set(_ secret: String?) {
         let s = secret?.trimmingCharacters(in: .whitespacesAndNewlines)
+        lock.lock(); stored = (s?.isEmpty == false) ? s : nil; lock.unlock()
         if let s, !s.isEmpty {
             _ = s.withCString { be_essence2_set_api_secret($0) }
         } else {
             _ = be_essence2_set_api_secret(nil)
         }
     }
+
+    /// The secret a download is made with: the one set here, else `BITHUMAN_API_SECRET`.
+    static var current: String? {
+        lock.lock(); defer { lock.unlock() }
+        if let s = stored { return s }
+        let e = ProcessInfo.processInfo.environment["BITHUMAN_API_SECRET"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (e?.isEmpty == false) ? e : nil
+    }
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var stored: String?
 }
 
 // MARK: - Errors
@@ -241,6 +252,77 @@ public final class Essence2Engine: @unchecked Sendable {
         let n = be_essence2_last_refusal(&buf, Int32(buf.count))
         guard n > 0 else { return nil }
         return Essence2Engine.text(buf)
+    }
+}
+
+// MARK: - Download
+
+/// Downloads an Essence 2 avatar file through the bitHuman download door.
+///
+/// It asks for the Apple slice of the avatar (`?slice=apple`): the members this engine reads,
+/// smaller than the full file. The door answers with the slice and its sha256, or with the full
+/// file when that avatar has no slice yet; either one opens with `Essence2Engine.create`. A slice
+/// whose bytes do not match the door's sha256 is refused, never opened. Files are kept under
+/// their content hash, so a second call for the same avatar downloads nothing.
+public enum Essence2Download {
+    static let door = "https://api.bithuman.ai"
+    /// Highest container ABI this engine reads.
+    static let abiMax = 1
+
+    /// Downloads avatar `agentCode` (for example `A52DHS2219`) and returns the file to pass to
+    /// `Essence2Engine.create(identity:)`. Uses the secret from `Essence2Credential.set`.
+    public static func identity(agentCode: String, directory: URL? = nil) async throws -> URL {
+        guard agentCode.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil,
+              var c = URLComponents(string: door + "/v1/agent/" + agentCode + "/model/download") else {
+            throw Essence2KitError.resourcesUnavailable("not an agent code: \(agentCode)")
+        }
+        c.queryItems = [URLQueryItem(name: "model", value: "essence-2"),
+                        URLQueryItem(name: "slice", value: "apple"),
+                        URLQueryItem(name: "abi_max", value: String(abiMax)),
+                        URLQueryItem(name: "redirect", value: "false")]
+        var req = URLRequest(url: c.url!)
+        if let s = Essence2Credential.current { req.setValue(s, forHTTPHeaderField: "api-secret") }
+        let (body, resp) = try await URLSession.shared.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        guard status == 200,
+              let root = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let d = root["data"] as? [String: Any],
+              let urlString = d["url"] as? String, let url = URL(string: urlString) else {
+            let msg = String(decoding: body.prefix(300), as: UTF8.self)
+            throw Essence2KitError.resourcesUnavailable("\(agentCode): the download door answered HTTP \(status): \(msg)")
+        }
+        let isSlice = (d["slice"] as? String).map { $0 != "universal" } ?? false
+        let want = (d["raw_sha256"] as? String) ?? (d["sha256"] as? String)
+        let dir = directory ?? Essence2Download.defaultDirectory
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let want, let hit = try? cached(want, in: dir) { return hit }
+        let (tmp, fileResp) = try await URLSession.shared.download(from: url)
+        guard (fileResp as? HTTPURLResponse)?.statusCode == 200 else {
+            throw Essence2KitError.resourcesUnavailable("\(agentCode): the avatar file download failed (HTTP \((fileResp as? HTTPURLResponse)?.statusCode ?? -1))")
+        }
+        let got = try Essence2Resources.sha256(of: tmp)
+        if let want, got != want {
+            try? FileManager.default.removeItem(at: tmp)
+            throw Essence2KitError.resourcesUnavailable("\(agentCode): the \(isSlice ? "apple slice" : "avatar file") is sha256 \(got), not the door's \(want); refused")
+        }
+        let dst = dir.appendingPathComponent(got + ".imx")
+        try? FileManager.default.removeItem(at: dst)
+        try FileManager.default.moveItem(at: tmp, to: dst)
+        return dst
+    }
+
+    /// Where downloads are kept when no directory is given: Caches/bitHuman/essence2/avatars.
+    public static var defaultDirectory: URL {
+        let root = (try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask,
+                                                   appropriateFor: nil, create: true))
+            ?? FileManager.default.temporaryDirectory
+        return root.appendingPathComponent("bitHuman/essence2/avatars", isDirectory: true)
+    }
+
+    static func cached(_ sha: String, in dir: URL) throws -> URL? {
+        let f = dir.appendingPathComponent(sha + ".imx")
+        guard FileManager.default.fileExists(atPath: f.path) else { return nil }
+        return try Essence2Resources.sha256(of: f) == sha ? f : nil
     }
 }
 
