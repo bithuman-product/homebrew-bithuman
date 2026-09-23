@@ -1,3 +1,12 @@
+## 2.6.14 — 2026-09-23 — the Essence 2 engine links without warnings
+
+Tag `flutter-plugin-v2.6.14`.
+
+* **iOS/macOS:** the Essence 2 engine moves to `essence2-v1.12.1` (libessence2 `64b6635b…`, resources
+  `d5247f61…`) and the engine adapter source to bithuman-models `8bae6d8f3`: the slices no longer name
+  module-cache files in their debug info, so an app's link prints no `.pcm: No such file or directory`
+  warnings (#1263). The engine's code is unchanged.
+
 ## 2.6.13 — 2026-09-23 — one credential setter on Android, and the Essence 2 engine without link warnings
 
 Tag `flutter-plugin-v2.6.13`.
