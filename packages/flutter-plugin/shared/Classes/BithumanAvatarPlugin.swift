@@ -265,7 +265,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
     // accepted forever (cross-boundary SDK↔app channel string contract).
     case "setExpression2AgentDir", "setEmbodyAgentDir":
       // Gallery: point the expression-2 runtime at a DOWNLOADED per-agent model —
-      // a DIRECTORY of members, or the packed `IMX\0` container the download
+      // a DIRECTORY of members, or the packed container the download
       // endpoint vends, which is expanded here (see bhResolveExpression2AgentDir).
       // Pass null/"" to revert to the bundled
       // default (A42). The shared w2v/taehv graphs always come from the app
@@ -277,6 +277,46 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       Expression2Engine.activeAgentDir = bhResolveExpression2AgentDir(dir)
       NSLog("[BithumanAvatar] setExpression2AgentDir → %@", Expression2Engine.activeAgentDir ?? "<bundled default>")
       result(nil)
+
+    // The Dart half of this plugin is public source and carries NO reader for
+    // bitHuman's container (owner ruling 2026-09-16: the format stays in private
+    // repositories and compiled bytes). A downloaded `.avatar` that is not a zip
+    // is expanded HERE, by the engine's own unpacker, into the directory the Dart
+    // installer then verifies. Off the platform thread: a container is ~200 MB.
+    case "unpackModelContainer":
+      guard let args = call.arguments as? [String: Any],
+            let path = args["path"] as? String,
+            let dir = args["dir"] as? String else {
+        result(FlutterError(code: "BAD_ARGS", message: "unpackModelContainer requires path + dir", details: nil))
+        return
+      }
+      let src = URL(fileURLWithPath: path)
+      guard Expression2Container.isContainer(src) else {
+        result(FlutterError(code: "NOT_A_CONTAINER",
+                            message: "\(src.lastPathComponent) is not a bitHuman model container",
+                            details: nil))
+        return
+      }
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          let t0 = CFAbsoluteTimeGetCurrent()
+          let names = try Expression2Container.unpack(src, to: URL(fileURLWithPath: dir, isDirectory: true))
+          NSLog("[BithumanAvatar] unpackModelContainer %@ -> %@ (%d members, %.2fs)",
+                src.lastPathComponent, dir, names.count, CFAbsoluteTimeGetCurrent() - t0)
+          DispatchQueue.main.async { result(names.count) }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "UNPACK_FAILED", message: "\(error)", details: nil))
+          }
+        }
+      }
+
+    case "isModelContainer":
+      guard let path = (call.arguments as? [String: Any])?["path"] as? String else {
+        result(FlutterError(code: "BAD_ARGS", message: "isModelContainer requires path", details: nil))
+        return
+      }
+      result(Expression2Container.isContainer(URL(fileURLWithPath: path)))
 
     case "micPermissionStatus":
       // "authorized" | "notDetermined" | "denied" — drives the status-chip color.
@@ -1972,7 +2012,7 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
 
 // ------- ADOPTION: expand a PACKED agent container (2026-09-17) -------
 // `Expression2Container.unpack` shipped in THIS pod and nothing on the plugin path
-// called it. A downloaded expression-2 agent arrives as a packed `IMX\0` container
+// called it. A downloaded expression-2 agent arrives as a packed container
 // (`<CODE>.imx`), while `Expression2Engine.modelURL` / `resURL` only ever join a NAME
 // onto `activeAgentDir` -- so a packed FILE resolved every per-identity member to a
 // path that cannot exist. Measured on echelon (macOS 26.6.2) 2026-09-16, with the

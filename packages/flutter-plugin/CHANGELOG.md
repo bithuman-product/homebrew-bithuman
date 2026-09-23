@@ -1,3 +1,31 @@
+## 2.6.11 — 2026-09-23 — the container is the engine's to read
+
+Tag `flutter-plugin-v2.6.11`.
+
+**This package no longer carries a reader for bitHuman's model container.** The container
+format is proprietary (owner ruling 2026-09-16: closed source, private repositories only), and
+until this release `lib/bithuman.dart` expanded it in Dart — in a public repository. The Dart
+reader is deleted. The engine, whose compiled code already reads the container, now expands it
+through the platform channel. The public Dart API is unchanged.
+
+* **`downloadExpression2Avatar`**: a download that is a zip still goes through `unzip`; anything
+  else goes to the new native method `unpackModelContainer`, which the Apple half answers with the
+  engine's own unpacker (off the platform thread). Android answers `unsupported` by name, because
+  it loads an identity by code (`BithumanAvatar.load`) and never needed a container on disk.
+* **`downloadAgentImx`** no longer compares magic bytes in Dart. It asks the engine
+  (`isModelContainer`); where the engine cannot tell (Android), the load itself refuses a bad file.
+* **Both expression-2 installers now require the per-identity decoder `dec_p2_v3_all`.** The
+  pinned engine refuses an identity without it, so an install without it rendered nothing. It is
+  now refused at install, by name, and an earlier install without it is fetched again instead of
+  re-used. This is the defect behind the product app's dead gallery (12 of 12 identities).
+* CI: the container-reader ratchet in `flutter-plugin-tests.yml` is at **0**, and
+  `test/avatar_install_test.dart` pins the new shape (8 arms, network-free).
+
+★**Exposure, recorded rather than rewritten.** The reader was in this public repository from
+2026-06-30 (`32e0bb4`) until this release, and every tag cut in that window carries it. Nothing was
+ever published to pub.dev (its API answers 404 for the package), so the exposure is git history
+and GitHub tag archives. Deleting it is mitigation, not erasure; history is not rewritten.
+
 ## 2.6.10 — 2026-09-23 — the Apple half builds again from a clean clone
 
 Tag `flutter-plugin-v2.6.10`.
@@ -120,7 +148,7 @@ and, unfixed until this tag, the iPhone.
 | | what shipped | what happened |
 |---|---|---|
 | `{macos,ios}/bithuman.podspec` | `s.resources = ['Assets/embody']` | CocoaPods resolves a file pattern **relative to the podspec** — `<plugin>/<plat>/Assets/embody`. `scripts/bootstrap.sh` staged the embody CoreML members one level up. The glob matched **nothing**, and an empty CocoaPods file pattern is not an error, so the build was green and the app carried no expression-2 graphs at all. |
-| `Expression2Container.unpack` | shipped in this pod, **called by nothing** | A downloaded agent arrives as a packed `IMX\0` container, while `Expression2Engine.modelURL`/`resURL` only join a NAME onto `activeAgentDir` — so every per-identity member resolved to a path *inside a file*. essence-2 already expanded its own container; expression-2 on Apple did not. |
+| `Expression2Container.unpack` | shipped in this pod, **called by nothing** | A downloaded agent arrives as a packed container, while `Expression2Engine.modelURL`/`resURL` only join a NAME onto `activeAgentDir` — so every per-identity member resolved to a path *inside a file*. essence-2 already expanded its own container; expression-2 on Apple did not. |
 
 **Measured on the owner's iPhone 15, on the customer path, before and after.** Same phone,
 same `A02HCY0444.imx` in the app's own Documents, same cold launch:

@@ -247,7 +247,7 @@
 //   is NOT a repack a consumer can do. MEASURED 2026-09-09, both sides:
 //     · WHAT THE DOWNLOAD ENDPOINT RETURNS. `GET
 //       /v1/agent/{code}/model/download?model=essence-2` (API secret)
-//       returned, for one live identity, a single `IMX\0` v2 CONTAINER FILE of
+//       returned, for one live identity, a single packed CONTAINER FILE of
 //       99,536,068 B. Read out of the container's own member index: 27
 //       members, `manifest.json` declares `"format": "le-bundle-v0"`, four
 //       members are `.onnx` graphs (`model_b24_fp32.onnx` among them), and
