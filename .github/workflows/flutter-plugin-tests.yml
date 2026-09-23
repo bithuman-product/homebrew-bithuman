@@ -97,7 +97,9 @@ jobs:
         run: |
           set -euo pipefail
           BASELINE=0
-          N=$(grep -rl "_unpackImxContainer" lib/ 2>/dev/null | wc -l | tr -d " ")
+          # `|| true` INSIDE the count: at zero hits grep exits 1, and under
+          # pipefail that failed the step at exactly the count it wants.
+          N=$( { grep -rl "_unpackImxContainer" lib/ 2>/dev/null || true; } | wc -l | tr -d " ")
           echo "files parsing the container in lib/: $N (baseline $BASELINE)"
           grep -rl "_unpackImxContainer" lib/ 2>/dev/null || true
           if [ "$N" -gt "$BASELINE" ]; then
