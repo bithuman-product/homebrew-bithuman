@@ -53,6 +53,14 @@ nothing is how a guard passes by testing air).
                   scripts/guard-public-vocabulary.py, so the three surfaces
                   cannot drift apart about what a word is.
 
+  R7 KIT-FILES    every runtime file Essence2Kit pins (Sources/Essence2Kit) fetches
+                  200 from the essence2Tag release and its sha256 equals the pin.
+                  Essence2Kit downloads them on a customer's first run and refuses
+                  bytes that differ, so a roll that moves essence2Tag to a release
+                  without them, or with other bytes, is red HERE (bithuman-models
+                  #1224). check-apple-engine-pin.sh A7 holds the Kit's own tag to
+                  essence2Tag; this reads the bytes.
+
 Exit 0 = all rules pass. Exit 1 = a rule failed. Exit 2 = harness error.
 """
 from __future__ import annotations
@@ -74,7 +82,7 @@ REPO = Path(__file__).resolve().parent.parent
 MANIFEST = REPO / "Package.swift"
 
 RULES = ["R1-CHECKSUM", "R2-TOKENS", "R3-IMPORTS", "R4-DOCUMENTED", "R5-NO-CLAIM",
-         "R6-VOCABULARY"]
+         "R6-VOCABULARY", "R7-KIT-FILES"]
 
 # Tokens that name a LIBRARY and are measured absent from the umbrella. Bare
 # "essence" is deliberately NOT here: essence-2 is a real product family the
@@ -487,6 +495,37 @@ def rule_R6_vocabulary(src, cache, workdir, state) -> list[str]:
     return errs
 
 
+KIT_SOURCE = REPO / "Sources" / "Essence2Kit" / "Essence2Engine.swift"
+KIT_PIN = re.compile(r'\("([A-Za-z0-9_.]+\.onnx)",\s*"([0-9a-f]{64})"\)')
+
+
+def rule_R7_kit_files(src, cache, workdir, state) -> list[str]:
+    if not KIT_SOURCE.exists():
+        log("    R7 --  no Essence2Kit source on this ref")
+        return []
+    pins = KIT_PIN.findall(KIT_SOURCE.read_text())
+    if len(pins) != 3:
+        return [f"R7: expected 3 (file, sha256) pins in {KIT_SOURCE.name}, read {len(pins)} — "
+                f"this rule has lost its subject"]
+    base = parse_constants(src).get("essence2Base", "")
+    if not base.startswith("https://") or "\\(" in base:
+        return [f"R7: could not resolve essence2Base out of the manifest ({base!r})"]
+    errs = []
+    for name, want in pins:
+        url = f"{base}/{name}"
+        try:
+            data = fetch(url, cache)
+        except Failure as e:
+            errs.append(f"R7 {name}: {e}")
+            continue
+        got = hashlib.sha256(data).hexdigest()
+        if got != want:
+            errs.append(f"R7 {name}: sha256 measured {got} != Essence2Kit's pin {want} ({url})")
+        else:
+            log(f"    R7 ok  {name:38} {len(data):>10} B  sha256 {got[:16]}…")
+    return errs
+
+
 RULE_FUNCS = {
     "R1-CHECKSUM": rule_R1_checksum,
     "R2-TOKENS": rule_R2_tokens,
@@ -494,6 +533,7 @@ RULE_FUNCS = {
     "R4-DOCUMENTED": rule_R4_documented,
     "R5-NO-CLAIM": rule_R5_noclaim,
     "R6-VOCABULARY": rule_R6_vocabulary,
+    "R7-KIT-FILES": rule_R7_kit_files,
 }
 
 
@@ -589,6 +629,13 @@ def _mut_dirty_archive(src: str) -> str:
     )
 
 
+def _mut_kit_tag(src: str) -> str:
+    """Serve the engine from essence2-v1.11.0: a real release, published before the runtime
+    files were attached one by one, so every Essence2Kit first run would 404."""
+    return re.sub(r'^let essence2Tag = "[^"]*"$', 'let essence2Tag = "essence2-v1.11.0"',
+                  src, count=1, flags=re.M)
+
+
 ARMS = [
     ("R1-CHECKSUM", "flip one hex digit of the pinned bitHumanKit checksum", _mut_checksum),
     ("R1-CHECKSUM", "point the bitHumanKit asset at a URL that 404s", _mut_url_404),
@@ -601,6 +648,8 @@ ARMS = [
     ("R5-NO-CLAIM", "re-add the 're-exports the libessence runtime' claim", _mut_reexports_claim),
     ("R6-VOCABULARY", "pin the archive this release replaced (v2.6.0 UnifiedModelHeader, "
      "its own checksum, so ONLY R6 can fail)", _mut_dirty_archive),
+    ("R7-KIT-FILES", "serve essence2-v1.11.0, a release without the Kit's runtime files",
+     _mut_kit_tag),
 ]
 
 

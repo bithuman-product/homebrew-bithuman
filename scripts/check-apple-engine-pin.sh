@@ -52,6 +52,8 @@
 #                      checksum is itself held to the published bytes by
 #                      manifest-truth R1, so agreeing with it is agreeing with
 #                      the artifact — no second download here.
+#   A6 UMH-AGREES      the pod's UnifiedModelHeader pin == the SwiftPM binaryTarget.
+#   A7 KIT-AGREES      Essence2Kit's Essence2Resources.releaseTag == essence2Tag.
 #
 # Usage:  check-apple-engine-pin.sh [repo-root]
 # Exit:   0 PASS   1 REFUSE   2 could not run (never a silent pass)
@@ -169,6 +171,22 @@ elif [ "$UMH_TAG" != "$SPM_X2_TAG" ] || [ "$UMH_SHA" != "$SPM_UMH_SHA" ]; then
     refuse "A6 the pod stages UnifiedModelHeader $UMH_TAG (${UMH_SHA:0:16}…), SwiftPM serves $SPM_X2_TAG (${SPM_UMH_SHA:0:16}…) — roll UMH_RELEASE/UMH_SHA256 with expression2Tag"
 else
     pass "A6 UnifiedModelHeader pinned at $UMH_TAG, the SwiftPM binaryTarget's bytes (${SPM_UMH_SHA:0:16}…)"
+fi
+
+# A7 — Essence2Kit fetches the engine's runtime files from ONE release, named in its
+# source, and the engine they must match is the one SwiftPM serves. A tag roll that moves
+# essence2Tag and not this constant hands a new engine the last release's files — or, for
+# a release that never carried them, a 404 on every customer's first run (#1224).
+KIT="$ROOT/Sources/Essence2Kit/Essence2Engine.swift"
+if [ -f "$KIT" ]; then
+    KIT_TAG="$(sed -n 's/^ *public static let releaseTag = "\([^"]*\)"$/\1/p' "$KIT" | head -1)"
+    if [ -z "$KIT_TAG" ]; then
+        refuse "A7 could not read Essence2Resources.releaseTag out of $KIT — this check has lost its subject"
+    elif [ "$KIT_TAG" != "$SPM_TAG" ]; then
+        refuse "A7 Essence2Kit fetches its runtime files from '$KIT_TAG', SwiftPM serves the engine '$SPM_TAG' — roll releaseTag (and its sha256 pins) with essence2Tag"
+    else
+        pass "A7 Essence2Kit's runtime files come from $SPM_TAG, the engine SwiftPM serves"
+    fi
 fi
 
 if [ "$FAIL" -ne 0 ]; then
