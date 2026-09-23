@@ -463,6 +463,15 @@ class BithumanCli < Formula
   # `ffmpeg -i … out.mp4` has no such coupling — a newer ffmpeg still muxes.
   depends_on "ffmpeg"
 
+  # ★`bithuman run` stands up an embedded LiveKit room: a separate Go executable
+  # the CLI finds next to itself, on PATH, or at /opt/homebrew/opt/livekit
+  # (embedded_livekit.rs). The Linux tarball ships one (cli-v2.7.2); upstream
+  # publishes no macOS binary, so here it is the homebrew-core formula. Without
+  # it a Homebrew install's first `bithuman run` refused ("livekit-server was
+  # not found"). Like ffmpeg above it is a SUBPROCESS, not a linked dylib, so the
+  # "no runtime deps" rule below does not reach it.
+  depends_on "livekit"
+
   # No runtime `depends_on` dylibs. The macOS tarball is self-contained:
   # the `bithuman` binary references every third-party dylib (ONNX
   # Runtime, HDF5, FFmpeg, libjpeg-turbo, libwebp, the libcurl chain)
