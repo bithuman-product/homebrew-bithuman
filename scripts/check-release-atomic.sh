@@ -4,8 +4,10 @@
 #                           before it is visible to anyone.
 #
 # ── THE DEFECT THIS EXISTS FOR ───────────────────────────────────────────────
-# A `cli-vX.Y.Z` release is TWO tarballs (macOS arm64 + Linux x86_64), each
-# with a `.sha256` sidecar, plus a formula that pins the macOS sha. Nothing
+# A `cli-vX.Y.Z` release is THREE tarballs (macOS arm64, Linux x86_64 and,
+# from cli-v2.7.1, Linux aarch64 — see the matrix below), each with a
+# `.sha256` sidecar, plus a formula that pins the macOS sha. (It was two from
+# cli-v2.4.0 to cli-v2.7.0, and the audit table below is of that era.) Nothing
 # made those arrive together, and measured on 2026-09-03 they never have:
 #
 #   tag         published_at          last asset uploaded   advertised
@@ -109,9 +111,20 @@ REPO="${BITHUMAN_TAP_REPO:-bithuman-product/homebrew-bithuman}"
 # tuned to the current size would encode "must vendor an engine" and go red
 # on cli-v2.3.27 (33/38 MB, cut before engine vendoring), which is a correct
 # release. Byte integrity is C6's job, not this one's.
+#
+# ★aarch64 LINUX IS IN THE MATRIX FROM cli-v2.7.1 (2026-09-23). It shipped
+# through cli-v2.3.27, was dropped at 2.4.0 (only an x86_64 render host was
+# frozen), and the CLI repo's release-linux.sh now cuts BOTH Linux arches from
+# one $CLI_SHA into one $R/out. A draft missing it is REFUSED on C1 like any
+# other half — that is the self-test's "aarch64 linux tarball absent" arm.
+# Consequence, deliberate: re-grading a release from cli-v2.4.0 … cli-v2.7.0
+# in LIVE mode now reads C1 FAIL on the aarch64 pair, because that is true —
+# those releases do not carry it. The matrix grades a release about to be
+# published, and it is not a record of what past releases promised.
 REQUIRED_TARBALLS=(
   "bithuman-aarch64-apple-darwin.tar.gz:10000000"
   "bithuman-x86_64-unknown-linux-gnu.tar.gz:10000000"
+  "bithuman-aarch64-unknown-linux-gnu.tar.gz:10000000"
 )
 # The formula pins the macOS half.
 FORMULA_PLATFORM="bithuman-aarch64-apple-darwin.tar.gz"
@@ -565,9 +578,10 @@ if (( SELFTEST )); then
   # publish, formula pinned to the macOS sidecar's digest.
   MAC_SHA="$(printf 'mac-bytes'  | sha256sum | cut -d' ' -f1)"
   LNX_SHA="$(printf 'linux-bytes'| sha256sum | cut -d' ' -f1)"
-  "$PY" - "$FIX/good.json" "$MAC_SHA" "$LNX_SHA" <<'MK'
+  ARM_SHA="$(printf 'linux-arm-bytes'| sha256sum | cut -d' ' -f1)"
+  "$PY" - "$FIX/good.json" "$MAC_SHA" "$LNX_SHA" "$ARM_SHA" <<'MK'
 import json, sys
-out, mac, lnx = sys.argv[1], sys.argv[2], sys.argv[3]
+out, mac, lnx, arm = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 def a(name, size, created, body=None):
     d = {"name": name, "size": size, "created_at": created, "updated_at": created}
     if body is not None: d["body_text"] = body
@@ -582,6 +596,9 @@ man = {
     a("bithuman-x86_64-unknown-linux-gnu.tar.gz",   166759273, "2026-09-03T11:51:00Z"),
     a("bithuman-x86_64-unknown-linux-gnu.tar.gz.sha256",   107, "2026-09-03T11:51:00Z",
       f"{lnx}  bithuman-x86_64-unknown-linux-gnu.tar.gz\n"),
+    a("bithuman-aarch64-unknown-linux-gnu.tar.gz",  160000000, "2026-09-03T11:52:00Z"),
+    a("bithuman-aarch64-unknown-linux-gnu.tar.gz.sha256",  108, "2026-09-03T11:52:00Z",
+      f"{arm}  bithuman-aarch64-unknown-linux-gnu.tar.gz\n"),
   ],
 }
 json.dump(man, open(out, "w"), indent=1)
@@ -636,6 +653,11 @@ MUT
 
   mutate "linux tarball absent"            C1 'A.pop("bithuman-x86_64-unknown-linux-gnu.tar.gz")'
   mutate "linux sidecar absent"            C1 'A.pop("bithuman-x86_64-unknown-linux-gnu.tar.gz.sha256")'
+  # ★THE ARM THIS MATRIX ROW EXISTS FOR: a release cut the pre-2.7.1 way —
+  # macOS + Linux x86_64 only, every other check green — must be REFUSED.
+  mutate "aarch64 linux tarball absent (the pre-2.7.1 shape)" C1 'A.pop("bithuman-aarch64-unknown-linux-gnu.tar.gz"); A.pop("bithuman-aarch64-unknown-linux-gnu.tar.gz.sha256")'
+  mutate "aarch64 linux sidecar absent"    C1 'A.pop("bithuman-aarch64-unknown-linux-gnu.tar.gz.sha256")'
+  mutate "aarch64 linux tarball truncated" C2 'A["bithuman-aarch64-unknown-linux-gnu.tar.gz"]["size"] = 4096'
   mutate "mac tarball truncated to 4 KB"   C2 'A["bithuman-aarch64-apple-darwin.tar.gz"]["size"] = 4096'
   mutate "sidecar names the other file"    C3 'a=A["bithuman-x86_64-unknown-linux-gnu.tar.gz.sha256"]; a["body_text"]=a["body_text"].split("  ")[0]+"  bithuman-aarch64-apple-darwin.tar.gz\n"'
   mutate "sidecar digest is not 64 hex"    C3 'a=A["bithuman-x86_64-unknown-linux-gnu.tar.gz.sha256"]; a["body_text"]="deadbeef  bithuman-x86_64-unknown-linux-gnu.tar.gz\n"'
@@ -896,7 +918,7 @@ TT
     echo "SELF-TEST: FAIL — $fails control(s)/mutation(s) behaved wrongly"
     exit 1
   fi
-  echo "SELF-TEST: PASS — baseline green, 11 mutations each refused on their own check,"
+  echo "SELF-TEST: PASS — baseline green, 14 mutations each refused on their own check,"
   echo "                  draft-gate truth table 7/7"
   exit 0
 fi
