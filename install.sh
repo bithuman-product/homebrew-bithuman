@@ -812,6 +812,21 @@ fi
 
 ver_line=$("$install_dir/bithuman" --version 2>/dev/null | head -1)
 
+# ★THE FIRST RENDER ON A CLEAN BOX NEEDS ONE THING THIS SCRIPT DOES NOT SHIP.
+# `bithuman render` writes its MP4 through an `ffmpeg` on PATH (docs: sdk/cli.md
+# prerequisites). MEASURED 2026-09-23 in a clean ubuntu:24.04 container: this
+# installer said "installed" and "Run 'bithuman --help' to get started", and the
+# first `bithuman render` of BOTH families exited 69 UNAVAILABLE ("ffmpeg not
+# found"). The CLI's refusal names the remedy; saying it here, before the first
+# render, costs one line and saves the round trip.
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  ffmpeg_hint="sudo apt install -y ffmpeg"
+  [ "$os" = "apple-darwin" ] && ffmpeg_hint="brew install ffmpeg"
+  info ""
+  info "Note: \`bithuman render\` writes MP4 through ffmpeg, which is not on your PATH:"
+  info "    $ffmpeg_hint"
+fi
+
 # ----- success message -------------------------------------------------------
 
 info ""
