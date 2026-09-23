@@ -78,9 +78,13 @@ public final class Essence2Engine: @unchecked Sendable {
     /// True once the engine can turn audio into speech frames.
     public var isReady: Bool { be_essence2_is_ready(handle) == 1 }
 
-    /// The metering refusal behind the most recent -3, or nil. Available from engines
-    /// built with essence2-v1.12.0 and later (`be_essence2_last_refusal`).
-    public var meteringRefusal: String? { Essence2Engine.lastRefusal() }
+    /// While metering refuses THIS session (its last pull or idle returned -3): the engine's
+    /// sentence (`be_essence2_last_refusal`, essence2-v1.12.0+). nil while frames flow.
+    public var meteringRefusal: String? {
+        lock.lock(); let refused = refusedNow; lock.unlock()
+        return refused ? Essence2Engine.lastRefusal() : nil
+    }
+    private var refusedNow = false
 
     private init(handle: be_essence2_handle) {
         self.handle = handle
@@ -162,7 +166,7 @@ public final class Essence2Engine: @unchecked Sendable {
     }
 
     /// The next frame (RGB, height*width*3) and whether it is a speech frame; nil when none is ready.
-    /// Returns nil while metering refuses — read `meteringRefusal`.
+    /// Returns nil while metering refuses — `meteringRefusal` then carries the engine's sentence.
     public func pull() -> (frame: [UInt8], speech: Bool)? {
         lock.lock(); defer { lock.unlock() }
         guard !closed else { return nil }
@@ -170,7 +174,9 @@ public final class Essence2Engine: @unchecked Sendable {
         guard be_essence2_frames_available(handle) > 0 else { return nil }
         fitBuffer()
         let n = buffer.withUnsafeMutableBufferPointer { be_essence2_pull_frame(handle, $0.baseAddress, Int32($0.count)) }
+        if n == -3 { refusedNow = true; return nil }
         guard n > 0 else { return nil }
+        refusedNow = false
         let sc = be_essence2_pulled_speech_frames(handle)
         let speech = sc > lastSpeech
         lastSpeech = sc
@@ -183,6 +189,7 @@ public final class Essence2Engine: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !closed else { return 0 }
         let n = out.withUnsafeMutableBufferPointer { be_essence2_idle_frame(handle, $0.baseAddress, Int32($0.count)) }
+        if n == -3 { refusedNow = true } else if n > 0 { refusedNow = false }
         return max(0, Int(n))
     }
 
