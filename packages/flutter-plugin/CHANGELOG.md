@@ -11,7 +11,7 @@ moves its `ref:`.
   rule for its JNI bridge, so a consumer's R8 cannot rename it whatever its `proguardFiles(...)` say.
   A Flutter release build always includes Android's default ProGuard file, so this plugin was never
   exposed; the engine output is unchanged (same handset proof as 0.5.12: lip contour bound,
-  generated mouth share 0.000000 / 0.000000, passthrough 0).
+  generated mouth share 0.000000 / 0.000000).
 
 **Measured 2026-09-23 on echelon**, a clean clone of `bithuman-examples` (`afa0bb4`) with only its
 plugin `ref:` pointed at this change, cold Gradle and pub caches, `flutter build apk --release
