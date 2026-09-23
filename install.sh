@@ -76,6 +76,13 @@ need_cmd mktemp
 #   cli-v2.4.2   404                         200                        200
 #   cli-v2.3.27  200                         200                        200
 #
+# ★RESTORED at cli-v2.7.1 (2026-09-23): the CLI repo's release rail now cuts
+# the aarch64 Linux half from the same commit as the other two (its render
+# host frozen on arm64), and the tap's check-release-atomic.sh refuses a draft
+# without it. So on a current release this check answers OK for aarch64 Linux;
+# the refusal below is what a PINNED pre-2.7.1 release (or a future release
+# that lost the half) still gets.
+#
 # The platform block below happily produces `aarch64-unknown-linux-gnu` on any
 # arm64 Linux box — Graviton, Ampere, a Pi, an arm64 container on an Apple
 # laptop — because nothing here ever knew which targets a release carries. It
@@ -382,10 +389,20 @@ SHIM
   fi
 
   _pat_ok="pip install bit""human"
+  # ★THE CHILD IS PINNED TO A RELEASE THAT LACKS aarch64 LINUX, because the
+  # refusal is the subject and an unpinned child stopped reaching it the day
+  # cli-v2.7.1 restored the half: the newest release CARRIES aarch64 Linux, so
+  # an unpinned shimmed child would download ~170 MB of aarch64 bytes, fail to
+  # run them on this x86_64 runner, and never print the refusal at all — a
+  # red that says nothing about the text. cli-v2.5.1 is this file's canonical
+  # "no aarch64 Linux" subject (the `_t` arm above grades exactly that), and a
+  # published release is immutable, so the pin cannot rot the way a "latest"
+  # read did.
   _run_child() { # <machine>  -> prints the installer's own stderr+stdout
     _mkshim "$1"
     PATH="$_st_tmp/shim:$PATH" \
       BITHUMAN_INSTALL_DIR="$_st_tmp/bin" \
+      BITHUMAN_VERSION=cli-v2.5.1 \
       BITHUMAN_INSTALL_SELFTEST_CHILD=1 \
       sh "$0" 2>&1 || true
   }
@@ -397,10 +414,27 @@ SHIM
       printf '  FAIL  %-58s the rendered refusal does not name it\n' \
              "aarch64-Linux refusal NAMES the channel that serves it"; _t_fail=1 ;;
   esac
+  # ★AND IT NAMES THE RELEASE THAT CARRIES THE HALF AGAIN — as a pin the
+  # developer can paste, graded on the rendered output like the arm above.
+  _pat_rel="BITHUMAN_VERSION=cli-v2.""7.1 sh"
+  case "$_out_arm" in
+    *"$_pat_rel"*)
+      printf '  PASS  %-58s FOUND\n' "aarch64-Linux refusal NAMES the release that restored it" ;;
+    *)
+      printf '  FAIL  %-58s the rendered refusal does not pin cli-v2.7.1\n' \
+             "aarch64-Linux refusal NAMES the release that restored it"; _t_fail=1 ;;
+  esac
   # ★THE NEAR-TWIN CONTROL: an architecture we serve nowhere must NOT be told
   # to `pip install bithuman`. If it were, the arm above would be passing on a
   # sentence this script prints unconditionally.
   _out_ctl=$(_run_child riscv64)
+  case "$_out_ctl" in
+    *"$_pat_rel"*)
+      printf '  FAIL  %-58s it is printed unconditionally\n' \
+             "★control: an unserved arch is NOT sent to cli-v2.7.1"; _t_fail=1 ;;
+    *)
+      printf '  PASS  %-58s ABSENT\n' "★control: an unserved arch is NOT sent to cli-v2.7.1" ;;
+  esac
   case "$_out_ctl" in
     *"$_pat_ok"*)
       printf '  FAIL  %-58s it is printed unconditionally\n' \
@@ -574,25 +608,22 @@ case "$(target_availability "$version" "$tarball_name")" in
     case "$target" in
       aarch64-unknown-linux-gnu)
         # ★THE FIRST OPTION IS THE ONE THAT ACTUALLY WORKS ON THIS MACHINE.
-        # Until 2026-09-04 this block offered an x86_64 host, a pinned old
-        # release, and an email address — and never mentioned that a supported
-        # channel serves aarch64 Linux TODAY. `pip install bithuman` has the
-        # broadest platform coverage in the estate and is the only channel that
-        # carries this one. Telling a developer to change machines while we
-        # ship a working package for the machine they have is the kind of
-        # refusal that reads as "unsupported" when it means "use the other
-        # door". DISTRIBUTION-SURFACE.md §5a / D-U3.
-        err "  aarch64 Linux was published through cli-v2.3.27 and dropped at cli-v2.4.0,"
-        err "  when the tarball began vendoring the expression-2 render engine and only an"
-        err "  x86_64 Linux engine was built. Options, in order of preference:"
-        err "    * ★USE THE PYTHON LIBRARY — it supports aarch64 Linux today:"
+        # aarch64 Linux shipped through cli-v2.3.27, was dropped at cli-v2.4.0
+        # (the tarball began vendoring a render host that was only ever frozen
+        # for x86_64), and is carried again from cli-v2.7.1 — so the way out of
+        # this refusal is a release that carries it. `pip install bithuman`
+        # stays second: it has served aarch64 Linux throughout, and telling a
+        # developer to change machines while a working channel exists for the
+        # one they have reads as "unsupported" when it means "use this door".
+        err "  aarch64 Linux is carried by cli-v2.7.1 and later (and by cli-v2.3.27 and"
+        err "  earlier); $version was cut while only an x86_64 Linux render host existed."
+        err "  Options, in order of preference:"
+        err "    * ★INSTALL A RELEASE THAT CARRIES IT — the newest does; to pin the first:"
+        err "          curl -sSL https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/install.sh | BITHUMAN_VERSION=cli-v2.7.1 sh"
+        err "    * use the Python library, which supports aarch64 Linux too:"
         err "          pip install bithuman        # docs.bithuman.ai"
         err "      Same engine, in your process; it is a library, not this command."
-        err "    * use an x86_64 Linux host (or run the x86_64 build under emulation);"
-        err "    * pin the last aarch64 release — note it predates engine vendoring, so"
-        err "      \`bithuman run\` cannot render locally on it:"
-        err "          curl -sSL https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/install.sh | BITHUMAN_VERSION=cli-v2.3.27 sh"
-        err "    * tell us you need it: hello@bithuman.ai"
+        err "    * tell us you need something else: hello@bithuman.ai"
         ;;
       x86_64-apple-darwin)
         # ★AN INTEL MAC IS A DIFFERENT ANSWER FROM "not published yet".

@@ -122,10 +122,13 @@ rather than failing.
   neither release ever had — which is why the predecessor's target set is always
   printed, and why `--require <triples>` exists to pin a floor.
 
-★ **Known standing gaps it will not flag** (the release under test and its
-predecessor both lack them, so there is no *loss* to detect): `install.sh`
-computes `x86_64-apple-darwin` (Intel Mac) and `aarch64-unknown-linux-gnu`
-(ARM Linux) as targets.
+★ **Known standing gap it will not flag** (the release under test and its
+predecessor both lack it, so there is no *loss* to detect): `install.sh`
+computes `x86_64-apple-darwin` (Intel Mac) as a target. ARM Linux
+(`aarch64-unknown-linux-gnu`) was in this list until **cli-v2.7.1 restored it**
+(2026-09-23, below); from that release on, losing it again is a *loss* this tool
+refuses, and `check-release-atomic.sh` C1 refuses a draft without it before
+anyone can see it.
 
 ★ **CORRECTED 2026-09-04, and the correction matters more than the typo.** The
 two sentences that used to stand here contradicted each other — *"no `cli-v*`
@@ -156,8 +159,17 @@ its asset list first and REFUSES, naming what *is* published and what to do
 instead, rather than emitting a 404 dressed as *"download failed … may not be
 published"*. `sh install.sh --self-test` proves it discriminates: the same
 target is `MISSING` on `cli-v2.5.1` and `OK` on `cli-v2.3.27`.
-Restoring the platform is a separate, costed job: it needs an aarch64 Linux
-render engine, which does not exist.
+~~Restoring the platform is a separate, costed job: it needs an aarch64 Linux
+render engine, which does not exist.~~ ★**RESTORED at `cli-v2.7.1`
+(2026-09-23).** The premise was half right: the *engine object*
+(`linux-x64-1.0.1.engine`) was never per-arch — it is a TFLite flatbuffer plus
+Python sources, no machine code. The per-arch piece was the PyInstaller-frozen
+render host, which bithuman-models `build_linux_artifacts.sh` now freezes for
+`--arch aarch64` on arm64, and the CLI repo's `release-linux.sh` cuts both Linux
+halves from one `CLI_SHA` into one `$R/out`. `REQUIRED_TARBALLS` in
+`check-release-atomic.sh` carries the third tarball from that release, and
+`install.sh`'s refusal (still what a *pinned* pre-2.7.1 release gets on ARM
+Linux) now names `cli-v2.7.1` as the pin that carries it.
 
 ## Atomicity: what the gate closes, and what it does NOT (measured 2026-09-03)
 
@@ -165,7 +177,7 @@ render engine, which does not exist.
 
 | | closes |
 |---|---|
-| C1 COMPLETE | both tarballs + both sidecars present |
+| C1 COMPLETE | every tarball in `REQUIRED_TARBALLS` + its sidecar present (three from cli-v2.7.1: macOS arm64, Linux x86_64, Linux aarch64) |
 | C2 NONEMPTY | each asset above its size floor |
 | C3 SIDECAR-SHAPE | each sidecar is `<64 hex>  <its own filename>` |
 | C4 FORMULA-PIN | the formula's url/sha256 point at this tag's macOS asset |

@@ -71,6 +71,9 @@ refuses.
     for its assets and REFUSES by name instead of building a URL that 404s; this
     tool is deliberately NOT made red for it, because a permanent red for
     something nobody has been asked to fix teaches people to ignore the gate.
+    ★RESTORED at cli-v2.7.1 (2026-09-23): the CLI rail cuts aarch64 Linux from
+    the same commit as the other two halves.  From that release on, a successor
+    that drops it LOSES a pair, and this tool refuses it like any other loss.
  3. DRAFTS AND PRE-RELEASES.  A draft release is invisible to an anonymous
     reader and is skipped; a pre-release is included (cli-v2.4.1 is one, and
     it is exactly the "shipped no assets at all" shape this refuses).
