@@ -13,7 +13,7 @@
 // provenance, not a live path.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// WHAT THIS PACKAGE ACTUALLY VENDS. Four products, and no others. Naming any
+// WHAT THIS PACKAGE ACTUALLY VENDS. Five products, and no others. Naming any
 // other product fails at resolve time:
 //     product 'Expression' ... not found in package 'homebrew-bithuman'
 //
@@ -35,6 +35,12 @@
 //                              this product and `Expression2` at once.
 //   - BithumanEngineProtocol   source-only Layer-0 engine interface.
 //                              `import BithumanEngineProtocol`.
+//   - Essence2Kit              a Swift `Essence2Engine` (create, feed, pull, idle,
+//                              interrupt, shutdown) over the `Essence2` product's C
+//                              interface, plus `Essence2Credential` and the engine's
+//                              runtime resources fetched once with pinned sha256s.
+//                              `import Essence2Kit`. Source only: it calls the public
+//                              header and reads no model file itself (#1224).
 //
 // ★ THERE IS NO `Expression` PRODUCT AND NO `Bithuman` PRODUCT. Earlier
 //   revisions of this header sent you to the modules `Expression` and
@@ -852,6 +858,12 @@ let package = Package(
         // source target can, and SwiftPM hands them to the final link of every
         // app that takes this product. So the four settings live here, once.
         .library(name: "Essence2", targets: ["libessence2", "onnxruntime", "UnifiedModelHeaderBinary", "Essence2LinkSettings"]),
+        // Layer-1 Swift engine for essence-2 (#1224): `Essence2Engine` reads like
+        // `Expression2Engine` and wraps ONLY the C interface the `Essence2` product ships
+        // (be_essence2.h). It carries the Essence2 product's targets, so an app attaches this
+        // ONE product. Its runtime resources come from the `essence2Tag` release, checked
+        // against sha256s pinned in its source (Sources/Essence2Kit/Essence2Engine.swift).
+        .library(name: "Essence2Kit", targets: ["Essence2Kit"]),
     ],
     targets: [
         .binaryTarget(
@@ -943,6 +955,13 @@ let package = Package(
                 .linkedFramework("Accelerate"),
                 .linkedFramework("CoreML"),
             ]
+        ),
+        // Source only, over the C interface above (#1224). Its dependencies are the
+        // `Essence2` product's own four targets, so taking this one product links the engine.
+        .target(
+            name: "Essence2Kit",
+            dependencies: ["libessence2", "onnxruntime", "UnifiedModelHeaderBinary", "Essence2LinkSettings"],
+            path: "Sources/Essence2Kit"
         ),
         .binaryTarget(
             name: "onnxruntime",
