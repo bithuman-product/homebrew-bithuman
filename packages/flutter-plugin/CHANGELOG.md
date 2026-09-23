@@ -1,3 +1,16 @@
+## 2.6.13 — 2026-09-23 — one credential setter on Android, and the Essence 2 engine without link warnings
+
+Tag `flutter-plugin-v2.6.13`.
+
+* **Android:** `ai.bithuman:essence2-android` **0.5.14 → 0.5.15** and `ai.bithuman:expression2-android`
+  **0.4.9 → 0.4.10** (bithuman-models #1223). The plugin sets the API secret through the one setter each
+  SDK now has — `Essence2Credential.set` / `Expression2Credential.set` — which covers the download and
+  the session; the deprecated `*Metering.apiSecret` it used before still works in older apps.
+* **iOS/macOS:** the Essence 2 engine moves to `essence2-v1.12.0` (libessence2 `921c64b6…`, resources
+  `e9b4f870…`) and the engine adapter source to bithuman-models `6ff1fd069`: `be_essence2_last_refusal`,
+  and slices that carry no builder path and no `CoreAudioTypes` autolink, so an app link no longer warns
+  (#1224).
+
 ## 2.6.12 — 2026-09-23 — every engine bills talking time only, and Expression 2 needs the API secret on both platforms
 
 Tag `flutter-plugin-v2.6.12`.

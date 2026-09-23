@@ -117,16 +117,18 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # ancestor; no Apple-engine source changed between them): the first Apple session meter
 # for Expression 2 (#1165), talking-time billing + the 300 s online grace on both engines,
 # the BITHUMAN_API_KEY alias (#1144), and create() naming a metering refusal (#1183).
-BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-ec9a3ab83244422b066aed20100e9236be57ebed}"
+# ★MOVED 2026-09-23 to 6ff1fd069 — the tree essence2-apple-v1.12.0 was built from (essence2-v1.12.0: the Swift Essence2Kit
+# engine's C half, be_essence2_last_refusal, clean slices — bithuman-models #1224).
+BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-6ff1fd069cd9cd184c74ae73df10c2574699a109}"
 
 # The essence-2 Apple ENGINE + its runtime RESOURCES. One release carries both.
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
 # `libessence2.xcframework.zip` binaryTarget checksum and the release's own
 # resources sidecar. Passed to the engine SDK bootstrap explicitly below.
-LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.11.0}"
-LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-08511e1632bfa5b99f67b78c7f43baefbf292d9bf15c07ca5ef18b48f06631c1}"
-LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.11.0}"
-LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-3024f45530176b888ee3944a5c5460c9cd2a2eb563f9c72b1674419f14ed1058}"
+LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.12.0}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-921c64b61deba8798e16e5555209d49bd7042db085a36fd35f618131b98b1e70}"
+LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.12.0}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-e9b4f8702435103f9267706f776bacfb76701f0190ade8902a5edef3614f7a80}"
 
 # The UnifiedModelHeader module, as a plain static .a per slice.
 #
