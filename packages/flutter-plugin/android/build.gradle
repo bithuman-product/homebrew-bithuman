@@ -70,7 +70,9 @@ android {
 }
 
 dependencies {
-    implementation 'ai.bithuman:expression2-android:0.4.8'
+    // 0.4.9 (2026-09-23): the FIRST on-device session meter — talking time only, idle free;
+    // a create without an API secret is refused (Expression2Metering.NO_SESSION).
+    implementation 'ai.bithuman:expression2-android:0.4.9'
     // 0.5.10 (public on Central since 2026-09-16, lastUpdated 20260916205927): A BARGE-IN
     // NO LONGER REWINDS THE DRIVER VIDEO TO ITS FIRST FRAME. Interrupt the agent mid-reply
     // and the video behind the avatar used to snap back to the start of its clip — every
@@ -131,7 +133,10 @@ dependencies {
     // release build always includes the default file, so this plugin was not exposed; the
     // pin moves so the plugin carries the current engine. Engine output unchanged: same
     // handset proof as 0.5.12 (lip contour bound, generated mouth share 0/0).
-    implementation 'ai.bithuman:essence2-android:0.5.13'
+    // 0.5.14 (2026-09-23): the meter bills talking time only (idle is free); a key the
+    // service never vouched for renders 0 frames; an outage after vouching renders 300 s of
+    // frames, then pauses until the service answers; BITHUMAN_API_KEY read as an alias.
+    implementation 'ai.bithuman:essence2-android:0.5.14'
 }
 
 // ★ The app that imports this plugin must ALSO set, in its own android/app build file:
