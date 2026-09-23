@@ -106,6 +106,12 @@ enum EngineRegistry {
     // essence2 on an embody-only (ESSENCE2_AVAILABLE-unset) build. Its per-agent
     // dir is set out of band via setExpression2AgentDir; the shared engine is
     // extracted by the buffered-display-clock setup before warmUp.
+    // ★From Expression2 v2.6.5 the engine BILLS the session it serves, and a Release
+    // build refuses (warmUp arms the meter first; `meteringRefusal` says why) without
+    // a credential — an installed app has no BITHUMAN_API_SECRET in its environment,
+    // so without this line every Expression2 app built on the plugin renders NOTHING.
+    // Set BEFORE init, exactly as the essence2 branch above sets its secret.
+    if let s = ref.apiSecret, !s.isEmpty { Expression2Credential.set(s) }
     return Expression2Engine()
   }
   #endif
