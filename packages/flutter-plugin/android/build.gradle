@@ -12,13 +12,13 @@
 // serves from 0.3.1 onward declares kotlin-stdlib and nothing else, the pinned 0.4.7
 // included. The claim was three minors dead before it was deleted.
 //
-// The two Qualcomm coordinates below are the Hexagon NPU delegate the SDK loads when the
-// SoC has one (Snapdragon); elsewhere they are inert. They are declared BY HAND because
-// 0.4.7's POM does not carry them — Central's 0.4.8 POM is the first that does, so this
-// pair must be revisited, not merely inherited, whenever the expression-2 pin moves.
-// Both are on Central. essence-2 resolves from Central alone.
+// The Qualcomm Hexagon NPU delegate + runtime (com.qualcomm.qti:qnn-litert-delegate and
+// qnn-runtime, 2.49.0) come in TRANSITIVELY: expression2-android 0.4.8 is the first POM that
+// declares them, so the two hand-declared lines this file carried for 0.4.7 are gone.
+// Revisit if the expression-2 pin ever moves BELOW 0.4.8 — 0.4.7's POM does not carry them
+// and the engine would silently render on the CPU. essence-2 resolves from Central alone.
 //
-// ★ The pin is 0.4.7, which the presenter needs: `Expression2IdleLoop` (the idle clip
+// ★ The floor is 0.4.7, which the presenter needs: `Expression2IdleLoop` (the idle clip
 // decoded in place, `next(bitmap)`) exists from 0.4.7 ONLY. Central's 0.4.6 — built
 // before that change — ships `idleLoop` as a `List<Bitmap>` of 48 frames and has no
 // `Expression2IdleLoop` class, so plugin 2.4.0's `implementation ...:0.4.6` did not
@@ -70,7 +70,7 @@ android {
 }
 
 dependencies {
-    implementation 'ai.bithuman:expression2-android:0.4.7'
+    implementation 'ai.bithuman:expression2-android:0.4.8'
     // 0.5.10 (public on Central since 2026-09-16, lastUpdated 20260916205927): A BARGE-IN
     // NO LONGER REWINDS THE DRIVER VIDEO TO ITS FIRST FRAME. Interrupt the agent mid-reply
     // and the video behind the avatar used to snap back to the start of its clip — every
@@ -123,9 +123,15 @@ dependencies {
     // Central's 0.4.6 did not have: `publishToMavenLocal` plus a pin bump compiles green
     // while no customer can resolve it. This pin was moved only once repo1.maven.org
     // served 0.5.12 (fetched anonymously 2026-09-20; the sha256 above is the sidecar's).
-    implementation 'ai.bithuman:essence2-android:0.5.12'
-    implementation 'com.qualcomm.qti:qnn-litert-delegate:2.49.0'
-    implementation 'com.qualcomm.qti:qnn-runtime:2.49.0'
+    //
+    // 0.5.13 (public on Central since 2026-09-23): THE AAR KEEPS ITS OWN JNI BRIDGE THROUGH A
+    // CONSUMER'S R8. 0.5.12 shipped no proguard.txt, so an app whose release build named its
+    // own proguardFiles(...) without AGP's default file had NativeBridge renamed and threw
+    // UnsatisfiedLinkError at the first create() (measured on a Galaxy S25+). A Flutter
+    // release build always includes the default file, so this plugin was not exposed; the
+    // pin moves so the plugin carries the current engine. Engine output unchanged: same
+    // handset proof as 0.5.12 (LIP CONTOUR bound, synth_w 0/0, passthrough 0).
+    implementation 'ai.bithuman:essence2-android:0.5.13'
 }
 
 // ★ The app that imports this plugin must ALSO set, in its own android/app build file:
