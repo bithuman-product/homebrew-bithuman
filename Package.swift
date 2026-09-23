@@ -495,7 +495,16 @@ let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/release
 // tag the consumer's `from:` picks and then reads absolute URLs out of the
 // manifest it finds there — the asset does not have to live on the resolved tag.
 // ---------------------------------------------------------------------------
-let expression2Tag = "v2.6.5"
+// ★ ROLLED 2026-09-23 ONTO Expression2 v2.7.0 (package tag v2.15.0) — THE MOUTH NO LONGER LEADS THE VOICE,
+// AND BOTH ENGINES FETCH THEIR APPLE SLICE. Expression2 v2.7.0 is bithuman-models fd37bdfb7 (#1279, #1283),
+// built on echelon by publish-apple-release.sh --build; its three checksums below are those files' sha256.
+// It presents a stream's first frame one extra time: SyncNet v2 on the same SDK path and clip read
+// -71.4 / -65.2 / -45.8 ms (mouth leading) on v2.6.5 and -25.1 / -17.0 / -0.3 ms on these bytes
+// (A26KFJ1886, A41VXS7661, A02HCY0444; gate |offset| <= 40). New: Expression2Download.avatar(agentCode:)
+// and Essence2Kit's Essence2Download.identity(agentCode:) ask the door for ?slice=apple&abi_max=1 and
+// refuse bytes that miss its raw_sha256. The apple slice renders like the universal through this SDK's
+// own API (x2: frame-identical, 3/3; e2: the same members opened with the same bytes, 3/3).
+let expression2Tag = "v2.7.0"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 
@@ -933,17 +942,17 @@ let package = Package(
         .binaryTarget(
             name: "Expression2Binary",
             url: "\(expression2Base)/Expression2.xcframework.zip",
-            checksum: "f1fb6775deca2884739432cb0f0c8d85173234c7f1137c3b8a01dd96ac84c732"
+            checksum: "d1a86576dd88eedbb86d3444bae72aadb173d96297ffe5ef4deb4c04308f5472"
         ),
         .binaryTarget(
             name: "BithumanEngineProtocolBinary",
             url: "\(expression2Base)/BithumanEngineProtocol.xcframework.zip",
-            checksum: "1dcb82534267ccb59f3f46681b202d3d1029eb40ef667a953e1f9669be11fe5f"
+            checksum: "383642736440b7e4d691212f82bfd035234260b76cc156d0c5bbf513d1b689c7"
         ),
         .binaryTarget(
             name: "UnifiedModelHeaderBinary",
             url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
-            checksum: "5e3e56a0a1895cb8f9277aee921d7ac30b7318d0fe75e78688f5223507e70c03"
+            checksum: "8cd64a4a1539c336f752d594e77833cd178a8cd5e3bd1ff4d379751b378447db"
         ),
         // The essence-2 engine itself. The target name matches the xcframework
         // inside the archive; the MODULES it vends are `CLibEssence2` and, since
