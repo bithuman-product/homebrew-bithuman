@@ -158,6 +158,37 @@ jobs:
       - name: Every slice carries the lip-contour bind (lip_delivery) — the ellipse core is not re-hosted
         run: bash scripts/check-xcframework-contour.sh src/libessence2.xcframework.zip
 
+      # ★THE THREE RUNTIME FILES, ALSO AS THEIR OWN ASSETS (bithuman-models #1224).
+      # Essence2Kit fetches the engine's audio frontend and its short-window pair at
+      # first run, one file at a time: an iOS app has no unzip in Foundation, and a
+      # 105 MB archive whose other members only a legacy bundle reads is not a thing
+      # to make every phone download. They are taken OUT of the resources archive
+      # verified above — never fetched from anywhere else — so these are the bytes
+      # the models workflow graded, under the same tag as the engine that reads them.
+      - name: The runtime files, taken out of the verified resources archive, each with a sha256 sidecar
+        run: |
+          set -euo pipefail
+          mkdir -p runtime
+          for f in w2v_ess_fp16_v1.onnx audio_encoder_fp16_window_trunk.onnx audio_encoder_fp16_window_head.onnx; do
+            unzip -o -j -q src/libessence2-resources.zip "$f" -d runtime \
+              || { echo "::error::$f is not a top-level member of libessence2-resources.zip — the engine cannot find it either"; exit 1; }
+            [ -s "runtime/$f" ] || { echo "::error::runtime/$f is empty"; exit 1; }
+            (cd runtime && shasum -a 256 "$f" > "$f.sha256" && cat "$f.sha256")
+          done
+          # Essence2Kit pins these sha256s in its source. When it is on this ref, a re-host it
+          # cannot use is refused here rather than on a customer's first run.
+          k=Sources/Essence2Kit/Essence2Engine.swift
+          if [ -f "$k" ]; then
+            for f in w2v_ess_fp16_v1.onnx audio_encoder_fp16_window_trunk.onnx audio_encoder_fp16_window_head.onnx; do
+              got=$(cut -d' ' -f1 "runtime/$f.sha256")
+              grep -q "(\"$f\", \"$got\")" "$k" \
+                || { echo "::error::$f sha256 $got is not the value $k pins — Essence2Kit would refuse these bytes"; exit 1; }
+            done
+            echo "Essence2Kit's pins match all three runtime files"
+          else
+            echo "no $k on this ref — nothing to compare the runtime pins against"
+          fi
+
       - name: The SwiftPM checksum the manifest will pin
         run: |
           set -euo pipefail
@@ -175,8 +206,11 @@ jobs:
             libessence2.xcframework.zip libessence2.xcframework.zip.sha256 libessence2.xcframework.zip.checksum \
             libessence2-resources.zip libessence2-resources.zip.sha256 \
             onnxruntime.xcframework.zip onnxruntime.xcframework.zip.sha256 onnxruntime.xcframework.zip.checksum \
+            ../runtime/w2v_ess_fp16_v1.onnx ../runtime/w2v_ess_fp16_v1.onnx.sha256 \
+            ../runtime/audio_encoder_fp16_window_trunk.onnx ../runtime/audio_encoder_fp16_window_trunk.onnx.sha256 \
+            ../runtime/audio_encoder_fp16_window_head.onnx ../runtime/audio_encoder_fp16_window_head.onnx.sha256 \
             --repo "$GITHUB_REPOSITORY" \
             --latest=false \
             --title "libessence2 $TAP_TAG" \
-            --notes "3-slice libessence2.xcframework (macos-arm64 + ios-arm64 + ios-arm64-simulator), the runtime resources, and the onnxruntime dependency. Built, tested and graded by bithuman-models apple-xcframework.yml at $SOURCE_TAG and re-hosted here unchanged (sha256 sidecars attached; libessence2.xcframework.zip = $EXPECTED_XCF_SHA256). Run on an M4 and an iPhone 15 before this release was cut."
+            --notes "3-slice libessence2.xcframework (macos-arm64 + ios-arm64 + ios-arm64-simulator), the runtime resources (also as the three files Essence2Kit fetches), and the onnxruntime dependency. Built, tested and graded by bithuman-models apple-xcframework.yml at $SOURCE_TAG and re-hosted here unchanged (sha256 sidecars attached; libessence2.xcframework.zip = $EXPECTED_XCF_SHA256). Run on an M4 and an iPhone 15 before this release was cut."
           echo "released: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAP_TAG"
