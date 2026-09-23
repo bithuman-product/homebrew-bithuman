@@ -26,7 +26,7 @@
 package ai.bithuman.flutter
 
 import ai.bithuman.elevate.Essence2Avatar
-import ai.bithuman.elevate.Essence2Metering
+import ai.bithuman.essence2.Essence2Credential
 import ai.bithuman.elevate.Essence2ModelStore
 import ai.bithuman.expression2.Expression2Avatar
 import ai.bithuman.expression2.Expression2ModelStore
@@ -242,9 +242,9 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             if (total > 0 && done == total) Log.i(TAG, "fetched $member")
         }
         // From expression2-android 0.4.9 the engine meters the session it serves and refuses
-        // to create one without an API secret. The store above already hands it the secret it
-        // fetched with; set it explicitly too, exactly as the essence-2 path sets its own.
-        if (!secret.isNullOrBlank()) ai.bithuman.expression2.Expression2Metering.apiSecret = secret
+        // to create one without an API secret. 0.4.10's one setter arms the meter (and any
+        // store resolver built without a credential), exactly as the essence-2 path does.
+        if (!secret.isNullOrBlank()) ai.bithuman.expression2.Expression2Credential.set(secret)
         val avatar = Expression2Avatar.create(context, model)
         // The idle loop the agent plays between turns is the SDK's: the identity's own
         // clip from the same store as the weights, decoded in place, every frame of it.
@@ -264,7 +264,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     private fun loadEssence2(code: String, secret: String?, t0: Long): AvatarEngine {
         if (secret.isNullOrBlank()) throw IllegalArgumentException(
             "essence-2 on Android needs the app's credential: members are served through the metered door and every frame is metered")
-        Essence2Metering.apiSecret = secret
+        Essence2Credential.set(secret)   // 0.5.15: the one setter for the door and the meter
         val store = Essence2ModelStore(context, java.io.File(context.filesDir, "essence2"),
             3L * 1024 * 1024 * 1024, Essence2ModelStore.MeteredDoorResolver(secret))
         val bundle = store.fetch(code, false, null) { member, done, total ->
