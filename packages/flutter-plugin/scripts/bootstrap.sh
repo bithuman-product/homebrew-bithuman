@@ -144,8 +144,13 @@ LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-fa9bfc79eca9a7f82d
 # The bytes come from the same public tap release the SwiftPM
 # `UnifiedModelHeaderBinary` binaryTarget pins, at `expression2Tag`; the digest
 # below is that binaryTarget's checksum, and a mismatch is a refusal.
-UMH_RELEASE="${UMH_RELEASE:-v2.6.3}"
-UMH_SHA256="${UMH_SHA256:-a8bf748cd564dc1348eb3c8f789fbc1e79077d34bdacb7755c5135c4abc744a5}"
+# ★It read v2.6.3 (a8bf748c…) after Package.swift had moved to v2.6.4 (the Swift
+# SDK tag v2.14.1), so the plugin tag and the SDK tag named different
+# UnifiedModelHeader bytes — nothing compared them. scripts/check-apple-engine-pin.sh
+# now does (A6): these two values must equal `expression2Tag` and the
+# UnifiedModelHeaderBinary checksum in Package.swift.
+UMH_RELEASE="${UMH_RELEASE:-v2.6.4}"
+UMH_SHA256="${UMH_SHA256:-eb5fde201bd122200332f656ba6049b494bbb6a2dc50ebd5906f11f2b4a01a41}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so
@@ -611,6 +616,48 @@ fi
 # runtime the iOS pod vendors. Staged to ios/Frameworks (sha256-verified).
 stage_onnxruntime_ios
 
+# 1d. Keep ONLY the identity-agnostic graphs of the embody bundle.
+#
+# ★THE VENDOR BUNDLE CARRIES A FACE THE PINNED ENGINE CANNOT START. Both vendor
+# releases this script reads (the public flutter-plugin-vendor-v1 tarball and
+# its private twin expression2-vendor-v1) were cut on 2026-07-01 from the A42
+# demo: w2v_frontend + audiotokenizer (shared) PLUS student_v4 + canon + idle.mp4
+# (one identity) + taehv_decode_T10 (the floor decoder retired 2026-08-11). They
+# carry NO dec_p2_v3_all, and since the 2026-08-11 taehv retirement the engine
+# at BITHUMAN_MODELS_REF refuses an identity without it. So the engine SDK's
+# startability gate refused this bundle on every run, `die`d, and stage_expression2
+# stopped AFTER `rm -rf Engines/expression2` and BEFORE copying the adapter
+# source — measured 2026-09-23 from a clean clone at flutter-plugin-v2.6.9:
+#     the staged embody bundle CANNOT START the current engine — missing: dec_p2_v3_all.mlpackage
+# and the app build then failed at `cannot find 'Expression2Engine' in scope`
+# (EngineRegistry.swift). That error is not an API mismatch between this pod and
+# the published Swift SDK: the engine source was never staged at all.
+#
+# The fix is the shape the gate already recognises as correct: the IDENTITY-FREE
+# bundle — the two identity-agnostic graphs and no face. Every identity reaches
+# the engine as a downloaded or app-bundled `.avatar`, which carries its own
+# student / dec_p2_v3_all / canon.f32 / idle.mp4 (the engine resolves those from
+# `activeAgentDir` first). The bundled A42 face could not render on this engine
+# anyway, so nothing that worked stops working; the app loses ~108 MB of bytes
+# it could never use (student 88.5 MB, taehv 19.7 MB). The tarball's digest pin
+# is unchanged — the bytes are still verified before anything is removed.
+reduce_to_shared_graphs() {  # $1 = extracted embody-models dir
+    local d="$1" m kept=0 dropped=""
+    for m in w2v_frontend_cpuAndNE.mlpackage audiotokenizer_cpuAndNE.mlpackage; do
+        [ -e "$d/$m" ] && kept=$((kept + 1))
+    done
+    [ "$kept" -eq 2 ] || die "the embody vendor bundle lacks an identity-agnostic graph (w2v_frontend / audiotokenizer) — $d holds: $(ls "$d" | tr '\n' ' ')"
+    for m in "$d"/*; do
+        case "$(basename "$m")" in
+            w2v_frontend_cpuAndNE.mlpackage|audiotokenizer_cpuAndNE.mlpackage|warm.wav) ;;
+            *) dropped="$dropped $(basename "$m")"; rm -rf "$m" ;;
+        esac
+    done
+    log "  embody bundle reduced to the identity-agnostic graphs (w2v_frontend + audiotokenizer)"
+    [ -z "$dropped" ] || log "    dropped (one identity the pinned engine cannot start, or retired):$dropped"
+}
+reduce_to_shared_graphs "$SRC/embody-models"
+
 # 2. N-engine loop. expression2 reuses the bundle we already downloaded for
 # libconverse (EMBODY_VENDOR_SRC → no re-download); essence2 fetches its own
 # sha-pinned libessence2 release inside its SDK bootstrap.
@@ -618,4 +665,4 @@ stage_expression2 "EMBODY_VENDOR_SRC=$SRC"
 stage_essence2
 
 log "Done. Self-contained — no sibling bithuman-sdk required."
-log "    the product app lives in the bithuman-jarvis-app repo: github.com/bithuman-product/bithuman-jarvis-app"
+log "    the product app lives in bithuman-apps at apps/jarvis (it pins this plugin by tag)"

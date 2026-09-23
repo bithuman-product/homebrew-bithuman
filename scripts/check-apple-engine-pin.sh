@@ -145,6 +145,32 @@ else
     pass "A5 engine digest matches the binaryTarget checksum (${SPM_SHA:0:16}…)"
 fi
 
+# A6 — the UnifiedModelHeader the pod stages is the SDK tag's own bytes.
+# From essence2-v1.10.0 the engine archive REFERENCES UnifiedModelHeader, and the
+# pod stages the module from the tap release SwiftPM's UnifiedModelHeaderBinary
+# pins. The two drifted once with no check between them: Package.swift moved to
+# v2.6.4 (Swift SDK tag v2.14.1) while the pod kept v2.6.3, so a plugin tag and
+# the SDK tag it ships beside named different bytes for one module.
+UMH_TAG="$(pin UMH_RELEASE)"
+UMH_SHA="$(pin UMH_SHA256)"
+SPM_X2_TAG="$(sed -n 's/^let expression2Tag = "\([^"]*\)"$/\1/p' "$MANIFEST" | head -1)"
+SPM_UMH_SHA="$(python3 - "$MANIFEST" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r'name:\s*"UnifiedModelHeaderBinary"\s*,\s*url:\s*"[^"]*/UnifiedModelHeader\.xcframework\.zip"\s*,\s*checksum:\s*"([0-9a-fA-F]{64})"', src)
+print(m.group(1).lower() if m else "")
+PY
+)"
+[ -n "$SPM_X2_TAG" ]  || cannot "could not read expression2Tag out of $MANIFEST"
+[ -n "$SPM_UMH_SHA" ] || cannot "could not read the UnifiedModelHeaderBinary checksum out of $MANIFEST"
+if [ -z "$UMH_TAG" ] || [ -z "$UMH_SHA" ]; then
+    refuse "A6 bootstrap.sh declares no UMH_RELEASE/UMH_SHA256 default — the pod would stage no UnifiedModelHeader and the app's final link fails"
+elif [ "$UMH_TAG" != "$SPM_X2_TAG" ] || [ "$UMH_SHA" != "$SPM_UMH_SHA" ]; then
+    refuse "A6 the pod stages UnifiedModelHeader $UMH_TAG (${UMH_SHA:0:16}…), SwiftPM serves $SPM_X2_TAG (${SPM_UMH_SHA:0:16}…) — roll UMH_RELEASE/UMH_SHA256 with expression2Tag"
+else
+    pass "A6 UnifiedModelHeader pinned at $UMH_TAG, the SwiftPM binaryTarget's bytes (${SPM_UMH_SHA:0:16}…)"
+fi
+
 if [ "$FAIL" -ne 0 ]; then
     echo
     echo "The Apple engine edge is the Android edge's twin: packages/flutter-plugin/android/build.gradle"
