@@ -400,14 +400,13 @@ class BithumanCli < Formula
   # on every release 2.4.0..2.6.4, which linked an engine build that was on no
   # branch; a separate axis from the CLI version, and the
   # version below is scanned from the cli-v* tag in the URL.)
-  # ★2026-09-23: THE PIN MOVES FORWARD to cli-v2.7.1 (bithuman 2db474072, all three
-  # halves — macOS arm64, Linux x86_64 and, restored this release, Linux aarch64 — from
-  # that ONE commit; engine pin essence1-v3.1.3-e2.36 = bithuman-models 0cf3004ee,
-  # libessence 2.11.6 ABI 7). The macOS half was built, signed and notarized on
-  # echelon (owner ruling 2026-09-23: alpharetta is not a release host); the two
-  # lines below are release_pack.sh's FORMULA-PIN.txt for those bytes, pasted, not typed.
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.7.1/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "feba4c4155a0c7003be9cdefe4c679633c46477f7b91f88f801ca78f3a25e4a5"
+  # ★2026-09-23: THE PIN MOVES FORWARD to cli-v2.7.2 (bithuman d087d8b76, all three
+  # halves from that ONE commit; engine pin essence1-v3.1.3-e2.39 = bithuman-models
+  # 0e1b37b70, libessence 2.11.8 ABI 7). The macOS half was built, signed and notarized
+  # on echelon; the two lines below are release_pack.sh's FORMULA-PIN.txt for those
+  # bytes, pasted, not typed. (2.7.1 was 2db474072 / e2.36 / sha feba4c41….)
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.7.2/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "763a199725340b9cc5bfd6aab49c5b39dfabae40582151945fbef5940fe4a484"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
