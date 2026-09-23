@@ -1,3 +1,27 @@
+## 2.6.9 — unreleased (no tag yet) — both Android engines move to Central's current: expression2-android 0.4.8, essence2-android 0.5.13
+
+**Not tagged.** An app pinning `ref: flutter-plugin-v2.6.8` (the example app does) still resolves
+0.4.7 / 0.5.12; it reaches these pins only once a `flutter-plugin-v2.6.9` tag exists and the app
+moves its `ref:`.
+
+* `ai.bithuman:expression2-android` **0.4.7 → 0.4.8**. 0.4.8's POM declares the Qualcomm Hexagon
+  delegate and runtime (`com.qualcomm.qti:qnn-litert-delegate` / `qnn-runtime` 2.49.0) itself, so the
+  two lines this plugin declared by hand for 0.4.7 are **deleted**; they still resolve, transitively.
+* `ai.bithuman:essence2-android` **0.5.12 → 0.5.13** (public 2026-09-23): the AAR ships its own keep
+  rule for its JNI bridge, so a consumer's R8 cannot rename it whatever its `proguardFiles(...)` say.
+  A Flutter release build always includes Android's default ProGuard file, so this plugin was never
+  exposed; the engine output is unchanged (same handset proof as 0.5.12: lip contour bound,
+  generated mouth share 0.000000 / 0.000000, passthrough 0).
+
+**Measured 2026-09-23 on echelon**, a clean clone of `bithuman-examples` (`afa0bb4`) with only its
+plugin `ref:` pointed at this change, cold Gradle and pub caches, `flutter build apk --release
+--target-platform android-arm64` → rc 0. Gradle resolved `expression2-android-0.4.8.aar`,
+`essence2-android-0.5.13.aar`, `qnn-litert-delegate-2.49.0.aar` and `qnn-runtime-2.49.0.aar` from
+Maven Central. R8's `mapping.txt`: `ai.bithuman.elevate.NativeBridge -> ai.bithuman.elevate.NativeBridge`,
+`ai.bithuman.expression2.Native -> ai.bithuman.expression2.Native`. In the APK, `lible_jni.so`
+`b97e7ff033ec442c…` and `libexpr2jni.so` `e8dab183ff6ed37e…` equal the ones inside Central's AARs, and
+`libQnnTFLiteDelegate.so` is present.
+
 ## 2.6.8 — 2026-09-20 — Essence 2 on Android draws the mouth with the identity's own lip contour
 
 Tag `flutter-plugin-v2.6.8`. **An app that pins this tag gets the mouth drawn by the
