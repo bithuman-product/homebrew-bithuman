@@ -471,6 +471,10 @@ class BithumanCli < Formula
   # not found"). Like ffmpeg above it is a SUBPROCESS, not a linked dylib, so the
   # "no runtime deps" rule below does not reach it.
   depends_on "livekit"
+  # `bithuman run`'s voice runtime is a Python venv the CLI builds on first
+  # run; with no Python 3.11+ it refuses (69 PYTHON_NOT_FOUND, cli-v2.7.2).
+  # A Homebrew install brings one, so that first run just works.
+  depends_on "python@3.13"
 
   # No runtime `depends_on` dylibs. The macOS tarball is self-contained:
   # the `bithuman` binary references every third-party dylib (ONNX
