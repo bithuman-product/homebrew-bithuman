@@ -1,8 +1,40 @@
-## 2.6.9 — unreleased (no tag yet) — both Android engines move to Central's current: expression2-android 0.4.8, essence2-android 0.5.13
+## 2.6.10 — 2026-09-23 — the Apple half builds again from a clean clone
 
-**Not tagged.** An app pinning `ref: flutter-plugin-v2.6.8` (the example app does) still resolves
-0.4.7 / 0.5.12; it reaches these pins only once a `flutter-plugin-v2.6.9` tag exists and the app
-moves its `ref:`.
+Tag `flutter-plugin-v2.6.10`.
+
+**`flutter-plugin-v2.6.8` and `v2.6.9` do not build a macOS app from a clean clone** (measured on
+both). The bootstrap's Expression 2 step refused its own model bundle, stopped before it copied the engine
+source into the pod, and the app build then failed at `cannot find 'Expression2Engine' in scope`.
+That error was never an interface mismatch with the Swift SDK; the engine source was simply not
+there.
+
+* **The model bundle is cut to the two shared graphs.** The pinned vendor bundle (2026-07-01)
+  carries one demo face whose per-identity decoder, `dec_p2_v3_all`, the current engine requires
+  and the bundle does not have. The bootstrap now keeps only `w2v_frontend` and `audiotokenizer`,
+  the shape the engine's own check accepts ("identity-free"). Every face reaches the engine as an
+  `.avatar`, which carries its own decoder. The app gets ~108 MB smaller; the digest pin on the
+  download is unchanged.
+* **`UnifiedModelHeader` is the Swift SDK tag's bytes.** The pod staged `v2.6.3` while
+  `Package.swift` (Swift SDK `v2.14.1`) serves `v2.6.4`. It now stages `v2.6.4`
+  (`eb5fde20…`), and `scripts/check-apple-engine-pin.sh` refuses a commit where the two differ
+  (A6, with two negative arms in `apple-engine-pin.yml`).
+
+Engine coordinates are unchanged: the adapter source is bithuman-models `05e443da9`, the
+engine `essence2-v1.10.0`, the same bytes Swift SDK `v2.14.1` serves.
+
+**Measured 2026-09-23 on a Mac with a clean clone of the product app** pinned to this change, cold
+pub cache. The bootstrap reported `identity-free bundle OK`, and staged expression2 + essence2 and
+UnifiedModelHeader v2.6.4. The app's 30 unit tests passed. `flutter build macos --debug` succeeded:
+the app carries `Expression2Engine` and `_be_essence2_create`, `Resources/embody` holds
+`w2v_frontend` + `audiotokenizer` and no face, and the app is 434 MB.
+
+The app's session test passed on Expression 2: launch, engine ready, call, a scripted reply, a
+barge-in cancel, a typed turn and hang-up. Essence 2 rendered from a current published identity:
+the engine was ready at 1920x1080, texture frames flowed, and a metered beat was delivered.
+
+## 2.6.9 — 2026-09-23 — both Android engines move to Central's current: expression2-android 0.4.8, essence2-android 0.5.13
+
+Tag `flutter-plugin-v2.6.9`.
 
 * `ai.bithuman:expression2-android` **0.4.7 → 0.4.8**. 0.4.8's POM declares the Qualcomm Hexagon
   delegate and runtime (`com.qualcomm.qti:qnn-litert-delegate` / `qnn-runtime` 2.49.0) itself, so the

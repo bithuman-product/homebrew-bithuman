@@ -82,4 +82,10 @@ jobs:
           # well-formed sha256, so this arm keeps biting whatever the pin becomes.
           arm "the engine digest is a different valid sha256" \
               's|LIBESSENCE2_SHA256:-[0-9a-f]\{64\}|LIBESSENCE2_SHA256:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|'
+          # A6: the UnifiedModelHeader pin drifts from the SDK tag (the real
+          # defect: v2.6.3 staged while Package.swift served v2.6.4).
+          arm "the pod stages an older UnifiedModelHeader release" \
+              's|UMH_RELEASE:-v[0-9.]*|UMH_RELEASE:-v2.6.3|'
+          arm "the UnifiedModelHeader digest is a different valid sha256" \
+              's|UMH_SHA256:-[0-9a-f]\{64\}|UMH_SHA256:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|'
           ./scripts/check-apple-engine-pin.sh
