@@ -725,6 +725,11 @@ bundle_root="$(dirname "$extracted_bin")"
 extracted_host=""; [ -f "$bundle_root/expression2-model" ] && extracted_host="$bundle_root/expression2-model"
 extracted_embody=""; [ -f "$bundle_root/embody.model" ] && extracted_embody="$bundle_root/embody.model"
 extracted_engines=""; [ -d "$bundle_root/engines" ] && extracted_engines="$bundle_root/engines"
+# ★THE EMBEDDED LIVEKIT SERVER `bithuman run` stands up (Linux tarballs from
+# cli-v2.7.2). The CLI looks for it next to itself FIRST
+# (embedded_livekit.rs::discover_binary); left in the temp dir, a fresh
+# `curl … | sh && bithuman run` refused with "livekit-server was not found".
+extracted_lk=""; [ -f "$bundle_root/livekit-server" ] && extracted_lk="$bundle_root/livekit-server"
 # ★THE ESSENCE-2 PAYLOAD, which this script never carried. The CLI dlopens
 # libessence2.dylib by exe-relative search (elevate/ffi.rs::candidates: next to
 # the binary, <exe>/lib, <exe>/../lib, ~/.bithuman/lib), and libessence2 then
@@ -776,6 +781,12 @@ if [ -n "$extracted_engines" ]; then
   cp -R "$extracted_engines" "$install_dir/engines"
   info "installed engines/ ($(ls -1 "$install_dir/engines" 2>/dev/null | tr '\n' ' '))"
 fi
+if [ -n "$extracted_lk" ]; then
+  cp "$extracted_lk" "$install_dir/livekit-server"
+  chmod 755 "$install_dir/livekit-server"
+  [ -f "$bundle_root/LICENSE.livekit-server" ] && cp "$bundle_root/LICENSE.livekit-server" "$install_dir/LICENSE.livekit-server"
+  info "installed livekit-server (the room \`bithuman run\` stands up)"
+fi
 
 # essence-2: the dylib and its Bundle.main resources travel TOGETHER. Installing
 # one without the other produces a CLI that dlopens the engine and then dies at
@@ -825,6 +836,16 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
   info ""
   info "Note: \`bithuman render\` writes MP4 through ffmpeg, which is not on your PATH:"
   info "    $ffmpeg_hint"
+fi
+# ★AND `bithuman run` NEEDS A livekit-server. Linux tarballs carry one (installed
+# above); upstream publishes no macOS binary, so on a Mac it comes from Homebrew.
+# Said here, once, instead of on the first `run`.
+if [ ! -x "$install_dir/livekit-server" ] && ! command -v livekit-server >/dev/null 2>&1; then
+  lk_hint="curl -sSL https://get.livekit.io | bash"
+  [ "$os" = "apple-darwin" ] && lk_hint="brew install livekit"
+  info ""
+  info "Note: \`bithuman run\` stands up a LiveKit room and needs livekit-server:"
+  info "    $lk_hint"
 fi
 
 # ----- success message -------------------------------------------------------
