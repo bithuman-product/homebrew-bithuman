@@ -121,7 +121,9 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # engine's C half, be_essence2_last_refusal, clean slices — bithuman-models #1224).
 # ★MOVED 2026-09-23 to 8bae6d8f3 — the tree essence2-apple-v1.12.1 was built from (essence2-v1.12.1: slices without module
 # breadcrumbs — bithuman-models #1263).
-BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-8bae6d8f3647a1432e1c82e754f6a5c4245b23c2}"
+# ★MOVED 2026-09-23 to fd37bdfb7: the tree Expression2 v2.7.0 was built from (the x2 lip-sync hold, #1279;
+# Expression2Download). The essence-2 adapter sources are unchanged since essence2-apple-v1.12.1 (8bae6d8f3).
+BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-fd37bdfb78ceffa8f1a64233e0215501f77ca169}"
 
 # The essence-2 Apple ENGINE + its runtime RESOURCES. One release carries both.
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
@@ -158,8 +160,8 @@ LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-d5247f61b2bf6e81c3
 # UnifiedModelHeader bytes — nothing compared them. scripts/check-apple-engine-pin.sh
 # now does (A6): these two values must equal `expression2Tag` and the
 # UnifiedModelHeaderBinary checksum in Package.swift.
-UMH_RELEASE="${UMH_RELEASE:-v2.6.5}"
-UMH_SHA256="${UMH_SHA256:-5e3e56a0a1895cb8f9277aee921d7ac30b7318d0fe75e78688f5223507e70c03}"
+UMH_RELEASE="${UMH_RELEASE:-v2.7.0}"
+UMH_SHA256="${UMH_SHA256:-8cd64a4a1539c336f752d594e77833cd178a8cd5e3bd1ff4d379751b378447db}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so

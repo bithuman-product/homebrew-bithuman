@@ -1,3 +1,12 @@
+## 2.6.15 — 2026-09-23 — Expression 2 lip sync on iOS and macOS
+
+Tag `flutter-plugin-v2.6.15`.
+
+* **iOS/macOS:** Expression 2 moves to v2.7.0 (UnifiedModelHeader `8cd64a4a…`) and the engine source
+  to bithuman-models `fd37bdfb7`: a stream's first frame is presented one extra time, so the mouth no
+  longer leads the voice (SyncNet v2: about -65 ms before, about -15 ms after). Essence 2 is unchanged
+  (essence2-v1.12.1).
+
 ## 2.6.14 — 2026-09-23 — the Essence 2 engine links without warnings
 
 Tag `flutter-plugin-v2.6.14`.
