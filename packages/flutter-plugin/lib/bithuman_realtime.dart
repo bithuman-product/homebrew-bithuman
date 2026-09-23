@@ -50,6 +50,10 @@ class BithumanRealtimeSession {
     _liveSystemPrompt = systemPrompt;
   }
 
+  /// The OpenAI Realtime credential: your OpenAI API key, or an `ek_…`
+  /// ephemeral token minted with your bitHuman API secret at
+  /// `POST /v1/realtime/ephemeral-token`. It is NOT your bitHuman API secret —
+  /// that goes to [BithumanAvatar.load] as `apiSecret:`.
   final String apiKey;
   /// The platform surface this session drives — mic, speaker, echo canceller
   /// and (if it has one) a mouth. Declared as the PROTOCOL, never as the render

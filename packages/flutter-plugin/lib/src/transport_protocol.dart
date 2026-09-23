@@ -94,7 +94,7 @@ const TransportDescriptor kWebRtcTransport = TransportDescriptor(
   canMute: true,
 );
 
-/// The on-device converse brain — no cloud, no API key. Apple only: the brain
+/// The on-device converse brain — no cloud, no OpenAI key. Apple only: the brain
 /// binds Apple SpeechAnalyzer for ASR, so off macOS/iOS the factory correctly
 /// falls through to a cloud transport.
 const TransportDescriptor kLocalConverseTransport = TransportDescriptor(

@@ -102,7 +102,8 @@ class _S extends State<AvatarView> {
   BithumanAvatar? _a;
   @override void initState() {
     super.initState();
-    BithumanAvatar.load('/path/to/agent').then((a) => setState(() => _a = a));
+    // apiSecret: your bitHuman API secret — from sign-in or your backend, never a literal.
+    BithumanAvatar.load('/path/to/agent', apiSecret: apiSecret).then((a) => setState(() => _a = a));
   }
   @override void dispose() { _a?.dispose(); super.dispose(); }
   @override Widget build(BuildContext c) =>
@@ -111,7 +112,7 @@ class _S extends State<AvatarView> {
 ```
 
 The avatar idles (real-footage idle loop) with no audio pushed.
-`BithumanAvatar.load(path, {engine, motionDir, chunk})` routes to the engine named
+`BithumanAvatar.load(path, {apiSecret, engine, motionDir, chunk})` routes to the engine named
 by `engine` (dual-accept slug; default expression2) — the wire contract is frozen.
 
 ## Voice chat in 30 lines
@@ -120,9 +121,9 @@ by `engine` (dual-accept slug; default expression2) — the wire contract is fro
 import 'package:bithuman/bithuman.dart';
 import 'package:bithuman/bithuman_realtime.dart';
 
-final avatar = await BithumanAvatar.load(agentPath);
+final avatar = await BithumanAvatar.load(agentPath, apiSecret: apiSecret);
 final session = BithumanRealtimeSession(
-  apiKey: const String.fromEnvironment('OPENAI_API_KEY'),
+  apiKey: const String.fromEnvironment('OPENAI_API_KEY'), // OpenAI's key, not your bitHuman API secret
   avatar: avatar,
   systemPrompt: 'You are a friendly avatar host.',
   voice: 'alloy',
@@ -190,7 +191,7 @@ A 3rd engine appends one `EngineDescriptor` here (and one line in
 
 | Member | Purpose |
 | --- | --- |
-| `static load(path, {engine, motionDir, chunk})` | Load an avatar; routes to the named engine (dual-accept). Returns a `BithumanAvatar` with a fresh `textureId`. |
+| `static load(path, {apiSecret, engine, motionDir, chunk})` | Load an avatar; routes to the named engine (dual-accept). Returns a `BithumanAvatar` with a fresh `textureId`. |
 | `textureId` | Pass to `Texture(textureId: ...)`. |
 | `pushAudio(Int16List pcm)` | Push 16 kHz mono PCM16. Native side schedules frame production as the queue drains. |
 | `audioStart()` | Start the unified VP-IO mic+speaker engine. AEC + sample-accurate A/V sync. |
