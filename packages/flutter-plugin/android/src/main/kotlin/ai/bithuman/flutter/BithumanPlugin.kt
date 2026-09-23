@@ -241,6 +241,10 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val model = store.fetch(code, false, null) { member, done, total ->
             if (total > 0 && done == total) Log.i(TAG, "fetched $member")
         }
+        // From expression2-android 0.4.9 the engine meters the session it serves and refuses
+        // to create one without an API secret. The store above already hands it the secret it
+        // fetched with; set it explicitly too, exactly as the essence-2 path sets its own.
+        if (!secret.isNullOrBlank()) ai.bithuman.expression2.Expression2Metering.apiSecret = secret
         val avatar = Expression2Avatar.create(context, model)
         // The idle loop the agent plays between turns is the SDK's: the identity's own
         // clip from the same store as the weights, decoded in place, every frame of it.

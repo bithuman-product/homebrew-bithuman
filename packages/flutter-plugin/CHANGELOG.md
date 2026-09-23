@@ -1,6 +1,13 @@
-## Unreleased (next: 2.6.12) — the Apple engines bill talking time, and Expression 2 needs the API secret
+## 2.6.12 — 2026-09-23 — every engine bills talking time only, and Expression 2 needs the API secret on both platforms
 
-Untagged. The iOS/macOS half now pins the Apple engines the Swift package serves at v2.14.2:
+Tag `flutter-plugin-v2.6.12`.
+
+* **Android:** `ai.bithuman:expression2-android` **0.4.8 → 0.4.9** (its first on-device session
+  meter) and `ai.bithuman:essence2-android` **0.5.13 → 0.5.14** (talking-time billing, the 300 s
+  online grace, a never-vouched key renders nothing). The expression-2 load path sets
+  `Expression2Metering.apiSecret` from the `apiSecret` the app passes, as the essence-2 path
+  already did — without an API secret 0.4.9 refuses to create a session.
+* The iOS/macOS half now pins the Apple engines the Swift package serves at v2.14.2:
 `essence2-v1.11.0` (libessence2 `08511e16…`, resources `3024f455…`), UnifiedModelHeader
 `v2.6.5` (`5e3e56a0…`), and engine adapter source bithuman-models `ec9a3ab83`.
 
@@ -10,7 +17,6 @@ Untagged. The iOS/macOS half now pins the Apple engines the Swift package serves
   `BITHUMAN_API_SECRET` in its environment) — the essence-2 branch already did the same.
 * Both engines bill **talking time only**; idle is free. After the service has vouched for the
   key, an outage keeps rendering for 300 s of frames, then pauses until it answers again.
-* The Android half is unchanged in this entry (its engines move with the next Maven release).
 
 ## 2.6.11 — 2026-09-23 — the container is the engine's to read
 
