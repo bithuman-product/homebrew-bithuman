@@ -518,96 +518,10 @@ class BithumanCli < Formula
 
   def caveats
     <<~EOS
-      Quick start:
-        bithuman doctor                    # host + auth + cache sanity check
-                                           # (from 2.6.5 the report and the exit
-                                           #  code take ffmpeg into account, so a
-                                           #  green doctor is a promise about the
-                                           #  `bithuman run` it exists to vet;
-                                           #  2.6.4 printed the same page either
-                                           #  way)
-        bithuman list                      # browse showcase avatars
-        bithuman pull modern-court-jester  # download one
-        bithuman run ~/.cache/bithuman/showcase/modern-court-jester.imx
-
-      Choosing a model family (new in 2.5.0):
-        bithuman pull <CODE>                       # the server's default
-        bithuman pull <CODE> --model essence-2     # ask for a family
-        Plain `pull` now also NAMES the families it did not hand you, and
-        says why you got the one you got.
-
-      `bithuman run` prints a http://127.0.0.1:8088/<CODE> URL — open
-      it, grant mic permission, talk.
-
-      Conversational brain — included with your account:
-        `bithuman run` bootstraps a managed brain on first use (a small
-        Python venv under ~/.cache/bithuman/brain-venv, set up automatically
-        — no `pip install` needed). The brain is billed to your credits
-        (~10/min). Just sign in:
-          bithuman login
-
-      Advanced brains (optional):
-        Bring your own OpenAI key (skips credit billing for the brain):
-          export OPENAI_API_KEY=sk-...
-        On-device (no key, no outbound network):
-          pip install 'livekit-agents[silero]~=1.5' supertonic pywhispercpp llama-cpp-python soxr
-          BITHUMAN_LOCAL=1 bithuman run <model.imx>
-        (llama-cpp-python has no wheel on macOS or Linux and builds from
-        source, so this needs a C++ toolchain.)
-        ~860 MB models auto-download from HuggingFace on first run.
-        Docs: https://docs.bithuman.ai/guides/local-mode
-
-      Avatar metering needs a free bitHuman API secret. Sign in once:
-        bithuman login
-      or, for CI, get one at https://www.bithuman.ai/developer/api-keys and:
-        export BITHUMAN_API_SECRET=...
-
-      Offline tooling:
-        bithuman info   avatar.imx                       # inspect .imx
-
-      `bithuman render` (offline MP4) WORKS on macOS on 2.6.1+.
-      ★The paragraph that stood here said the opposite — "does NOT work
-      on macOS today … for offline renders use a Linux host" — measured
-      2026-09-04 on 2.5.1 and never re-measured. RE-MEASURED 2026-09-08
-      on cli-v2.6.4 arm64 (the release this formula pinned then; it now
-      pins cli-v2.6.9), Apple silicon:
-        essence-2     rc=0 · 300 frames · 1920x1080 @25 fps
-        expression-2  rc=0 · 240 frames · 416x720 @20 fps
-      RE-MEASURED 2026-09-11 on the cli-v2.6.6 arm64 tarball itself:
-        essence-2     rc=0 · 300 frames · 1280x720 @25 fps · mouth-to-audio
-                      lag 0 frames (the shipped 2.6.5 read +10 = 400 ms)
-      RE-MEASURED 2026-09-11 on the cli-v2.6.7 arm64 tarball (built,
-      never published):
-        expression-2  rc=0 · 300 frames · 1280x720 @25 fps · 30.5 fps ·
-                      mouth-to-audio lag 0 frames · receipt frames 300
-                      == frames in the file
-        essence-2     rc=0 · 100 frames · 1920x1080 @25 fps · 8.59 and
-                      8.71 fps over two runs
-      RE-MEASURED 2026-09-12 on the cli-v2.6.8 arm64 tarball ITSELF —
-      the exact bytes this formula now pins (sha256 ce0c24c5…), extracted
-      on a quiet 10-core Apple M5, warm, unpaced. The span is the WHOLE
-      `bithuman render` process at your wall, start to exit, nothing
-      excluded; the `fps` field in the command's own --json is the output
-      VIDEO rate (25), not throughput:
-        essence-2     rc=0 · 408 frames · 1920x1080 · 24.4-27.9 fps end
-                      to end over 9 runs, median 25.5 — against 16.4-16.8
-                      for the same command in the 2.6.8 pre-fix build.
-                      The render loop alone: 36.5-40.1 fps.
-        ★No Apple M4 figure is quoted: no quiet M4 could be had, and the
-         same bytes read 11.3-21.9 fps on a contended one.
-        ★expression-2 was NOT re-measured on these bytes — every avatar
-         on hand refuses on the Apple path for a provisioning reason the
-         engine names itself, on 2.6.6 and on 2.6.8 alike.
-      Both audio-driven and both verified frame-by-frame against the
-      drive audio. essence-1 is not renderable by this CLI on any
-      platform and is unchanged by that.
-      Offline renders need ffmpeg on PATH, and this formula installs it
-      for you: `depends_on "ffmpeg"` since the 2026-09-08 revision, and
-      this one serves 2.6.8. If you took the tarball instead of
-      `brew install`, run `brew install ffmpeg` yourself.
-
-      Docs:    https://docs.bithuman.ai
-      Source:  https://github.com/bithuman-product/homebrew-bithuman
+      bithuman — talk to an avatar, or turn audio into a video of one.
+        bithuman run                  # talk to the free Wise Pup avatar in your browser
+        bithuman login                # sign in once
+      Docs: https://docs.bithuman.ai/cli
     EOS
   end
 
@@ -618,6 +532,9 @@ class BithumanCli < Formula
     # version skew (e.g. a 2.3.0 binary vs 2.3.6 source). It verifies the
     # engine-core axis is present, not that the CLI version is current.
     assert_match(/libessence \d+\.\d+\.\d+ ABI \d+/, shell_output("#{bin}/bithuman --version"))
+    # CLI 2.7.3: `run --help` teaches --host/--port only; internal and
+    # operator flags never reach the help a customer reads.
+    assert_no_match(/--offscreen|--embedded-|--launcher/, shell_output("#{bin}/bithuman run --help"))
     # Smoke: doctor runs (exit code may be 0 or 1 depending on env;
     # we just assert the binary linked + opens the cache dirs).
     output = shell_output("#{bin}/bithuman doctor 2>&1", 1) + shell_output("#{bin}/bithuman doctor 2>&1 || true")
