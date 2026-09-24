@@ -1,3 +1,13 @@
+## 2.6.16 — 2026-09-24 — Android: Expression 2 lip sync, faster first frame after a pause
+
+Tag `flutter-plugin-v2.6.16`.
+
+* **Android:** `ai.bithuman:expression2-android` 0.4.10 -> **0.5.0**: the first frame of each stream is
+  shown twice, so the mouth no longer leads the voice (the same fix iOS/macOS got in 2.6.15).
+* **Android:** `ai.bithuman:essence2-android` 0.5.15 -> **0.6.0**: the first frame after a listening
+  gap arrives sooner (1,090 -> 242 ms on a Galaxy S25+); renders are otherwise bit-identical.
+* Both AARs retry a failing download on one shared budget per store instead of per file.
+
 ## 2.6.15 — 2026-09-23 — Expression 2 lip sync on iOS and macOS
 
 Tag `flutter-plugin-v2.6.15`.
