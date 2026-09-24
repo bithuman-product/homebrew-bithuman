@@ -74,7 +74,10 @@ dependencies {
     // a create without an API secret is refused (Expression2Metering.NO_SESSION).
     // 0.4.10 (2026-09-23): Expression2Credential.set(secret) is the one setter for the meter and
     // the store's metered door; Expression2Metering.apiSecret stays, deprecated (#1223).
-    implementation 'ai.bithuman:expression2-android:0.4.10'
+    // 0.5.0 (2026-09-24): Expression 2 lip sync — the first frame of each stream is shown twice,
+    // so the mouth no longer leads the voice (SyncNet on the S25+: about -60 ms before, within
+    // 25 ms after); the frame count is unchanged. Store retries share one budget per store.
+    implementation 'ai.bithuman:expression2-android:0.5.0'
     // 0.5.10 (public on Central since 2026-09-16, lastUpdated 20260916205927): A BARGE-IN
     // NO LONGER REWINDS THE DRIVER VIDEO TO ITS FIRST FRAME. Interrupt the agent mid-reply
     // and the video behind the avatar used to snap back to the start of its clip — every
@@ -140,7 +143,10 @@ dependencies {
     // frames, then pauses until the service answers; BITHUMAN_API_KEY read as an alias.
     // 0.5.15 (2026-09-23): Essence2Credential.set(secret) is the one setter for the door and the
     // meter, and every type an app touches is in ai.bithuman.essence2 (#1223).
-    implementation 'ai.bithuman:essence2-android:0.5.15'
+    // 0.6.0 (2026-09-24): the first frame after a listening gap arrives about 4x sooner
+    // (resetAudio seeds the next reply where the picture is); store retries share one budget
+    // per store; renders are bit-identical to 0.5.15.
+    implementation 'ai.bithuman:essence2-android:0.6.0'
 }
 
 // ★ The app that imports this plugin must ALSO set, in its own android/app build file:
