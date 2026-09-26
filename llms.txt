@@ -18,10 +18,11 @@ https://docs.bithuman.ai/cli/agents
 - macOS (Apple Silicon): `brew install bithuman-product/bithuman/bithuman-cli`
   (the full name implies the tap; the installed command is `bithuman`)
 - macOS + Linux (x86_64/aarch64): `curl -fsSL https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/install.sh | sh`
-- No package manager: the per-target tarball from
-  https://github.com/bithuman-product/homebrew-bithuman/releases/latest —
-  `bithuman-aarch64-apple-darwin.tar.gz` or
-  `bithuman-x86_64-unknown-linux-gnu.tar.gz`, each with a `.sha256` beside it.
+- No package manager: the per-target tarball from the newest `cli-v*` release,
+  today https://github.com/bithuman-product/homebrew-bithuman/releases/tag/cli-v2.7.8 —
+  `bithuman-aarch64-apple-darwin.tar.gz`, `bithuman-x86_64-unknown-linux-gnu.tar.gz` or
+  `bithuman-aarch64-unknown-linux-gnu.tar.gz`, each with a `.sha256` beside it.
+  (Not `/releases/latest`: other packages publish releases in this repository.)
 
 The CLI is not distributed on PyPI. `pip install bithuman-cli` is not an
 install path for it: that name is retired as a user-facing coordinate and does

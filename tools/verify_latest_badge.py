@@ -59,7 +59,7 @@ import urllib.request
 
 REPO = "bithuman-product/homebrew-bithuman"
 CLI = "cli-v"
-ARMS = 9  # ★a denominator that moves on its own is not coverage
+ARMS = 12  # ★a denominator that moves on its own is not coverage
 
 
 class Refusal(Exception):
@@ -168,6 +168,72 @@ def check(get, repo: str = REPO) -> list:
            "\n".join(fix)))
 
 
+def heal(get, patch, repo: str = REPO) -> list:
+    """★THE DETECTOR CLOSES ITS OWN LOOP (2026-09-26). Red every hour from
+    06:45Z to 12:1xZ on 2026-09-26 and nobody acted (lane B's
+    cli-engine-expression2-apple-v7 took the badge; every CLI older than
+    2.7.8 printed no update notice for those hours). The remedy was always
+    mechanical, so the scheduled run now applies it: re-pin the newest
+    published cli-v* release (the load-bearing line of the REMEDY), then grade
+    AGAIN. Returns the lines of a HEALED run; raises what `check` raises when
+    there is nothing to re-pin, when the re-pin is refused, or when the badge
+    is still wrong after it."""
+    try:
+        return check(get, repo)
+    except Refusal:
+        pass
+    index = get("releases?per_page=100")
+    cli = newest_cli(index)
+    if cli is None:
+        return check(get, repo)        # re-raises the "cut a CLI release first" refusal
+    try:
+        patch("releases/%s" % cli.get("id"), {"make_latest": "true"})
+    except CannotCheck as exc:
+        raise Refusal("the badge is wrong and the re-pin of %s was refused (%s) "
+                      "-- run the REMEDY by hand" % (cli.get("tag_name"), exc)) from None
+    lines = check(get, repo)            # the second reading is the proof
+    return ["HEALED -- re-pinned %s (id %s) as Latest" % (cli.get("tag_name"),
+                                                         cli.get("id"))] + lines
+
+
+def live_patch(repo: str):
+    def patch(path: str, body: dict):
+        tok = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        if not tok:
+            raise CannotCheck("no token: a re-pin needs contents:write")
+        req = urllib.request.Request(
+            "https://api.github.com/repos/%s/%s" % (repo, path),
+            data=json.dumps(body).encode(), method="PATCH",
+            headers={"Accept": "application/vnd.github+json",
+                     "User-Agent": "bithuman-latest-badge-gate",
+                     "Authorization": "Bearer %s" % tok})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise CannotCheck("HTTP %d on PATCH /%s" % (exc.code, path)) from None
+        except Exception as exc:                                # noqa: BLE001
+            raise CannotCheck("%s on PATCH /%s" % (type(exc).__name__, path)) from None
+    return patch
+
+
+def verify_heal(repo: str) -> int:
+    try:
+        lines = heal(live(repo), live_patch(repo), repo)
+    except CannotCheck as exc:
+        print("::error::CANNOT CHECK -- %s" % exc, file=sys.stderr)
+        return 2
+    except Refusal as exc:
+        print("::error::REFUSED -- %s" % exc, file=sys.stderr)
+        return 1
+    if lines and lines[0].startswith("HEALED"):
+        print("::warning::%s" % lines[0], file=sys.stderr)
+    for line in lines:
+        print("  ok  " + line)
+    print("GREEN -- /releases/latest resolves to the CLI.")
+    return 0
+
+
 def verify(repo: str, get=None) -> int:
     try:
         lines = check(get or live(repo), repo)
@@ -260,6 +326,46 @@ def selftest() -> int:
     arm("the repo itself 404s (bad token) is CANNOT CHECK, not a verdict", 2,
         _api(FLU, None), ["I could not look"])
 
+    # ★THE HEAL ARMS: the re-pin is applied to the NEWEST published cli-v*, the
+    # second reading is what makes it green, and a refused PATCH is red.
+    def healed_api(start, index):
+        state = {"latest": start}
+        def get(path):
+            if path.startswith("releases/latest"):
+                return state["latest"]
+            return index
+        def patch(path, body):
+            rid = int(path.split("/")[-1])
+            state["latest"] = next(r for r in index if r["id"] == rid)
+            state["patched"] = rid
+        return get, patch, state
+
+    def heal_arm(name, want, get, patch, must=()):
+        try:
+            text, rc = "\n".join(heal(get, patch, REPO)), 0
+        except Refusal as exc:
+            text, rc = str(exc), 1
+        except CannotCheck as exc:
+            text, rc = str(exc), 2
+        why = "" if rc == want and not [m for m in must if m not in text] else \
+            "exit %d (demanded %d) text %r" % (rc, want, text[:120])
+        ran.append((name, why))
+        print("  %-5s exit %d  %-56s | %s" % ("ok" if not why else "★BAD", rc, name,
+                                              text.splitlines()[0][:78] if text else ""))
+
+    g, p, st = healed_api(FLU, [FLU, DRF, PRE, C20])
+    heal_arm("HEAL: a theft is re-pinned to the newest cli-v*, then passes", 0, g, p,
+             ["HEALED -- re-pinned cli-v2.6.20", "cli-v2.6.20"])
+    ran[-1] = (ran[-1][0], ran[-1][1] or ("" if st.get("patched") == 388704408
+                                          else "patched %r" % st.get("patched")))
+
+    def refused_patch(path, body):
+        raise CannotCheck("HTTP 403 on PATCH /%s" % path)
+    heal_arm("HEAL: a refused re-pin is RED, never green", 1, _api(FLU, [FLU, C20]),
+             refused_patch, ["re-pin of cli-v2.6.20 was refused"])
+    heal_arm("HEAL: nothing to re-pin keeps the cut-a-release refusal", 1,
+             _api(FLU, [FLU, DRF, PRE]), refused_patch, ["Cut a CLI release first"])
+
     bad = [n for n, why in ran if why]
     if len(ran) != ARMS:
         print("\n★SELF-TEST FAILED: %d arm(s) ran, %d demanded -- an arm that "
@@ -281,7 +387,14 @@ def main(argv=None) -> int:
     ap.add_argument("--selftest", action="store_true",
                     help="run the arms in-process against synthetic API "
                          "answers (no network, no re-exec)")
-    return selftest() if ap.parse_args(argv).selftest else verify(REPO)
+    ap.add_argument("--heal", action="store_true",
+                    help="when the badge is wrong, re-pin the newest cli-v* "
+                         "release as Latest and grade again (needs a token "
+                         "with contents:write)")
+    a = ap.parse_args(argv)
+    if a.selftest:
+        return selftest()
+    return verify_heal(REPO) if a.heal else verify(REPO)
 
 
 if __name__ == "__main__":
