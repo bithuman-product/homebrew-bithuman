@@ -284,19 +284,13 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         // Zero-copy delivery by default (2.6.19). `debug.bh.e2.copy=1` keeps the copy path for a
         // same-bytes A/B, and only a DEBUGGABLE host app honours it (see AvatarPlayer.debuggable).
         val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-        val forceCopy = debuggable && sysProp("debug.bh.e2.copy") == "1"
+        val forceCopy = debuggable && AvatarPlayer.devInt("debug.bh.e2.copy") == 1
         val e = Essence2Engine(avatar, zeroCopy = !forceCopy)
         Log.i(TAG, "avatar ready ${avatar.width}x${avatar.height} (essence-2, ${e.fps} fps, driver ${avatar.targetFrames} frames" +
             " in place, delivery ${if (e.hardwareFrames) "zero-copy (${Essence2Engine.HW_SLOTS} hardware buffers)" else "copy"}" +
             "${if (forceCopy) ", debug.bh.e2.copy=1" else ""}) +${(System.nanoTime() - t0) / 1_000_000} ms")
         return e
     }
-
-    /** A system property, "" when unset or unreadable (`adb shell setprop`). */
-    private fun sysProp(key: String): String = runCatching {
-        val c = Class.forName("android.os.SystemProperties")
-        (c.getMethod("get", String::class.java, String::class.java).invoke(null, key, "") as String).trim()
-    }.getOrDefault("")
 
     private fun destroy(id: Long) {
         val s = sessions.remove(id) ?: return

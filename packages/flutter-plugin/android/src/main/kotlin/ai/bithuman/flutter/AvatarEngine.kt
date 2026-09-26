@@ -45,10 +45,10 @@ class EngineStats(val wallMs: Double, val chunks: Long, val frames: Long)
 
 /**
  * A frame the ENGINE owns and the player shows without copying it (zero-copy delivery,
- * essence2-android 0.8.0): [bitmap] is a HARDWARE bitmap over the GPU buffer the engine composed
+ * essence2-android 0.8.0): [bitmap] is a HARDWARE bitmap over the GPU buffer the engine rendered
  * into, drawn with a hardware canvas. The player keeps it in one ring slot and [release]s it when
  * that slot comes round again, which the ring only allows after the frame was presented — so the
- * engine never composes into a buffer the display may still be sampling.
+ * engine never renders into a buffer the display may still be sampling.
  */
 class HwFrame(val bitmap: Bitmap, /** First 16 kHz sample of its audio (speech), -1 for idle. */ val at: Long,
               /** Its index in the idle clip (idle), -1 for speech. */ val index: Int,
@@ -159,10 +159,10 @@ class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = tru
     override val name = "essence2-android"
     /**
      * ★ZERO-COPY DELIVERY (plugin 2.6.19, essence2-android 0.8.0). The copy path moves every frame
-     * three times on the CPU: the SDK reads the composed frame back from the GPU into a ByteBuffer
+     * three times on the CPU: the SDK reads the finished frame back from the GPU into a ByteBuffer
      * of this adapter's ring, [pull] copies it into the player's Bitmap, and the texture sink blits
      * that Bitmap into the Flutter surface with a software canvas — 8.3 MB each at 1920x1080, 25
-     * times a second. With `useHardwareBuffers` the GPU composes straight into a HardwareBuffer,
+     * times a second. With `useHardwareBuffers` the GPU renders straight into a HardwareBuffer,
      * the player holds it as a hardware Bitmap, and the sink draws it with a hardware canvas: no
      * pixel crosses the CPU. Same bytes (the SDK proves its buffers equal [pull]'s, plus alpha 255).
      * A device without the OpenCL body refuses, and this adapter keeps the copy path, logged.
@@ -295,7 +295,7 @@ class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = tru
             val g = gen
             val t0 = System.nanoTime()
             // With every slot held (the player's ring + this queue + the SDK's own ahead) the SDK
-            // waits, then fails the render loudly rather than compose into a frame the display may
+            // waits, then fails the render loudly rather than render into a frame the display may
             // be showing — exactly as a failed copy-path render does. HW_SLOTS is sized so it cannot.
             val hf: Essence2HardwareFrame? = if (hardwareFrames) avatar.pullHardwareBuffer() else null
             val got = if (hardwareFrames) hf != null else avatar.pull(buf!!)
@@ -423,7 +423,7 @@ class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = tru
         /**
          * Hardware buffers asked of the SDK (its maximum, 0.8.0): the player's ring holds one per
          * slot until the slot comes round ([AvatarPlayer.RING], 20), this adapter's ready queue
-         * [DEPTH] (6), and the SDK composes up to ~3 ahead (pipe depth 2 + the one in hand).
+         * [DEPTH] (6), and the SDK renders up to ~3 ahead (pipe depth 2 + the one in hand).
          * One RGBA buffer of the avatar's size each: 8.3 MB at 1920x1080, where the copy path
          * held 20 Bitmaps + 6 ByteBuffers of the same size on the CPU.
          */

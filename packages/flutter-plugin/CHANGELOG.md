@@ -1,9 +1,9 @@
-## Unreleased (2.6.19) — Android: Essence 2 frames reach the screen without a CPU copy
+## 2.6.19 — 2026-09-26 — Android: Essence 2 frames reach the screen without a CPU copy; both engines fixed billing
 
-Waits for `ai.bithuman:essence2-android` 0.8.0 on Maven Central (the release pair) and for 2.6.18.
+Tag `flutter-plugin-v2.6.19`.
 
 * **Android:** `ai.bithuman:essence2-android` 0.6.0 -> **0.8.0**, and the Essence 2 path uses the SDK's
-  zero-copy delivery: the GPU composes each frame into a hardware buffer (32 of them, the SDK's
+  zero-copy delivery: the GPU renders each frame into a hardware buffer (32 of them, the SDK's
   maximum from 0.8.0), the player keeps it in its ring as a hardware `Bitmap`, and the texture is drawn
   with a hardware canvas. Before, every frame was read back from the GPU, copied into a `ByteBuffer`,
   copied into a `Bitmap` and blitted by the CPU (three 8.3 MB copies at 1920x1080, 25 times a second).
@@ -13,6 +13,9 @@ Waits for `ai.bithuman:essence2-android` 0.8.0 on Maven Central (the release pai
   (`coalesced`) 18-27 vs 46, stale 0 in all runs. Same pixels.
   A device without the SDK's GPU compositor keeps the copy path and logs why.
   Debuggable host apps can force the copy path with `adb shell setprop debug.bh.e2.copy 1` for A/B runs.
+* **Android:** `ai.bithuman:expression2-android` 0.5.0 -> **0.5.1** and `essence2-android` 0.8.0 carry the
+  billing fixes: each installation names itself on the meter, the meter's endpoint can only be a
+  bitHuman host, and essence-2's frame rate for billing is fixed in compiled code.
 * **Android:** a failed load now logs the exception's own message. `android.util.Log` prints no stack
   trace when the cause is an `UnknownHostException`, so a failed download used to log only
   `load failed`.
