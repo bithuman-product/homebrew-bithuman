@@ -33,17 +33,35 @@ package ai.bithuman.flutter
 import ai.bithuman.elevate.Essence2Avatar
 import ai.bithuman.expression2.Expression2Avatar
 import ai.bithuman.expression2.Expression2IdleLoop
+import ai.bithuman.elevate.Essence2HardwareFrame
 import android.graphics.Bitmap
+import android.graphics.ColorSpace
+import android.util.Log
 import java.nio.ByteBuffer
 import java.util.concurrent.ArrayBlockingQueue
 
 /** The engine's own counters, for the log lines that split a turn into waiting and rendering. */
 class EngineStats(val wallMs: Double, val chunks: Long, val frames: Long)
 
+/**
+ * A frame the ENGINE owns and the player shows without copying it (zero-copy delivery,
+ * essence2-android 0.8.0): [bitmap] is a HARDWARE bitmap over the GPU buffer the engine composed
+ * into, drawn with a hardware canvas. The player keeps it in one ring slot and [release]s it when
+ * that slot comes round again, which the ring only allows after the frame was presented — so the
+ * engine never composes into a buffer the display may still be sampling.
+ */
+class HwFrame(val bitmap: Bitmap, /** First 16 kHz sample of its audio (speech), -1 for idle. */ val at: Long,
+              /** Its index in the idle clip (idle), -1 for speech. */ val index: Int,
+              private val owner: AutoCloseable) {
+    fun release() { runCatching { owner.close() } }
+}
+
 /** The identity's idle clip: the next frame of it, in order, wrapping at the end. */
 interface IdleClip {
     /** Fills [dst] with the next frame and returns its index in the clip, or -1 when none is ready yet. */
     fun next(dst: Bitmap): Int
+    /** [next] for an engine with [AvatarEngine.hardwareFrames]: the next frame as the engine's own buffer, or null. */
+    fun nextSlot(): HwFrame? = null
     val frameCount: Int
     val wraps: Int
     val lastIndex: Int
@@ -70,6 +88,14 @@ interface AvatarEngine : AutoCloseable {
      * frame is ready.
      */
     fun pull(dst: Bitmap): Long
+    /**
+     * Zero-copy delivery: frames come from [pullSlot] / [IdleClip.nextSlot] as hardware bitmaps the
+     * engine owns, and the player draws them with a hardware canvas; [pull] / [IdleClip.next] are
+     * not called. False = the copy path.
+     */
+    val hardwareFrames: Boolean get() = false
+    /** [pull] for [hardwareFrames]: the next speech frame, or null when none is ready. */
+    fun pullSlot(): HwFrame? = null
     /** The engine still owes frames for audio it was fed. */
     val hasPendingTail: Boolean
     /** Frames rendered (or motion computed) and not yet pulled. */
@@ -129,8 +155,21 @@ class Expression2Engine(private val avatar: Expression2Avatar) : AvatarEngine {
  * SDK call itself runs outside it (the SDK serialises feed / pull / reset on locks of
  * its own), so a [reset] waits for at most the render in flight, as it did before.
  */
-class Essence2Engine(private val avatar: Essence2Avatar) : AvatarEngine {
+class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = true) : AvatarEngine {
     override val name = "essence2-android"
+    /**
+     * ★ZERO-COPY DELIVERY (plugin 2.6.19, essence2-android 0.8.0). The copy path moves every frame
+     * three times on the CPU: the SDK reads the composed frame back from the GPU into a ByteBuffer
+     * of this adapter's ring, [pull] copies it into the player's Bitmap, and the texture sink blits
+     * that Bitmap into the Flutter surface with a software canvas — 8.3 MB each at 1920x1080, 25
+     * times a second. With `useHardwareBuffers` the GPU composes straight into a HardwareBuffer,
+     * the player holds it as a hardware Bitmap, and the sink draws it with a hardware canvas: no
+     * pixel crosses the CPU. Same bytes (the SDK proves its buffers equal [pull]'s, plus alpha 255).
+     * A device without the OpenCL body refuses, and this adapter keeps the copy path, logged.
+     */
+    override val hardwareFrames: Boolean = zeroCopy && runCatching { avatar.useHardwareBuffers(HW_SLOTS) }
+        .onFailure { Log.w("bhav", "essence-2 zero-copy delivery unavailable, copy path kept: ${it.message}") }
+        .isSuccess
     override val width get() = avatar.width
     override val height get() = avatar.height
     override val fps = FPS
@@ -179,9 +218,11 @@ class Essence2Engine(private val avatar: Essence2Avatar) : AvatarEngine {
     private val idleLock = Object()
     private val idleClip = Essence2Idle()
 
-    /** A frame the render thread finished: its pixels, its stream position, the [gen] it was rendered under. */
-    private class Rendered(val buf: ByteBuffer, val at: Long, val gen: Int)
-    private val free = ArrayBlockingQueue<ByteBuffer>(DEPTH).apply { repeat(DEPTH) { offer(avatar.newFrameBuffer()) } }
+    /** A frame the render thread finished: its pixels ([buf], or [hf] with [hardwareFrames]), its stream position, the [gen] it was rendered under. */
+    private class Rendered(val buf: ByteBuffer?, val hf: Essence2HardwareFrame?, val at: Long, val gen: Int) {
+        fun recycle(free: ArrayBlockingQueue<ByteBuffer>) { if (buf != null) free.offer(buf); hf?.close() }
+    }
+    private val free = ArrayBlockingQueue<ByteBuffer>(DEPTH).apply { if (!hardwareFrames) repeat(DEPTH) { offer(avatar.newFrameBuffer()) } }
     private val ready = ArrayBlockingQueue<Rendered>(DEPTH)
     /** Moved by [reset]: a frame rendered under an older value belongs to a cancelled reply. */
     @Volatile private var gen = 0
@@ -235,19 +276,29 @@ class Essence2Engine(private val avatar: Essence2Avatar) : AvatarEngine {
         avatar.resetAudio(startFrame = synchronized(idleLock) { cursor })
         uttBase = 0; uttFed = 0; delivered = 0; open = false; closed = false
         queued = 0
-        // Finished frames of the cancelled reply go back to the pool; the one in flight
-        // comes back through the gen check in [renderLoop].
-        while (true) { val r = ready.poll() ?: break; free.offer(r.buf) }
+        // Finished frames of the cancelled reply go back to the pool (or to the engine); the
+        // one in flight comes back through the gen check in [renderLoop].
+        while (true) { val r = ready.poll() ?: break; r.recycle(free) }
     }
 
     /** The render thread: one SDK pull into a free buffer, then hand it to [pull]. */
     private fun renderLoop() {
         while (!shut) {
             if (!open) { Thread.sleep(2); continue }
-            val buf = free.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
+            var buf: ByteBuffer? = null
+            if (hardwareFrames) {
+                // The engine owns the buffers; [DEPTH] finished frames is this thread's bound.
+                if (ready.size >= DEPTH) { Thread.sleep(2); continue }
+            } else {
+                buf = free.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
+            }
             val g = gen
             val t0 = System.nanoTime()
-            val got = avatar.pull(buf)
+            // With every slot held (the player's ring + this queue + the SDK's own ahead) the SDK
+            // waits, then fails the render loudly rather than compose into a frame the display may
+            // be showing — exactly as a failed copy-path render does. HW_SLOTS is sized so it cannot.
+            val hf: Essence2HardwareFrame? = if (hardwareFrames) avatar.pullHardwareBuffer() else null
+            val got = if (hardwareFrames) hf != null else avatar.pull(buf!!)
             pullNanos += System.nanoTime() - t0
             val at = synchronized(this) {
                 queued = avatar.available()
@@ -264,8 +315,8 @@ class Essence2Engine(private val avatar: Essence2Avatar) : AvatarEngine {
                     }
                 }
             }
-            if (at < 0) { free.offer(buf); if (!got) Thread.sleep(2) }
-            else { buf.rewind(); ready.offer(Rendered(buf, at, g)) }
+            if (at < 0) { if (buf != null) free.offer(buf); hf?.close(); if (!got) Thread.sleep(2) }
+            else { buf?.rewind(); ready.offer(Rendered(buf, hf, at, g)) }
         }
     }
 
@@ -283,19 +334,37 @@ class Essence2Engine(private val avatar: Essence2Avatar) : AvatarEngine {
         }
     }
 
-    override fun pull(dst: Bitmap): Long {
+    /** False while a reply's first delivery still waits for its lead: see [leadPending]. */
+    private fun leadMet(): Boolean {
         if (leadPending) {
             if (ready.size >= LEAD && (queued >= 8 || closed || !open)) leadPending = false
             else if (ready.size >= DEPTH || (closed && !open)) leadPending = false
-            else return -1L
+            else return false
         }
+        return true
+    }
+
+    override fun pull(dst: Bitmap): Long {
+        if (!leadMet()) return -1L
         while (true) {
             val r = ready.poll() ?: return -1L
-            if (r.gen != gen) { free.offer(r.buf); continue }
-            r.buf.rewind()
-            dst.copyPixelsFromBuffer(r.buf)
-            free.offer(r.buf)
+            if (r.gen != gen) { r.recycle(free); continue }
+            val b = r.buf ?: run { r.recycle(free); return -1L }      // a hardware frame: pullSlot's
+            b.rewind()
+            dst.copyPixelsFromBuffer(b)
+            free.offer(b)
             return r.at
+        }
+    }
+
+    override fun pullSlot(): HwFrame? {
+        if (!hardwareFrames || !leadMet()) return null
+        while (true) {
+            val r = ready.poll() ?: return null
+            if (r.gen != gen) { r.recycle(free); continue }
+            val hf = r.hf ?: run { r.recycle(free); return null }
+            val bmp = Bitmap.wrapHardwareBuffer(hf.buffer, SRGB) ?: run { hf.close(); return null }
+            return HwFrame(bmp, r.at, -1, hf)
         }
     }
 
@@ -314,6 +383,7 @@ class Essence2Engine(private val avatar: Essence2Avatar) : AvatarEngine {
     override fun close() {
         shut = true
         renderer.join()
+        while (true) { val r = ready.poll() ?: break; r.recycle(free) }
         synchronized(this) { avatar.close() }
     }
 
@@ -331,6 +401,15 @@ class Essence2Engine(private val avatar: Essence2Avatar) : AvatarEngine {
             lastIndex = i
             return i
         }
+        override fun nextSlot(): HwFrame? {
+            if (!hardwareFrames) return null
+            val hf = avatar.idleHardwareBuffer() ?: return null
+            val bmp = Bitmap.wrapHardwareBuffer(hf.buffer, SRGB) ?: run { hf.close(); return null }
+            val i = synchronized(idleLock) { val c = cursor; cursor = (c + 1) % nt; c }
+            if (i == 0 && lastIndex >= 0) wraps++
+            lastIndex = i
+            return HwFrame(bmp, -1L, i, hf)
+        }
     }
 
     companion object {
@@ -341,5 +420,14 @@ class Essence2Engine(private val avatar: Essence2Avatar) : AvatarEngine {
         private const val DEPTH = 6
         /** Finished frames a reply's first delivery waits for (160 ms): see [leadPending]. */
         private const val LEAD = 4
+        /**
+         * Hardware buffers asked of the SDK (its maximum, 0.8.0): the player's ring holds one per
+         * slot until the slot comes round ([AvatarPlayer.RING], 20), this adapter's ready queue
+         * [DEPTH] (6), and the SDK composes up to ~3 ahead (pipe depth 2 + the one in hand).
+         * One RGBA buffer of the avatar's size each: 8.3 MB at 1920x1080, where the copy path
+         * held 20 Bitmaps + 6 ByteBuffers of the same size on the CPU.
+         */
+        const val HW_SLOTS = 32
+        private val SRGB: ColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
     }
 }

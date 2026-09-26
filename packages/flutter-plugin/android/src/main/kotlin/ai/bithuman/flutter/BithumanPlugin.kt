@@ -83,12 +83,18 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         var micSink: EventChannel.EventSink? = null
         var micChannel: EventChannel? = null
         var framesDrawn = 0L
+        private val hwCanvas = avatar.hardwareFrames
 
-        /** Called on the player's presenter thread; the copy into the texture happens here. */
+        /**
+         * Called on the player's presenter thread; the copy into the texture happens here — or,
+         * with zero-copy delivery, a GPU draw of the engine's own buffer: a hardware Bitmap needs
+         * a hardware canvas (a software one refuses it). One kind per surface, for its whole life:
+         * a Surface connects to one producer API, CPU or GPU.
+         */
         fun draw(bmp: Bitmap) {
             if (stopped.get()) return
-            val canvas = try { surface.lockCanvas(null) } catch (e: Exception) {
-                if (!stopped.get()) Log.w(TAG, "lockCanvas: ${e.message}"); return
+            val canvas = try { if (hwCanvas) surface.lockHardwareCanvas() else surface.lockCanvas(null) } catch (e: Exception) {
+                if (!stopped.get()) Log.w(TAG, "lock${if (hwCanvas) "Hardware" else ""}Canvas: ${e.message}"); return
             }
             try { canvas.drawBitmap(bmp, 0f, 0f, null) } finally { surface.unlockCanvasAndPost(canvas) }
             framesDrawn++
@@ -227,7 +233,10 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     result.success(entry.id().toInt())
                 }
             } catch (e: Throwable) {
-                Log.e(TAG, "load failed", e)
+                // The exception's own words in the line itself: android.util.Log prints NO stack
+                // trace when the cause chain holds an UnknownHostException, so a bare "load failed"
+                // was all a failed fetch ever logged.
+                Log.e(TAG, "load failed: $e${e.cause?.let { " (cause: $it)" } ?: ""}", e)
                 main.post { entry.release(); result.error("load_failed", e.message ?: e.toString(), null) }
             }
         }, "bh-load").start()
@@ -272,11 +281,22 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         }
         val w2v = java.io.File(bundle.dir, Essence2Avatar.W2V_MEMBER)
         val avatar = Essence2Avatar.create(bundle.dir, w2v, 0)
-        val e = Essence2Engine(avatar)
+        // Zero-copy delivery by default (2.6.19). `debug.bh.e2.copy=1` keeps the copy path for a
+        // same-bytes A/B, and only a DEBUGGABLE host app honours it (see AvatarPlayer.debuggable).
+        val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        val forceCopy = debuggable && sysProp("debug.bh.e2.copy") == "1"
+        val e = Essence2Engine(avatar, zeroCopy = !forceCopy)
         Log.i(TAG, "avatar ready ${avatar.width}x${avatar.height} (essence-2, ${e.fps} fps, driver ${avatar.targetFrames} frames" +
-            " in place) +${(System.nanoTime() - t0) / 1_000_000} ms")
+            " in place, delivery ${if (e.hardwareFrames) "zero-copy (${Essence2Engine.HW_SLOTS} hardware buffers)" else "copy"}" +
+            "${if (forceCopy) ", debug.bh.e2.copy=1" else ""}) +${(System.nanoTime() - t0) / 1_000_000} ms")
         return e
     }
+
+    /** A system property, "" when unset or unreadable (`adb shell setprop`). */
+    private fun sysProp(key: String): String = runCatching {
+        val c = Class.forName("android.os.SystemProperties")
+        (c.getMethod("get", String::class.java, String::class.java).invoke(null, key, "") as String).trim()
+    }.getOrDefault("")
 
     private fun destroy(id: Long) {
         val s = sessions.remove(id) ?: return
