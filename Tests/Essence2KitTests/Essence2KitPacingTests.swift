@@ -16,16 +16,15 @@ import Essence2
 
 final class Essence2KitPacingTests: XCTestCase {
 
-    /// Offer a frame every `step` seconds for `seconds`; count what the clock hands out.
+    /// Ask for a frame every `step` seconds for `seconds` (call i at 1000 + i*step + jitter(i),
+    /// computed, not accumulated); return when the clock handed one out.
     private func delivered(step: Double, seconds: Double, jitter: (Int) -> Double = { _ in 0 }) -> [Double] {
         var clock = Essence2FrameClock(fps: 25)
         var out: [Double] = []
-        var t = 1000.0
-        var i = 0
-        while t < 1000.0 + seconds {
-            let now = t + jitter(i)
+        let calls = Int((seconds / step).rounded())
+        for i in 0..<calls {
+            let now = 1000.0 + Double(i) * step + jitter(i)
             if clock.isDue(now) { clock.delivered(at: now); out.append(now) }
-            t += step; i += 1
         }
         return out
     }
