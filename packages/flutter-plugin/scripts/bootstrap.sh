@@ -125,6 +125,8 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # Expression2Download). The essence-2 adapter sources are unchanged since essence2-apple-v1.12.1 (8bae6d8f3).
 BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-fd37bdfb78ceffa8f1a64233e0215501f77ca169}"
 
+# ★MOVED 2026-09-26 to essence2-v1.14.1 (bithuman-models #1516 @ b4a331443): a Release engine cannot be switched
+# unmetered or pointed at another meter endpoint. The C interface is unchanged; BITHUMAN_MODELS_REF stays.
 # ★MOVED 2026-09-26 to essence2-v1.14.0 (bithuman-models #1473, essence2-apple-v1.14.0 @ 3485848d2): the engine's
 # meter names the install (a UUIDv4 in Application Support, not ""), and the C interface gains two ADDITIVE calls
 # (be_essence2_end_utterance, be_essence2_last_frame_kind) the adapter does not need, so BITHUMAN_MODELS_REF stays.
@@ -136,10 +138,10 @@ BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-fd37bdfb78ceffa8f1a64233e0215501f77c
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
 # `libessence2.xcframework.zip` binaryTarget checksum and the release's own
 # resources sidecar. Passed to the engine SDK bootstrap explicitly below.
-LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.14.0}"
-LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-00f4c6127346497c7ee1cd98a5137466d0920f346646504bf9a8c40583dd7f96}"
-LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.14.0}"
-LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-151e52288aa651052db745b20efbd8c6f66a443dc5fca59aa6b41d150b790faa}"
+LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.14.1}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-e999f6aabd5be8e958cb1b3ddccaf4c55d4e52e282380afe8b7af6707f39b1bd}"
+LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.14.1}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-6a133791471ea92220bc296076eedebb259d5c2b72e20e5d121f0273b56ac6db}"
 
 # The UnifiedModelHeader module, as a plain static .a per slice.
 #
