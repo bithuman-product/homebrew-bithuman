@@ -39,10 +39,9 @@
 # refuses a commit where they drift apart again.
 #
 # CHECKS (all offline — no network, no credential, runs on a fork)
-#   A1 SOURCE-PINNED   bootstrap.sh defaults BITHUMAN_MODELS_REF to a full
-#                      40-hex commit sha. A branch name is not a pin.
-#   A2 REF-PASSED      every locate_engine_sdk call site passes the ref. This is
-#                      the exact line that was missing; two call sites, twice.
+#   A1 NO-SOURCE       bootstrap.sh fetches and copies no engine source (2.6.19:
+#                      the pod links the published binaries).
+#   A2 X2-AGREES       the pod's Expression 2 release + checksums == Package.swift's.
 #   A3 ENGINE-PINNED   bootstrap.sh defaults all four engine coordinates
 #                      (release + sha256, engine + resources).
 #   A4 PATHS-AGREE     the plugin's LIBESSENCE2_RELEASE == Package.swift's
@@ -79,34 +78,40 @@ pin() {  # $1 = var name -> prints VALUE, empty if undeclared
     sed -n "s/^$1=\"\\\${$1:-\\([^}]*\\)}\"\$/\\1/p" "$BOOT" | head -1
 }
 
-MODELS_REF="$(pin BITHUMAN_MODELS_REF)"
 ENG_TAG="$(pin LIBESSENCE2_RELEASE)"
 ENG_SHA="$(pin LIBESSENCE2_SHA256)"
 RES_TAG="$(pin LIBESSENCE2_RESOURCES_RELEASE)"
 RES_SHA="$(pin LIBESSENCE2_RESOURCES_SHA256)"
 
-# ── A1 SOURCE-PINNED ────────────────────────────────────────────────────────
-if [ -z "$MODELS_REF" ]; then
-    refuse "A1 bootstrap.sh declares no BITHUMAN_MODELS_REF default — the engine adapter source would come from whatever main HEAD is at bootstrap time, and the tag would name no engine"
-elif ! printf '%s' "$MODELS_REF" | grep -Eq '^[0-9a-f]{40}$'; then
-    refuse "A1 BITHUMAN_MODELS_REF is '$MODELS_REF' — a pin must be a full 40-hex commit sha; a branch or tag name can move under a published plugin tag"
+# ── A1 NO-SOURCE ────────────────────────────────────────────────────────────
+# ★Since 2.6.19 the pod links the PUBLISHED engine binaries and compiles no engine source
+# (owner ruling 2026-09-26: engine source is proprietary). bootstrap.sh must not clone the
+# engine repository or copy engine Classes, and must pin the Expression 2 binaries.
+if grep -nE 'locate_engine_sdk [A-Z]|git clone .*bithuman-models|gh repo clone|/sdk/Classes' "$BOOT" | grep -v '^[0-9]*:\s*#' | grep -q .; then
+    refuse "A1 bootstrap.sh still fetches or copies engine SOURCE:
+$(grep -nE 'locate_engine_sdk [A-Z]|git clone .*bithuman-models|gh repo clone|/sdk/Classes' "$BOOT" | grep -v '^[0-9]*:\s*#')"
 else
-    pass "A1 engine adapter source pinned at $MODELS_REF"
+    pass "A1 bootstrap.sh fetches no engine source"
 fi
 
-# ── A2 REF-PASSED ───────────────────────────────────────────────────────────
-# Every call must carry four arguments. Grading the CALL, not the default, is
-# the point: the function has always accepted a ref and always defaulted it.
-BAD_CALLS="$(grep -n 'locate_engine_sdk [A-Z]' "$BOOT" \
-             | grep -v '"\$BITHUMAN_MODELS_REF"' || true)"
-CALLS="$(grep -c 'locate_engine_sdk [A-Z]' "$BOOT" || true)"
-if [ "${CALLS:-0}" -lt 1 ]; then
-    refuse "A2 found no locate_engine_sdk call sites in bootstrap.sh — this check has lost its subject"
-elif [ -n "$BAD_CALLS" ]; then
-    refuse "A2 locate_engine_sdk call site(s) do not pass the pin:
-$BAD_CALLS"
+# ── A2 EXPRESSION2-AGREES ───────────────────────────────────────────────────
+# The Expression 2 binaries the pod stages are the SDK tag's own bytes.
+X2_TAG="$(pin EXPRESSION2_RELEASE)"; X2_SHA="$(pin EXPRESSION2_SHA256)"; BEP_SHA="$(pin BEP_SHA256)"
+SPM_X2_TAG0="$(sed -n 's/^let expression2Tag = "\([^"]*\)"$/\1/p' "$MANIFEST" | head -1)"
+spm_sum() { python3 - "$MANIFEST" "$1" <<'PY2'
+import re, sys
+s = open(sys.argv[1]).read()
+m = re.search(r'name:\s*"%s",\s*url:\s*"[^"]*",\s*checksum:\s*"([0-9a-f]{64})"' % sys.argv[2], s)
+print(m.group(1) if m else "")
+PY2
+}
+SPM_X2_SHA="$(spm_sum Expression2Binary)"; SPM_BEP_SHA="$(spm_sum BithumanEngineProtocolBinary)"
+if [ -z "$X2_TAG" ] || [ -z "$X2_SHA" ] || [ -z "$BEP_SHA" ]; then
+    refuse "A2 bootstrap.sh declares no EXPRESSION2_RELEASE / EXPRESSION2_SHA256 / BEP_SHA256 default"
+elif [ "$X2_TAG" != "$SPM_X2_TAG0" ] || [ "$X2_SHA" != "$SPM_X2_SHA" ] || [ "$BEP_SHA" != "$SPM_BEP_SHA" ]; then
+    refuse "A2 the pod's Expression 2 pins ($X2_TAG ${X2_SHA:0:12} ${BEP_SHA:0:12}) differ from Package.swift's ($SPM_X2_TAG0 ${SPM_X2_SHA:0:12} ${SPM_BEP_SHA:0:12})"
 else
-    pass "A2 all $CALLS locate_engine_sdk call site(s) pass \$BITHUMAN_MODELS_REF"
+    pass "A2 the pod links Expression 2 $X2_TAG, the bytes SwiftPM serves"
 fi
 
 # ── A3 ENGINE-PINNED ────────────────────────────────────────────────────────
