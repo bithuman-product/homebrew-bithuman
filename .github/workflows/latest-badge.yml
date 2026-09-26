@@ -65,7 +65,8 @@ on:
     - cron: '41 * * * *'
 
 permissions:
-  contents: read
+  # write: the scheduled run re-pins the badge itself (verify_latest_badge.py --heal).
+  contents: write
 
 jobs:
   latest-badge:
@@ -86,8 +87,12 @@ jobs:
       # for every caller, and `/releases/latest` never returns a draft, so a
       # credentialled read sees exactly what a stranger sees. Without it a
       # shared-runner 403 would read as CANNOT CHECK (exit 2) and cry wolf.
-      - name: grade the live badge
+      # ★AND THEN HEALS IT (2026-09-26): red for five hours with nobody acting is
+      # a detector that does not close its loop. A wrong badge is re-pinned to
+      # the newest cli-v* release and graded again; the run carries a warning
+      # naming what it did. A refused re-pin, or no CLI release, stays RED.
+      - name: grade the live badge, re-pinning it to the CLI if it was taken
         timeout-minutes: 5
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 tools/verify_latest_badge.py
+        run: python3 tools/verify_latest_badge.py --heal
