@@ -22,6 +22,9 @@
 // Apache-2.0; (c) bitHuman.
 
 import Foundation
+#if os(macOS) || os(iOS)
+import Expression2   // the published binary (Expression2Credential)
+#endif
 
 /// One registered engine's static description (identity + behaviour). The
 /// creation factory lives in `EngineRegistry.make` (macOS-only).
@@ -112,7 +115,7 @@ enum EngineRegistry {
     // so without this line every Expression2 app built on the plugin renders NOTHING.
     // Set BEFORE init, exactly as the essence2 branch above sets its secret.
     if let s = ref.apiSecret, !s.isEmpty { Expression2Credential.set(s) }
-    return Expression2Engine()
+    return Expression2PluginEngine()
   }
   #endif
 }

@@ -169,8 +169,18 @@ LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-6a133791471ea92220
 # UnifiedModelHeader bytes — nothing compared them. scripts/check-apple-engine-pin.sh
 # now does (A6): these two values must equal `expression2Tag` and the
 # UnifiedModelHeaderBinary checksum in Package.swift.
-UMH_RELEASE="${UMH_RELEASE:-v2.7.0}"
-UMH_SHA256="${UMH_SHA256:-8cd64a4a1539c336f752d594e77833cd178a8cd5e3bd1ff4d379751b378447db}"
+# ★THE EXPRESSION 2 ENGINE IS LINKED AS THE PUBLISHED BINARY (2026-09-26). Until 2.6.18 this script
+# cloned the PRIVATE bithuman-models repo for the engine adapters' Swift source, so the iOS/macOS half
+# of every published plugin tag failed with a 404 for anyone outside the company. The plugin now links
+# the three xcframeworks the Swift package's `Expression2` product ships (Expression2,
+# BithumanEngineProtocol, UnifiedModelHeader), from the same tap release and checked against the same
+# checksums Package.swift pins; the Essence 2 adapter is the plugin's own (shared/Classes). No engine
+# source is fetched, from anywhere. X2_XCF_DIR=<dir holding the three zips> stages a candidate build.
+EXPRESSION2_RELEASE="${EXPRESSION2_RELEASE:-v2.8.0}"
+EXPRESSION2_SHA256="${EXPRESSION2_SHA256:-__X2_SHA__}"
+BEP_SHA256="${BEP_SHA256:-__BEP_SHA__}"
+UMH_RELEASE="${UMH_RELEASE:-v2.8.0}"
+UMH_SHA256="${UMH_SHA256:-__UMH_SHA__}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so
@@ -308,173 +318,79 @@ locate_engine_sdk() {
 # bundle into its Vendor/embody (no static lib); the umbrella stages Classes into
 # Engines/expression2/Classes and the models into Assets/embody (FROZEN landing).
 # $1 = extra env to pass the engine bootstrap (e.g. EMBODY_VENDOR_SRC=...).
+# fetch_tap_zip <release> <file> <sha256> <dest dir>: a public tap release asset, sha256-checked.
+fetch_tap_zip() {
+    local rel="$1" name="$2" want="$3" dir="$4"
+    local url="https://github.com/bithuman-product/homebrew-bithuman/releases/download/$rel/$name"
+    curl -fsSL --retry 2 -o "$dir/$name" "$url" || die "could not fetch $url"
+    local got; got="$(shasum -a 256 "$dir/$name" | cut -d' ' -f1)"
+    [ "$got" = "$want" ] || die "sha256 MISMATCH for $name ($rel) — refusing to install
+  expected $want
+  actual   $got"
+}
+
+# The Expression 2 engine: the three binary xcframeworks the Swift package vends, into
+# {macos,ios}/Frameworks, plus the identity-agnostic embody graphs into {macos,ios}/Assets/embody.
 stage_expression2() {
-    local extra_env="${1:-}"
-    rm -rf "$PLUGIN_ROOT/macos/Engines/expression2" "$PLUGIN_ROOT/ios/Engines/expression2"
-    if ! locate_engine_sdk EXPRESSION2 "expression-2" "${BITHUMAN_EXPRESSION2_DIR:-}" "$BITHUMAN_MODELS_REF"; then
-        die "bithuman-models models/expression-2/sdk not found (set BITHUMAN_EXPRESSION2_DIR, place a sibling bithuman-models checkout, or allow a git clone) — expression2 is the DEFAULT engine and is REQUIRED"
+    local embody_src="${1:-}" dl z
+    dl="$(mktemp -d)"
+    if [ -n "${X2_XCF_DIR:-}" ]; then
+        log "Staging Expression 2 from X2_XCF_DIR=$X2_XCF_DIR (candidate)"
+        for z in Expression2 BithumanEngineProtocol UnifiedModelHeader; do
+            cp "$X2_XCF_DIR/$z.xcframework.zip" "$dl/" || die "X2_XCF_DIR has no $z.xcframework.zip"
+        done
+    else
+        log "Fetching Expression 2 $EXPRESSION2_RELEASE (Expression2 + BithumanEngineProtocol + UnifiedModelHeader) …"
+        fetch_tap_zip "$EXPRESSION2_RELEASE" Expression2.xcframework.zip "$EXPRESSION2_SHA256" "$dl"
+        fetch_tap_zip "$EXPRESSION2_RELEASE" BithumanEngineProtocol.xcframework.zip "$BEP_SHA256" "$dl"
+        fetch_tap_zip "$UMH_RELEASE" UnifiedModelHeader.xcframework.zip "$UMH_SHA256" "$dl"
     fi
-    local sdk="$ENGINE_SDK"
-    log "Staging expression2 (embody) engine SDK from $sdk"
-    log "  engine adapter source: $ENGINE_SDK_REV"
-    # Run the engine's own bootstrap (fetches the embody models). A nonzero exit
-    # is a HARD failure (e.g. sha mismatch) we must not swallow.
-    ( cd "$sdk" && env $extra_env bash scripts/bootstrap.sh ) \
-        || die "expression2 SDK bootstrap FAILED — aborting"
-    # Stage the adapter SOURCE into both platform slices (compiled in-module).
-    for plat in macos ios; do
-        local base="$PLUGIN_ROOT/$plat/Engines/expression2"
-        mkdir -p "$base/Classes"
-        cp "$sdk"/Classes/*.swift "$base/Classes/"
+    for z in Expression2 BithumanEngineProtocol UnifiedModelHeader; do
+        ( cd "$dl" && unzip -q -o "$z.xcframework.zip" ) || die "could not unzip $z.xcframework.zip"
+        [ -d "$dl/$z.xcframework" ] || die "$z.xcframework.zip did not contain $z.xcframework/"
+        for fw in "$MAC_FW" "$IOS_FW"; do
+            mkdir -p "$fw"; rm -rf "$fw/$z.xcframework"; cp -R "$dl/$z.xcframework" "$fw/$z.xcframework"
+        done
     done
-    log "  staged expression2 → {macos,ios}/Engines/expression2/Classes"
-    # Stage the embody CoreML models to Assets/embody (FROZEN landing) when the
-    # engine bootstrap produced them (absent in DEV mode → runtime falls back).
-    if [ -d "$sdk/Vendor/embody" ]; then
-        # ONE LANDING PER PLATFORM, and it is the platform dir because that is where
-        # CocoaPods actually looks. `s.resources = ['Assets/embody']` in
-        # {macos,ios}/bithuman.podspec is resolved RELATIVE TO THE PODSPEC, i.e.
-        # <plugin>/<plat>/Assets/embody. This staged to <plugin>/Assets/embody, one
-        # level up, so the glob matched NOTHING — silently, because an empty CocoaPods
-        # file pattern is not an error. Measured on echelon 2026-09-16: a Release
-        # avatar_chat build's Pods-Runner-resources-Release-input-files.xcfilelist held
-        # five essence2 entries and zero embody ones, the shipped .app carried no
-        # .mlpackage at all, and the macOS app logged
-        #     [embody] MISSING w2v_frontend_cpuAndNE.mlpackage in bundle
-        #     [embody] warmUp FAILED - missing model(s)
-        # and rendered not one frame while talking normally. The iOS .app built the
-        # same evening carries the same nothing.
-        # (The product app hid this: bithuman-jarvis-app has its own Runner "Bundle
-        # embody models" phase, so the podspec's dead glob never showed there;
-        # app/avatar_chat - the app the phones and the Mac run - has no such phase.)
+    rm -rf "$dl" "$PLUGIN_ROOT/macos/Engines/expression2" "$PLUGIN_ROOT/ios/Engines/expression2"
+    log "  staged Expression2 / BithumanEngineProtocol / UnifiedModelHeader xcframeworks → {macos,ios}/Frameworks"
+    if [ -n "$embody_src" ] && [ -d "$embody_src" ]; then
         for plat in macos ios; do
             rm -rf "$PLUGIN_ROOT/$plat/Assets/embody"; mkdir -p "$PLUGIN_ROOT/$plat/Assets"
-            # clonefile on APFS where it exists, so N platforms cost one copy on disk
-            cp -Rc "$sdk/Vendor/embody" "$PLUGIN_ROOT/$plat/Assets/embody" 2>/dev/null \
-                || cp -R "$sdk/Vendor/embody" "$PLUGIN_ROOT/$plat/Assets/embody"
+            cp -R "$embody_src" "$PLUGIN_ROOT/$plat/Assets/embody"
         done
-        log "  staged embody models → {macos,ios}/Assets/embody ($(ls "$PLUGIN_ROOT/macos/Assets/embody" | wc -l | tr -d ' ') items each)"
-    else
-        log "  no Vendor/embody (DEV mode) — embody loads from ~/embody-ane at runtime"
+        log "  staged the identity-agnostic embody graphs → {macos,ios}/Assets/embody"
     fi
 }
 
-# ------------------------------------------------- engine #2: essence2 (OPTIONAL)
-# Stage one platform's pod surface from the essence-2 SDK, IF that platform's
-# slice (its libessence2.a) exists. Classes + header travel with the slice.
-# Download UnifiedModelHeader.xcframework ONCE per run and hand out slices.
-# Anonymous: the asset is on the public tap, the same one the SwiftPM
-# binaryTarget reads. Digest PINNED above and checked here — a 200 means a
-# server answered, not that the bytes are the bytes.
-UMH_XCF_DIR=""
-fetch_umh_xcframework() {
-    [ -n "$UMH_XCF_DIR" ] && return 0
-    command -v curl  >/dev/null 2>&1 || { warn "no curl — cannot stage UnifiedModelHeader"; return 1; }
-    command -v unzip >/dev/null 2>&1 || { warn "no unzip — cannot stage UnifiedModelHeader"; return 1; }
-    local dl; dl="$(mktemp -d)"
-    local url="https://github.com/bithuman-product/homebrew-bithuman/releases/download/$UMH_RELEASE/UnifiedModelHeader.xcframework.zip"
-    curl -fsSL --retry 2 -o "$dl/umh.zip" "$url" || { warn "could not fetch $url"; return 1; }
-    local got; got="$(shasum -a 256 "$dl/umh.zip" | cut -d' ' -f1)"
-    [ "$got" = "$UMH_SHA256" ] || die "sha256 MISMATCH for UnifiedModelHeader.xcframework.zip — refusing to install
-  expected $UMH_SHA256
-  actual   $got"
-    unzip -q -o "$dl/umh.zip" -d "$dl" || { warn "could not unzip UnifiedModelHeader.xcframework.zip"; return 1; }
-    [ -d "$dl/UnifiedModelHeader.xcframework" ] || { warn "unexpected archive shape"; return 1; }
-    UMH_XCF_DIR="$dl/UnifiedModelHeader.xcframework"
-    log "  UnifiedModelHeader.xcframework verified against the pinned digest ($got)"
-    return 0
-}
-
-# $1 = xcframework slice id, $2 = destination .a
-stage_umh_slice() {
-    local slice="$1" dest="$2"
-    fetch_umh_xcframework || return 1
-    local bin="$UMH_XCF_DIR/$slice/UnifiedModelHeader.framework/UnifiedModelHeader"
-    [ -f "$bin" ] || { warn "UnifiedModelHeader.xcframework has no $slice slice"; return 1; }
-    # It is already a static archive (`libtool -static` over one object in
-    # models/expression-2/sdk/scripts/build-xcframework.sh), so this is a copy
-    # under a name the podspec glob recognises — not a repack.
-    cp "$bin" "$dest"
-    return 0
-}
-
-stage_essence2_plat() {  # $1=plat, $2=slice .a path, $3=resources dir, $4=sdk path, $5=UMH slice id
-    local plat="$1" a="$2" res="$3" sdk="$4" umh_slice="$5"
-    [ -f "$a" ] || return 0
+# The Essence 2 engine: its C library (libessence2.a per slice + be_essence2.h) and runtime
+# resources from the public tap release. The Swift adapter over it is the plugin's own
+# (shared/Classes/Essence2Engine.swift). Optional: without it the plugin builds embody-only.
+stage_essence2_plat() {  # $1=plat, $2=xcframework slice dir, $3=headers dir, $4=resources dir
+    local plat="$1" slice="$2" hdr="$3" res="$4"
     local base="$PLUGIN_ROOT/$plat/Engines/essence2"
-    rm -rf "$base"; mkdir -p "$base/Classes" "$base/include" "$base/Vendor"
-    cp "$sdk"/Classes/*.swift "$base/Classes/"
-    cp "$sdk"/include/*.h      "$base/include/"
-    cp "$a" "$base/Vendor/libessence2.a"
+    rm -rf "$base"; mkdir -p "$base/include" "$base/Vendor"
+    cp "$slice/libessence2.a" "$base/Vendor/libessence2.a"
+    cp "$hdr/be_essence2.h" "$base/include/"
     [ -d "$res" ] && cp -R "$res" "$base/Vendor/essence2-resources"
-    # ★REFUSE RATHER THAN STAGE HALF AN ENGINE. An archive that references
-    # UnifiedModelHeader with nothing beside it that defines those symbols is a
-    # pod that installs cleanly and breaks the app's final link — the failure
-    # lands on the customer's build, far from here. Only slices that actually
-    # need it are gated: `nm -u` on the staged bytes decides, so an older
-    # self-contained libessence2.a still stages exactly as before.
-    # ★ASK THE ARCHIVE, AND ASK IT CORRECTLY. Two readings of this test were
-    # measured wrong on echelon 2026-09-21 before it settled, and both fail in
-    # the dangerous direction: `grep -q` exits early, awk takes SIGPIPE, and
-    # under this script's `set -o pipefail` the pipeline reports 141, i.e.
-    # "needs nothing" on an archive that needs fourteen; and `nm -gu` alone
-    # reads 14 on the OLD self-contained slice too, because nm lists a symbol as
-    # undefined in the MEMBER that references it even when another member
-    # defines it — staging the module beside THAT archive is the
-    # 112-duplicate-symbol failure this change exists to remove. So: count, and
-    # subtract what the archive defines for itself.
-    _umh_syms () { nm $1 "$base/Vendor/libessence2.a" 2>/dev/null \
-                   | awk '{print $NF}' | grep '^_\$s18UnifiedModelHeader' | sort -u; }
-    local umh_need
-    umh_need=$(comm -23 <(_umh_syms -gu) <(_umh_syms '-g --defined-only') | wc -l | tr -d ' ')
-    if [ "${umh_need:-0}" -gt 0 ]; then
-        stage_umh_slice "$umh_slice" "$base/Vendor/libUnifiedModelHeader.a" \
-          || die "libessence2.a ($plat) REFERENCES UnifiedModelHeader and the module could not be staged from $UMH_RELEASE — the app would fail to link. Set UMH_RELEASE/UMH_SHA256, or restore network access."
-        log "  staged UnifiedModelHeader ($umh_slice) → $plat/Engines/essence2/Vendor/libUnifiedModelHeader.a ($umh_need symbols the engine archive no longer defines)"
-    fi
-    log "  staged essence2 → $plat/Engines/essence2 (Classes + be_essence2.h + libessence2.a + resources)"
+    log "  staged essence2 → $plat/Engines/essence2 (be_essence2.h + libessence2.a + resources)"
 }
-
 stage_essence2() {
     rm -rf "$PLUGIN_ROOT/macos/Engines/essence2" "$PLUGIN_ROOT/ios/Engines/essence2"
-    if ! locate_engine_sdk ESSENCE2 "essence-2" "${BITHUMAN_ESSENCE2_DIR:-}" "$BITHUMAN_MODELS_REF"; then
-        warn "bithuman-models models/essence-2/sdk not found (set BITHUMAN_ESSENCE2_DIR, place a sibling bithuman-models checkout, or allow a git clone) — essence2 disabled (embody-only)"
-        return 0
-    fi
-    local sdk="$ENGINE_SDK"
-    log "Staging essence2 engine SDK from $sdk"
-    log "  engine adapter source: $ENGINE_SDK_REV"
-    log "  engine binary: $LIBESSENCE2_RELEASE (${LIBESSENCE2_SHA256:0:16}…), resources: $LIBESSENCE2_RESOURCES_RELEASE (${LIBESSENCE2_RESOURCES_SHA256:0:16}…)"
-    # ★ THE PIN IS PASSED, NOT INHERITED. The engine SDK's own bootstrap carries
-    # a DEFAULT tag of its own, in the private repo, on whatever revision this
-    # checkout happens to be — that default is what shipped essence2-v1.2.0 into
-    # this pod while Package.swift served v1.7.0. Naming all four coordinates
-    # here makes the plugin tag, and only the plugin tag, decide.
-    # The engine SDK bootstrap exits 0 (degrade to embody-only) on a download
-    # failure / missing release, but `die`s (nonzero) on a sha256 MISMATCH — so a
-    # nonzero here is a HARD, loud failure we must NOT swallow.
-    ( cd "$sdk" && env \
-        LIBESSENCE2_RELEASE="$LIBESSENCE2_RELEASE" \
-        LIBESSENCE2_SHA256="$LIBESSENCE2_SHA256" \
-        LIBESSENCE2_RESOURCES_RELEASE="$LIBESSENCE2_RESOURCES_RELEASE" \
-        LIBESSENCE2_RESOURCES_SHA256="$LIBESSENCE2_RESOURCES_SHA256" \
-        bash scripts/bootstrap.sh ) \
-        || die "essence2 SDK bootstrap FAILED (e.g. libessence2 sha256 mismatch) — aborting"
-    local mac_a="$sdk/Vendor/libessence2-macos.a"
-    local ios_a="$sdk/Vendor/libessence2-ios.a"
-    local res="$sdk/Vendor/essence2-resources"
-    if [ ! -f "$mac_a" ] && [ ! -f "$ios_a" ]; then
-        warn "essence2 SDK produced no libessence2.a — essence2 disabled (embody-only)"
-        return 0
-    fi
-    # The UMH slice id matches the libessence2 slice the SDK bootstrap extracted:
-    # macos-arm64 for macOS, ios-arm64 for iOS (that bootstrap takes the DEVICE
-    # slice only, never *-simulator).
-    stage_essence2_plat macos "$mac_a" "$res" "$sdk" macos-arm64
-    stage_essence2_plat ios   "$ios_a" "$res" "$sdk" ios-arm64   # iOS device slice only when present (human-gated)
+    [ "${BITHUMAN_SKIP_ESSENCE2:-0}" = "1" ] && { log "BITHUMAN_SKIP_ESSENCE2=1 — embody-only build"; return 0; }
+    local dl; dl="$(mktemp -d)"
+    log "Fetching Essence 2 $LIBESSENCE2_RELEASE (${LIBESSENCE2_SHA256:0:16}…, resources ${LIBESSENCE2_RESOURCES_SHA256:0:16}…) …"
+    fetch_tap_zip "$LIBESSENCE2_RELEASE" libessence2.xcframework.zip "$LIBESSENCE2_SHA256" "$dl"
+    fetch_tap_zip "$LIBESSENCE2_RESOURCES_RELEASE" libessence2-resources.zip "$LIBESSENCE2_RESOURCES_SHA256" "$dl"
+    ( cd "$dl" && unzip -q -o libessence2.xcframework.zip && mkdir -p res && unzip -q -o libessence2-resources.zip -d res ) \
+        || die "could not unzip the Essence 2 archives"
+    local x="$dl/libessence2.xcframework" res="$dl/res"
+    [ -d "$res/libessence2-resources" ] && res="$res/libessence2-resources"
+    stage_essence2_plat macos "$x/macos-arm64" "$x/macos-arm64/Headers" "$res"
+    stage_essence2_plat ios   "$x/ios-arm64"   "$x/ios-arm64/Headers"   "$res"
+    rm -rf "$dl"
 }
 
-# ---------------------------------------------------- platform detection
 case "$(uname -s)" in
     Darwin) ;;
     Linux)  log "Linux host — the Apple plugin builds on macOS only. Nothing to do."; exit 0 ;;
@@ -681,7 +597,7 @@ reduce_to_shared_graphs "$SRC/embody-models"
 # 2. N-engine loop. expression2 reuses the bundle we already downloaded for
 # libconverse (EMBODY_VENDOR_SRC → no re-download); essence2 fetches its own
 # sha-pinned libessence2 release inside its SDK bootstrap.
-stage_expression2 "EMBODY_VENDOR_SRC=$SRC"
+stage_expression2 "$SRC/embody-models"
 stage_essence2
 
 log "Done. Self-contained — no sibling bithuman-sdk required."
