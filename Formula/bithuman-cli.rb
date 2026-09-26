@@ -405,8 +405,8 @@ class BithumanCli < Formula
   # dfe6e24b5). The macOS half was built, signed and notarized on echelon; the two lines
   # below are release_pack.sh's FORMULA-PIN.txt for those bytes, pasted, not typed.
   # (2.7.5 was 060d9a7d4 / e2.43 / sha ea9c7e44….)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.7.7/bithuman-aarch64-apple-darwin.tar.gz"
-  sha256 "7d2a0986ced054d7e0216508df0fc2d8bd89b9a8c9edd6bf7b3b6276ef04d6f1"
+  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.7.8/bithuman-aarch64-apple-darwin.tar.gz"
+  sha256 "ecf63fcce4bd338107b9dcaedbd30b3d616a44b5a5e272644cd57c4b504c37f9"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`
   # printed to every customer and what every SPDX scanner recorded. The tarball
