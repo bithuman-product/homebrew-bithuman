@@ -78,6 +78,60 @@ final class Essence2KitPacingTests: XCTestCase {
         XCTAssertFalse(clock.isDue(5.010 + w - 0.001))
     }
 
+    // ── inside a reply: anchored, never re-anchored, stale frames dropped ──
+
+    /// Drive the clock the way Essence2Engine.takeLocked does for `seconds` of one reply, a call
+    /// every `step` s, the engine always a frame ahead; returns (shown, dropped, worst lateness).
+    private func reply(step: Double, seconds: Double) -> (shown: Int, dropped: Int, worst: Double) {
+        var clock = Essence2FrameClock(fps: 25)
+        clock.anchorReply(at: 0)                     // speech frame 0, shown at t = 0
+        var shown = 1, dropped = 0, worst = 0.0
+        let calls = Int((seconds / step).rounded())
+        for i in 1...calls {
+            let now = Double(i) * step
+            guard clock.isDue(now) else { continue }
+            while clock.isStale(now) { clock.skipped(); dropped += 1 }
+            worst = max(worst, clock.lateness(now))
+            clock.delivered(at: now); shown += 1
+        }
+        return (shown, dropped, worst)
+    }
+
+    /// The frames() stream (it waits for each due time): nothing dropped, never late.
+    func testAPromptCallerShowsEveryFrameOfAReply() {
+        let r = reply(step: 0.001, seconds: 60)
+        XCTAssertEqual(r.dropped, 0)
+        XCTAssertEqual(r.shown, 1501, accuracy: 1)
+        XCTAssertLessThan(r.worst, 0.0011)
+    }
+
+    /// The #344 loop (sleep 40 ms, ~42 ms a turn): it can never catch up by itself, so the
+    /// clock drops a stale frame and the picture stays within ONE frame of the reply's audio —
+    /// the 60 s reply does not end 2.8 s behind its voice.
+    func testASlowCallerIsKeptOnTheReplysTimeline() {
+        let r = reply(step: 0.042, seconds: 60)
+        XCTAssertLessThan(r.worst, 0.040, "never a full frame behind the voice")
+        XCTAssertEqual(r.shown + r.dropped, 1500, accuracy: 2, "the reply's timeline is kept")
+        XCTAssertGreaterThan(r.dropped, 50)
+    }
+
+    /// A stall inside a reply is paid back by dropping, not by re-anchoring later.
+    func testAStallInsideAReplyIsNotCarriedForward() {
+        var clock = Essence2FrameClock(fps: 25)
+        clock.anchorReply(at: 0)
+        clock.delivered(at: 0.04)                    // frame 1 on time
+        let now = 1.0                                // a 0.9 s stall
+        XCTAssertTrue(clock.isDue(now))
+        var drops = 0
+        while clock.isStale(now) { clock.skipped(); drops += 1 }
+        XCTAssertEqual(drops, 23, "frames 2..24 are stale at 1.0 s")
+        XCTAssertLessThan(clock.lateness(now), 0.040)
+        clock.delivered(at: now)
+        XCTAssertEqual(clock.next ?? 0, 1.04, accuracy: 1e-9, "still on the reply's timeline")
+        clock.endReply()
+        XCTAssertFalse(clock.anchored)
+    }
+
     // ── replies ──
 
     private func run(_ kinds: [Essence2FrameKind], interruptAt: Set<Int> = []) -> (events: [Essence2Event], ends: [Int]) {

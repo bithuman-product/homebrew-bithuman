@@ -98,6 +98,10 @@ public final class Essence2Engine: @unchecked Sendable {
     private var clock = Essence2FrameClock(fps: Essence2Engine.framesPerSecond)
     private var replies = Essence2ReplyTracker()
     private var handedOut = 0
+    private var dropped = 0
+    /// Speech frames of the current reply pulled so far (handed out or dropped): frame k shows
+    /// the reply's audio from k/25 s.
+    private var replySpeech = 0
     private var pacingValue = Essence2Pacing.realtime
     private let listenersLock = NSLock()
     private var listeners: [UUID: AsyncStream<Essence2Event>.Continuation] = [:]
@@ -224,7 +228,7 @@ public final class Essence2Engine: @unchecked Sendable {
         guard let got = takeLocked(now: t, into: nil) else { lock.unlock(); return nil }
         let frame = Essence2Frame(bgr: Array(buffer.prefix(got.bytes)), width: got.width,
                                   height: got.height, isSpeech: got.kind == .speech,
-                                  endsReply: got.endsReply, index: got.index)
+                                  endsReply: got.endsReply, index: got.index, audioTime: got.audioTime)
         lock.unlock()
         emit(got.events)
         return frame
@@ -314,34 +318,73 @@ public final class Essence2Engine: @unchecked Sendable {
 
     /// One frame from the engine, if one is due (paced) and ready. Caller holds `lock`.
     /// `into` nil: pull into `buffer`; otherwise the idle entry point into the caller's buffer.
+    ///
+    /// ★THE CLOCK, AND WHY IT CANNOT DRIFT FROM THE VOICE (2026-09-26). Monotonic time
+    /// (mach uptime). Between replies frames follow a free-running 25 fps grid. A reply's
+    /// FIRST speech frame re-anchors it — that frame is handed out at once, and it is the moment
+    /// the documented loop starts the reply's audio — and from there frame k of the reply is due
+    /// at anchor + k/25, never re-anchored. A frame that is already a full period late when it
+    /// is pulled (a stall, or a caller slower than 25 Hz) is DROPPED when the next one is ready,
+    /// so presentation stays within one frame of the reply's timeline instead of accumulating
+    /// lag. What is left is the audio device's own clock against uptime (parts per million).
+    /// `Essence2Frame.audioTime` carries each speech frame's place in the reply's audio for an
+    /// app that presents by its audio device's playout position.
     private func takeLocked(now: Double, into out: UnsafeMutableBufferPointer<UInt8>?)
         -> (bytes: Int, width: Int, height: Int, kind: Essence2FrameKind, endsReply: Bool,
-            index: Int, events: [Essence2Event])? {
+            index: Int, audioTime: Double?, events: [Essence2Event])? {
         guard !closed else { return nil }
         drainPending()
         let paced = pacingValue == .realtime
         if paced && !clock.isDue(now) { return nil }
-        let n: Int32
-        if let out {
-            n = be_essence2_idle_frame(handle, out.baseAddress, Int32(out.count))
-        } else {
-            guard be_essence2_frames_available(handle) > 0 else { return nil }
+        func pullOne() -> Int32 {
+            if let out { return be_essence2_idle_frame(handle, out.baseAddress, Int32(out.count)) }
+            guard be_essence2_frames_available(handle) > 0 else { return 0 }
             fitBuffer()
-            n = buffer.withUnsafeMutableBufferPointer { be_essence2_pull_frame(handle, $0.baseAddress, Int32($0.count)) }
+            return buffer.withUnsafeMutableBufferPointer { be_essence2_pull_frame(handle, $0.baseAddress, Int32($0.count)) }
         }
+        var n = pullOne()
         if n == -3 { refusedNow = true; return nil }
         guard n > 0 else { return nil }
         refusedNow = false
-        let sc = be_essence2_pulled_speech_frames(handle)
-        let speech = sc > lastSpeech
-        lastSpeech = sc
-        let kind = Essence2FrameKind(engine: be_essence2_last_frame_kind(handle), speech: speech)
-        if paced { clock.delivered(at: now) }
-        let r = replies.note(kind)
+        var events: [Essence2Event] = []
+        var ends = false
+        var kind = Essence2FrameKind.idle
+        var audioTime: Double? = nil
+        while true {
+            let sc = be_essence2_pulled_speech_frames(handle)
+            let speech = sc > lastSpeech
+            lastSpeech = sc
+            kind = Essence2FrameKind(engine: be_essence2_last_frame_kind(handle), speech: speech)
+            let r = replies.note(kind)
+            events += r.events
+            ends = ends || r.endsReply
+            if r.events.contains(.replyStarted) { replySpeech = 0 }
+            audioTime = nil
+            if kind == .speech {
+                audioTime = Double(replySpeech) / Essence2Engine.framesPerSecond
+                replySpeech += 1
+            }
+            guard paced else { break }
+            if r.events.last == .replyStarted {
+                clock.anchorReply(at: now)          // speech frame 0: shown now, its audio starts now
+                break
+            }
+            if r.events.last == .replyEnded { clock.endReply() }
+            // A full period late and the next frame is ready: this one is stale — drop it.
+            guard clock.isStale(now), be_essence2_frames_available(handle) > 0 else {
+                clock.delivered(at: now)
+                break
+            }
+            let next = pullOne()
+            guard next > 0 else { clock.delivered(at: now); break }   // nothing newer: show this one
+            clock.skipped()
+            dropped += 1
+            n = next
+        }
         let d = dims()
         let index = handedOut
         handedOut += 1
-        return (Int(n), d.w, d.h, kind, r.endsReply, index, r.events)
+        return (Int(n), d.w, d.h, kind, ends, index, audioTime, events)
     }
 
     private func emit(_ events: [Essence2Event]) {
@@ -358,7 +401,12 @@ public final class Essence2Engine: @unchecked Sendable {
         be_essence2_reset(handle)
         lastSpeech = be_essence2_pulled_speech_frames(handle)
         replies.interrupted()
+        clock.endReply()
     }
+
+    /// Frames this engine dropped to keep a reply's picture on its audio's timeline (a frame a
+    /// full period late when a newer one was ready). 0 while the caller keeps up.
+    public var droppedFrames: Int { lock.lock(); defer { lock.unlock() }; return dropped }
 
     /// End the session: the final billing beat is flushed, then the engine is released.
     public func shutdown() {
@@ -422,6 +470,10 @@ public struct Essence2Frame: Sendable {
     public let endsReply: Bool
     /// This engine's frame count before this frame (0, 1, 2, …).
     public let index: Int
+    /// For a speech frame: where it sits in the reply's audio, in seconds (frame k shows the
+    /// audio from k/25 s). An app that presents by its audio device's playout position shows
+    /// this frame once the device has played that much of the reply. nil for idle and ramp.
+    public let audioTime: Double?
 }
 
 /// A reply boundary (``Essence2Engine/events()``).
@@ -454,15 +506,18 @@ enum Essence2FrameKind: Equatable {
     }
 }
 
-/// The frame clock: frame k is due at t0 + k/fps. A caller that asks early gets nothing; one
-/// that fell behind gets at most `maxLag` frames back to back, then the clock re-anchors on it
-/// (a stall is not paid back with a burst). A caller up to `tolerance` early is on time, so a
-/// 40 ms timer that wakes a hair early still gets every frame.
+/// The frame clock (see `Essence2Engine.takeLocked`). Between replies: frame k is due at
+/// t0 + k/fps; a caller that asks early gets nothing; one that fell behind gets at most `maxLag`
+/// frames back to back, then the grid re-anchors on it. Inside a reply (`anchored`): frame k is
+/// due at anchor + k/fps and the grid NEVER re-anchors — lateness is paid by dropping stale
+/// frames, so the picture cannot drift from the reply's audio. A caller up to `tolerance` early
+/// is on time, so a 40 ms timer that wakes a hair early still gets every frame.
 struct Essence2FrameClock {
     let period: Double
     let tolerance: Double
     let maxLag: Double
     private(set) var next: Double?
+    private(set) var anchored = false
 
     init(fps: Double, tolerance: Double = 0.002, maxLag: Int = 2) {
         period = 1 / fps; self.tolerance = tolerance; self.maxLag = Double(maxLag); next = nil
@@ -473,12 +528,28 @@ struct Essence2FrameClock {
     /// Seconds until the next frame is due (0 = now).
     func wait(until now: Double) -> Double { next.map { max(0, $0 - tolerance - now) } ?? 0 }
 
+    /// How far past its due time the frame being handed out is (seconds; <= 0 on time).
+    func lateness(_ now: Double) -> Double { next.map { now - $0 } ?? 0 }
+
     mutating func delivered(at now: Double) {
         guard let due = next else { next = now + period; return }
+        if anchored { next = due + period; return }
         next = (now - due > maxLag * period) ? now + period : due + period
     }
 
-    mutating func reset() { next = nil }
+    /// Inside a reply, the frame being handed out is a full period late: the next one is due.
+    func isStale(_ now: Double) -> Bool { anchored && lateness(now) >= period }
+
+    /// A stale frame was dropped: its slot passes and the next frame takes the one after.
+    mutating func skipped() { if let due = next { next = due + period } }
+
+    /// A reply's first speech frame was handed out at `now`: the reply's timeline starts here.
+    mutating func anchorReply(at now: Double) { anchored = true; next = now + period }
+
+    /// The reply is over (or cut): back to the free-running grid.
+    mutating func endReply() { anchored = false }
+
+    mutating func reset() { next = nil; anchored = false }
 
     static func now() -> Double { Double(DispatchTime.now().uptimeNanoseconds) / 1e9 }
 }
