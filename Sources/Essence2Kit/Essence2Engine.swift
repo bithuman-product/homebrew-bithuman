@@ -333,7 +333,7 @@ public enum Essence2Download {
 /// never against a checksum served beside the file.
 public enum Essence2Resources {
     /// Must equal `essence2Tag` in Package.swift (the tap's check-apple-engine-pin.sh grades it).
-    public static let releaseTag = "essence2-v1.12.1"
+    public static let releaseTag = "essence2-v1.13.0"
     static let base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/"
     static let files: [(name: String, sha256: String)] = [
         ("w2v_ess_fp16_v1.onnx", "7340a0350c340e059f0931d7381fad1ed8aa579cc4440fcc3223f136d9aaa8e5"),

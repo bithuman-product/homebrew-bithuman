@@ -1,3 +1,14 @@
+## 2.6.17 — 2026-09-25 — iOS/macOS: an app can link its own MLX beside the Essence 2 engine
+
+Tag `flutter-plugin-v2.6.17`.
+
+* **iOS/macOS:** the Essence 2 engine moves to `essence2-v1.13.0` (libessence2 `ada8bbb0…`, resources
+  `11843e96…`). The engine no longer carries a private copy of MLX, so an app that links its own
+  MLX (mlx-swift) links beside it — CocoaPods adds `-ObjC`, which made the old engine's copy collide
+  (bithuman-models #1461). The engine library is 22 MB instead of 171 MB, and the resources archive
+  no longer ships an `mlx-swift_Cmlx.bundle` (the pod's `*.bundle` glob is empty and that is correct).
+  The engine adapter source stays at bithuman-models `fd37bdfb7`: the C interface is unchanged.
+
 ## 2.6.16 — 2026-09-24 — Android: Expression 2 lip sync, faster first frame after a pause
 
 Tag `flutter-plugin-v2.6.16`.
