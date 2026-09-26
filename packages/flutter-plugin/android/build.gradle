@@ -146,7 +146,9 @@ dependencies {
     // 0.6.0 (2026-09-24): the first frame after a listening gap arrives about 4x sooner
     // (resetAudio seeds the next reply where the picture is); store retries share one budget
     // per store; renders are bit-identical to 0.5.15.
-    implementation 'ai.bithuman:essence2-android:0.6.0'
+    // 0.8.0 (2026-09-26): useHardwareBuffers takes up to 32 slots (was 16), which the zero-copy
+    // path below needs: the player's ring holds one frame per slot until the slot comes round.
+    implementation 'ai.bithuman:essence2-android:0.8.0'
 }
 
 // ★ The app that imports this plugin must ALSO set, in its own android/app build file:
