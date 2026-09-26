@@ -234,11 +234,7 @@ public final class Essence2Engine: @unchecked Sendable {
     /// down or the calling task is cancelled.
     public func nextFrame() async -> Essence2Frame? {
         while !Task.isCancelled {
-            lock.lock()
-            if closed { lock.unlock(); return nil }
-            let paced = pacingValue == .realtime
-            let wait = paced ? clock.wait(until: Essence2FrameClock.now()) : 0
-            lock.unlock()
+            guard let (paced, wait) = timeToNextFrame() else { return nil }
             if wait > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(wait * 1e9))
                 continue
@@ -248,6 +244,15 @@ public final class Essence2Engine: @unchecked Sendable {
             try? await Task.sleep(nanoseconds: paced ? 4_000_000 : 1_000_000)
         }
         return nil
+    }
+
+    /// (paced, seconds until the next frame is due), or nil once shut down. Synchronous: an
+    /// NSLock may not be taken across an `await`.
+    private func timeToNextFrame() -> (Bool, Double)? {
+        lock.lock(); defer { lock.unlock() }
+        if closed { return nil }
+        let paced = pacingValue == .realtime
+        return (paced, paced ? clock.wait(until: Essence2FrameClock.now()) : 0)
     }
 
     /// The frames, paced to the frame clock (25 per second), for as long as you iterate:
