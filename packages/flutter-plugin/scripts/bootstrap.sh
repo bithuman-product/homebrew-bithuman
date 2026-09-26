@@ -98,32 +98,8 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # Env overrides stay honoured for development; the committed values are what a
 # tag ships.
 
-# The bithuman-models revision whose engine ADAPTER SOURCE (models/*/sdk/Classes)
-# this pod compiles. A full 40-hex commit sha — never a branch.
-# 05e443da9 = 2026-09-22, the tree the essence2-v1.10.0 Apple build ran on
-# — bithuman-models #1082: libessence2.a stops carrying the UnifiedModelHeader
-# objects, which is what made an app taking both published Apple products
-# collide on 112 duplicate symbols. VERIFIED, not assumed: the annotated tag
-# essence2-apple-v1.10.0 dereferences to exactly this commit, and the release it
-# cut reads `UnifiedModelHeader defined=0` on all three slices.
-# ★THIS SHA IS WHY THE UnifiedModelHeader STAGING BELOW IS NOT OPTIONAL: the
-# archive this tree produces REFERENCES that module (14 symbols on ios-arm64 and
-# macos-arm64, 6 on the simulator) instead of defining it.
-# (It read 92d9d9d56 — the essence2-v1.9.0 tree — until this bump. That pin is
-# what decides which engine ADAPTER SOURCE the pod compiles, so it moves with
-# the engine or the pod compiles one release's Swift against another's bytes.)
-# ★MOVED 2026-09-23 to ec9a3ab83 — the tree Expression2 v2.6.5 was built from, which also
-# carries the essence2-v1.11.0 engine sources (essence2-apple-v1.11.0 = 295e3aaf2, an
-# ancestor; no Apple-engine source changed between them): the first Apple session meter
-# for Expression 2 (#1165), talking-time billing + the 300 s online grace on both engines,
-# the BITHUMAN_API_KEY alias (#1144), and create() naming a metering refusal (#1183).
-# ★MOVED 2026-09-23 to 6ff1fd069 — the tree essence2-apple-v1.12.0 was built from (essence2-v1.12.0: the Swift Essence2Kit
-# engine's C half, be_essence2_last_refusal, clean slices — bithuman-models #1224).
-# ★MOVED 2026-09-23 to 8bae6d8f3 — the tree essence2-apple-v1.12.1 was built from (essence2-v1.12.1: slices without module
-# breadcrumbs — bithuman-models #1263).
-# ★MOVED 2026-09-23 to fd37bdfb7: the tree Expression2 v2.7.0 was built from (the x2 lip-sync hold, #1279;
-# Expression2Download). The essence-2 adapter sources are unchanged since essence2-apple-v1.12.1 (8bae6d8f3).
-BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-fd37bdfb78ceffa8f1a64233e0215501f77ca169}"
+# (Until 2.6.18 a BITHUMAN_MODELS_REF pinned the private repository revision whose engine
+# ADAPTER SOURCE this pod compiled. Since 2.6.19 no engine source is fetched: see below.)
 
 # ★MOVED 2026-09-26 to essence2-v1.14.1 (bithuman-models #1516 @ b4a331443): a Release engine cannot be switched
 # unmetered or pointed at another meter endpoint. The C interface is unchanged; BITHUMAN_MODELS_REF stays.
@@ -240,78 +216,6 @@ relink() {
 # for 1 and 2, which are developer paths this script cannot pin).
 #   $1 = slug (EXPRESSION2|ESSENCE2)  $2 = models/ dir name (expression-2|essence-2)
 #   $3 = override env VALUE           $4 = ref (REQUIRED — the committed pin)
-MODELS_REPO="${BITHUMAN_MODELS_REPO:-bithuman-product/bithuman-models}"
-MODELS_CACHE="$HOME/.cache/bithuman/bithuman-models"
-ENGINE_SDK=""
-ENGINE_SDK_REV=""
-# Print the revision of a checkout, or a reason it has none.
-sdk_rev_of() {  # $1 = any path inside a git work tree
-    ( cd "$1" && git rev-parse HEAD 2>/dev/null ) || echo "not-a-git-checkout"
-}
-locate_engine_sdk() {
-    local slug="$1" model="$2" override="$3" ref="${4:-}"
-    local cache="$MODELS_CACHE"
-    ENGINE_SDK=""; ENGINE_SDK_REV=""
-    [ -n "$ref" ] || die "locate_engine_sdk $slug called with no ref — the engine adapter source must be pinned (BITHUMAN_MODELS_REF)"
-    # 1. explicit dev override (engine dir root OR its sdk/). A DEVELOPER path:
-    # it wins over the pin by design, so say out loud what it resolved to —
-    # the whole defect this pin fixes was an unrecorded revision.
-    if [ -n "$override" ]; then
-        if [ -f "$override/scripts/bootstrap.sh" ]; then
-            ENGINE_SDK="$override"; ENGINE_SDK_REV="OVERRIDE BITHUMAN_${slug}_DIR @ $(sdk_rev_of "$override")"; return 0; fi
-        if [ -f "$override/sdk/scripts/bootstrap.sh" ]; then
-            ENGINE_SDK="$override/sdk"; ENGINE_SDK_REV="OVERRIDE BITHUMAN_${slug}_DIR @ $(sdk_rev_of "$override")"; return 0; fi
-        warn "BITHUMAN_${slug}_DIR=$override has no (sdk/)scripts/bootstrap.sh"
-    fi
-    # 2. sibling bithuman-models checkout next to this umbrella repo. Also a
-    # DEVELOPER path and also unpinned: whatever that tree is checked out at,
-    # dirty or not, is what compiles into the pod. Named, for the same reason.
-    if [ -f "$PLUGIN_ROOT/../bithuman-models/models/$model/sdk/scripts/bootstrap.sh" ]; then
-        ENGINE_SDK="$(cd "$PLUGIN_ROOT/../bithuman-models/models/$model/sdk" && pwd)"
-        ENGINE_SDK_REV="SIBLING CHECKOUT $PLUGIN_ROOT/../bithuman-models @ $(sdk_rev_of "$PLUGIN_ROOT/../bithuman-models")"
-        return 0
-    fi
-    # 3. one shared shallow clone of the monorepo into a cache, checked out AT
-    # THE PIN. This is the reproducible path — the one a clean clone takes.
-    if [ ! -d "$cache/models" ]; then
-        mkdir -p "$(dirname "$cache")"; rm -rf "$cache"
-        log "Cloning $MODELS_REPO → $cache"
-        # No `-b $ref`: the pin is a COMMIT SHA and `clone -b` takes only branch
-        # and tag names. Clone the default branch shallow, then fetch the pin
-        # itself below — `git fetch origin <sha>` is served for any commit
-        # reachable from a ref, which a pin on main always is.
-        if command -v gh >/dev/null 2>&1; then
-            gh repo clone "$MODELS_REPO" "$cache" -- --depth 1 >/dev/null 2>&1 \
-              || git clone --depth 1 "https://github.com/$MODELS_REPO.git" "$cache" >/dev/null 2>&1 || true
-        else
-            git clone --depth 1 "https://github.com/$MODELS_REPO.git" "$cache" >/dev/null 2>&1 || true
-        fi
-    fi
-    if [ -d "$cache/.git" ]; then
-        # Move the cache ONTO THE PIN. This must FAIL LOUD: the cache holds the
-        # engine adapter SOURCE compiled into the pod, and a silently-stale
-        # cache pins it forever while every log line reads success (found
-        # 2026-07-06: an echelon cache frozen at a pre-dec_P2 Expression2Engine
-        # because the plain-git refresh of the PRIVATE repo had no credentials
-        # and the old `|| true` swallowed the failure). gh's credential helper
-        # carries the auth (gh auth login / GH_TOKEN); plain git is the fallback
-        # for public/credential-cached setups. Cheap to re-run: a cache already
-        # at the pin fetches one commit it already has.
-        if ! ( cd "$cache" && { \
-                 if command -v gh >/dev/null 2>&1; then \
-                     git -c credential.helper='!gh auth git-credential' fetch -q --depth 1 origin "$ref"; \
-                 else \
-                     git fetch -q --depth 1 origin "$ref"; \
-                 fi; } && git checkout -q FETCH_HEAD ) >/dev/null 2>&1; then
-            die "engine SDK checkout of the PIN FAILED ($MODELS_REPO @ $ref, cache $cache) — refusing to stage an engine adapter this script cannot name.
-  Fix: gh auth login (or export GH_TOKEN), or rm -rf $cache to re-clone, or set BITHUMAN_${slug}_DIR / place a sibling bithuman-models checkout."
-        fi
-    fi
-    if [ -f "$cache/models/$model/sdk/scripts/bootstrap.sh" ]; then
-        ENGINE_SDK="$cache/models/$model/sdk"; ENGINE_SDK_REV="PINNED $(sdk_rev_of "$cache")"; return 0
-    fi
-    return 1
-}
 
 # ---------------------------------------------- engine #1: expression2 (REQUIRED)
 # Source-only (pure Swift/CoreML). Its bootstrap fetches the embody CoreML model
