@@ -244,6 +244,11 @@
 //   your app's Resources root — the two `.bundle`s and the loose `.onnx` land
 //   where `DirectorRuntime.resolveA2XW2VPath()` and MLX look. Nothing about
 //   that changed; what changed is that the archive now contains all of it.
+//   ★ SINCE essence2-v1.13.0 THE ARCHIVE HOLDS NO `.bundle`: the MLX metallib and
+//   the idle audio were read only by the MLX actor, which is gone from the engine.
+//   It carries the audio encoder and its 2 s window pair, which `Essence2Kit`
+//   fetches for you. Do NOT copy an older `mlx-swift_Cmlx.bundle` into an app that
+//   links its own mlx-swift — that bundle is your mlx-swift's, and it builds its own.
 //   bithuman-models `apple-xcframework.yml` refuses to publish an archive
 //   missing any resource the built engine names
 //   (`tools/check-libessence2-resources-complete.py`).
@@ -743,6 +748,22 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // asset, so its checksum does not move; it must be attached to this tag too,
 // because `essence2Base` is the tag both URLs are read from.
 // ---------------------------------------------------------------------------
+// ★ ROLLED 2026-09-25 ONTO essence2-v1.13.0 (package tag v2.16.0) — AN APP CAN LINK ITS OWN MLX BESIDE ESSENCE 2.
+// A customer's iPhone app that links mlx-swift (MLX, MLXNN) for its own models failed its final iOS
+// device link on duplicate MLX symbols: every essence2 release through v1.12.1 carried a dead copy of
+// mlx-swift, MLXNN, Cmlx, swift-numerics and the MLX actor inside libessence2.a (28,019 global names
+// spelling "mlx" on ios-arm64, 249.7 MB), left in the link closure by a Package.swift dependency no
+// source used since 2026-09-15. A plain SwiftPM app linked lazily; -ObjC (CocoaPods adds it) and
+// -all_load did not (measured on echelon, Xcode 26.3: 3,658 and 8,292 duplicate symbols on 2.15.0).
+// essence2-v1.13.0 (bithuman-models #1461, essence2-apple-v1.13.0 @ 2cc2a334f) carries NO MLX:
+// ios-arm64 22 MB, 3,624 globals, 0 "mlx", stb_image private, `randombytes` renamed; the xcframework
+// zip is 22 MB (was 171 MB) and the resources zip no longer ships mlx-swift_Cmlx.bundle. Re-hosted
+// byte-for-byte by publish-essence2-apple.yml: libessence2.xcframework.zip sha256 ada8bbb0ecdfa717…, its
+// checksum below. MEASURED ON THESE BYTES: E2MLXCoexist (Essence2Kit + the app's own mlx-swift in ONE
+// target) links plain / -ObjC / -all_load for iOS device and macOS; iPhone 15 renders the teeth
+// on the lip contour and runs the app's MLX on the GPU before and after. onnxruntime is carried
+// forward byte-identical again.
+// ---------------------------------------------------------------------------
 // ★ ROLLED 2026-09-23 ONTO essence2-v1.12.1 (package tag v2.14.4) — NO LINK WARNING LEFT FROM THE ESSENCE 2 SLICES.
 // A SwiftPM consumer of 2.14.2/2.14.3 got 11 "<ModuleCache>/<M>.pcm: No such file or directory"
 // warnings at its link: the slices named ~800 module-cache .pcm files in their debug info. Built
@@ -791,7 +812,7 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // the 300 s grace refuses at 7,500 frames since the last ack and resumes on reconnect,
 // the outage claimed as accrued. iPhone 15 floor series on these bytes: see the
 // release notes. onnxruntime is carried forward byte-identical again.
-let essence2Tag = "essence2-v1.12.1"
+let essence2Tag = "essence2-v1.13.0"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -961,7 +982,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "64b6635b40edb006c4a47a2e1aede56e1771f7496991ed2e0d5f835e4e9b3ed1"
+            checksum: "ada8bbb0ecdfa71766e4e34e051448e609a6def2ea2938f61925dbf093989016"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
