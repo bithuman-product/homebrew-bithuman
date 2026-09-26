@@ -203,7 +203,7 @@ class AvatarPlayer(
     // rather than assuming there is none.
     //
     // ★ZERO-COPY (2.6.19): with [AvatarEngine.hardwareFrames] a slot holds the ENGINE's frame
-    // instead of a copy of it — a hardware Bitmap over the GPU buffer it was composed into — and
+    // instead of a copy of it — a hardware Bitmap over the GPU buffer it was rendered into — and
     // the frame goes back to the engine when the producer comes round to the slot again, the same
     // moment the copy path would overwrite it. The ring rule above is what makes that safe: a
     // slot is reused only after its unit was presented (`ringOverrun` counts any exception).
@@ -1026,7 +1026,7 @@ class AvatarPlayer(
         private val CLICK_SAMPLES = RATE * 12 / 1000
 
         /** A `debug.*` system property as an int, 0 when unset — settable from `adb shell setprop`. */
-        private fun devInt(key: String): Int = runCatching {
+        internal fun devInt(key: String): Int = runCatching {
             val c = Class.forName("android.os.SystemProperties")
             (c.getMethod("get", String::class.java, String::class.java).invoke(null, key, "0") as String).trim().toInt()
         }.getOrDefault(0)
