@@ -748,6 +748,19 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // asset, so its checksum does not move; it must be attached to this tag too,
 // because `essence2Base` is the tag both URLs are read from.
 // ---------------------------------------------------------------------------
+// ★ ROLLED 2026-09-26 ONTO essence2-v1.14.0 (package tag v2.17.0) — ESSENCE 2 FRAMES COME PACED, WITH ONE END PER REPLY,
+// AND EVERY BEAT NAMES ITS INSTALL. Through 2.16.0 Essence2Kit's pull() handed out the engine's idle frames as
+// fast as it was called (~405/s on an M4) and never a nil after a reply, so every app had to hand-pace a loop.
+// Essence2Kit now paces pull()/idle(into:)/pullFrame()/nextFrame()/frames() to the 25 fps frame clock, anchors
+// each reply at its first speech frame, drops a frame that would be shown a full frame late, and can follow the
+// app's audio device (frames(audioClock:)); events() reports .replyStarted/.replyEnded exactly once per reply;
+// flushTail() ends a reply now. It needs the two additive C calls essence2-v1.14.0 exports
+// (be_essence2_end_utterance, be_essence2_last_frame_kind). The engine's meter also sends a per-install UUIDv4
+// (Application Support/bitHuman/install_id) instead of "" (bithuman-models #1473 @ 3485848d2, released as
+// essence2-apple-v1.14.0 and re-hosted here byte-for-byte by publish-essence2-apple.yml: libessence2.xcframework.zip
+// sha256 00f4c6127346497c…, its checksum below; resources 151e5228…). No MLX, as since v1.13.0. onnxruntime is carried
+// forward byte-identical again.
+// ---------------------------------------------------------------------------
 // ★ ROLLED 2026-09-25 ONTO essence2-v1.13.0 (package tag v2.16.0) — AN APP CAN LINK ITS OWN MLX BESIDE ESSENCE 2.
 // A customer's iPhone app that links mlx-swift (MLX, MLXNN) for its own models failed its final iOS
 // device link on duplicate MLX symbols: every essence2 release through v1.12.1 carried a dead copy of
@@ -812,7 +825,7 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // the 300 s grace refuses at 7,500 frames since the last ack and resumes on reconnect,
 // the outage claimed as accrued. iPhone 15 floor series on these bytes: see the
 // release notes. onnxruntime is carried forward byte-identical again.
-let essence2Tag = "essence2-v1.13.0"
+let essence2Tag = "essence2-v1.14.0"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -982,7 +995,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "ada8bbb0ecdfa71766e4e34e051448e609a6def2ea2938f61925dbf093989016"
+            checksum: "00f4c6127346497c7ee1cd98a5137466d0920f346646504bf9a8c40583dd7f96"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
