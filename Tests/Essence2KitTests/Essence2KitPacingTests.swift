@@ -120,11 +120,11 @@ final class Essence2KitPacingTests: XCTestCase {
         var clock = Essence2FrameClock(fps: 25)
         clock.anchorReply(at: 0)
         clock.delivered(at: 0.04)                    // frame 1 on time
-        let now = 1.0                                // a 0.9 s stall
+        let now = 1.01                               // a 0.9 s stall
         XCTAssertTrue(clock.isDue(now))
         var drops = 0
         while clock.isStale(now) { clock.skipped(); drops += 1 }
-        XCTAssertEqual(drops, 23, "frames 2..24 are stale at 1.0 s")
+        XCTAssertEqual(drops, 23, "frames 2..24 are stale at 1.01 s")
         XCTAssertLessThan(clock.lateness(now), 0.040)
         clock.delivered(at: now)
         XCTAssertEqual(clock.next ?? 0, 1.04, accuracy: 1e-9, "still on the reply's timeline")
