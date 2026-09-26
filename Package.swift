@@ -1013,6 +1013,13 @@ let package = Package(
             dependencies: ["libessence2", "onnxruntime", "UnifiedModelHeaderBinary", "Essence2LinkSettings"],
             path: "Sources/Essence2Kit"
         ),
+        // The frame clock and reply boundaries of Essence2Kit (2.17.0), plus a link-time proof
+        // that the pinned libessence2 exports the calls Essence2Kit makes.
+        .testTarget(
+            name: "Essence2KitTests",
+            dependencies: ["Essence2Kit"],
+            path: "Tests/Essence2KitTests"
+        ),
         .binaryTarget(
             name: "onnxruntime",
             url: "\(essence2Base)/onnxruntime.xcframework.zip",
