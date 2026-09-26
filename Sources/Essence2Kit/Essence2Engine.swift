@@ -116,11 +116,14 @@ public final class Essence2Engine: @unchecked Sendable {
     }
 
     /// Current frame geometry (it follows the identity's canvas).
-    public var width: Int { dims().w }
-    public var height: Int { dims().h }
+    public var width: Int { lock.lock(); defer { lock.unlock() }; return dimsLocked().w }
+    public var height: Int { lock.lock(); defer { lock.unlock() }; return dimsLocked().h }
 
     /// True once the engine can turn audio into speech frames.
-    public var isReady: Bool { be_essence2_is_ready(handle) == 1 }
+    public var isReady: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return !closed && be_essence2_is_ready(handle) == 1
+    }
 
     /// While metering refuses THIS session (its last pull or idle returned -3): the engine's
     /// sentence (`be_essence2_last_refusal`, essence2-v1.12.0+). nil while frames flow.
@@ -140,7 +143,7 @@ public final class Essence2Engine: @unchecked Sendable {
     /// The pull buffer is sized for the full canvas, which `be_essence2_get_info` reports as
     /// soon as `create` returns (a frame smaller than the canvas is read by its byte count).
     private func fitBuffer() {
-        let d = dims()
+        let d = dimsLocked()
         let need = max(d.w * d.h * 3, 1)
         if buffer.count < need { buffer = [UInt8](repeating: 0, count: need) }
     }
@@ -409,7 +412,7 @@ public final class Essence2Engine: @unchecked Sendable {
             dropped += 1
             n = next
         }
-        let d = dims()
+        let d = dimsLocked()
         let index = handedOut
         handedOut += 1
         return (Int(n), d.w, d.h, kind, ends, index, audioTime, events)
@@ -453,6 +456,8 @@ public final class Essence2Engine: @unchecked Sendable {
     /// Set when this engine's own runtime failed and it stopped rather than hand back idle
     /// frames forever (`be_essence2_render_status`); nil while it is healthy.
     public var runtimeFailure: String? {
+        lock.lock(); defer { lock.unlock() }
+        guard !closed else { return nil }
         var buf = [CChar](repeating: 0, count: 512)
         var failures: Int64 = 0
         guard be_essence2_render_status(handle, &buf, Int32(buf.count), &failures) != 0 else { return nil }
@@ -463,11 +468,18 @@ public final class Essence2Engine: @unchecked Sendable {
     /// Before the process exits: let every engine's last beat leave the machine.
     public static func quiesceAll(timeoutMs: Int32 = 5_000) { _ = be_essence2_quiesce_all(timeoutMs) }
 
-    private func dims() -> (w: Int, h: Int) {
+    /// The engine's frame size. Caller holds `lock` (or is `init`). ★After `shutdown()` the handle
+    /// is released, so the last size read is returned instead of asking a freed engine (2.17.1:
+    /// until then `width`/`height`/`isReady`/`runtimeFailure` after `shutdown()` read freed memory
+    /// and could crash the app).
+    private func dimsLocked() -> (w: Int, h: Int) {
+        guard !closed else { return lastDims }
         var w: Int32 = 0, h: Int32 = 0
         be_essence2_get_info(handle, &w, &h)
-        return (Int(w), Int(h))
+        lastDims = (Int(w), Int(h))
+        return lastDims
     }
+    private var lastDims: (w: Int, h: Int) = (0, 0)
 
     /// A NUL-terminated C buffer as UTF-8 text.
     static func text(_ buf: [CChar]) -> String {
