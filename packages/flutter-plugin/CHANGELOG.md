@@ -1,3 +1,21 @@
+## Unreleased (2.6.19) — Android: Essence 2 frames reach the screen without a CPU copy
+
+Waits for `ai.bithuman:essence2-android` 0.8.0 on Maven Central (the release pair) and for 2.6.18.
+
+* **Android:** `ai.bithuman:essence2-android` 0.6.0 -> **0.8.0**, and the Essence 2 path uses the SDK's
+  zero-copy delivery: the GPU composes each frame into a hardware buffer (32 of them, the SDK's
+  maximum from 0.8.0), the player keeps it in its ring as a hardware `Bitmap`, and the texture is drawn
+  with a hardware canvas. Before, every frame was read back from the GPU, copied into a `ByteBuffer`,
+  copied into a `Bitmap` and blitted by the CPU (three 8.3 MB copies at 1920x1080, 25 times a second).
+  Measured on a Galaxy S25+ (Essence 2, 1920x1080, four scripted replies, two runs per arm, the same
+  engine bytes with and without it): process CPU **1.65-1.73 cores vs 1.84-1.85**, GPU busy
+  26.7-27.1 % vs 23.4-23.6 %, delivered 25 fps while talking in every run, presenter backlog
+  (`coalesced`) 18-27 vs 46, stale 0 in all runs. Same pixels.
+  A device without the SDK's GPU compositor keeps the copy path and logs why.
+  Debuggable host apps can force the copy path with `adb shell setprop debug.bh.e2.copy 1` for A/B runs.
+* **Android:** a failed load now logs the exception's own message. `android.util.Log` prints no stack
+  trace when the cause is an `UnknownHostException`, so a failed download used to log only
+  `load failed`.
 ## 2.6.18 — 2026-09-26 — iOS/macOS: the Essence 2 engine names its install on every usage report
 
 Tag `flutter-plugin-v2.6.18`.

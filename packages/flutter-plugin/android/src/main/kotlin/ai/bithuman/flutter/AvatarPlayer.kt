@@ -201,8 +201,25 @@ class AvatarPlayer(
     // units ahead of the writer plus the device buffer ahead of the presenter, so the
     // ring is deeper than both together; the check at pull time counts any violation
     // rather than assuming there is none.
-    private val speechFrames = Array(RING) { avatar.newFrameBitmap() }
+    //
+    // ★ZERO-COPY (2.6.19): with [AvatarEngine.hardwareFrames] a slot holds the ENGINE's frame
+    // instead of a copy of it — a hardware Bitmap over the GPU buffer it was composed into — and
+    // the frame goes back to the engine when the producer comes round to the slot again, the same
+    // moment the copy path would overwrite it. The ring rule above is what makes that safe: a
+    // slot is reused only after its unit was presented (`ringOverrun` counts any exception).
+    private val hw = avatar.hardwareFrames
+    private val speechFrames: Array<Bitmap> = Array(RING) {
+        if (hw) Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888) else avatar.newFrameBitmap()
+    }
+    private val slotHw = arrayOfNulls<HwFrame>(RING)
     private val slotSeq = LongArray(RING)
+
+    /** Puts the engine's frame [fr] in [slot], handing back the one it held (presented by now). */
+    private fun install(slot: Int, fr: HwFrame) {
+        slotHw[slot]?.release()
+        slotHw[slot] = fr
+        speechFrames[slot] = fr.bitmap
+    }
     @Volatile private var presentedSeq = 0L
     private var admittedSeq = 0L
     private val silence = ByteArray(BYTES_PER_FRAME)
@@ -422,7 +439,8 @@ class AvatarPlayer(
             if (heldFrom < 0 && !pending) {
                 if (slotSeq[slot] > presentedSeq) nRingOverrun++
                 val t0 = System.nanoTime()
-                val f = avatar.pull(speechFrames[slot])
+                val f = if (hw) avatar.pullSlot()?.let { install(slot, it); it.at } ?: -1L
+                        else avatar.pull(speechFrames[slot])
                 val ms = (System.nanoTime() - t0) / 1_000_000L
                 pullCalls++; pullNanos += System.nanoTime() - t0
                 if (ms > pullMaxMs) pullMaxMs = ms
@@ -565,7 +583,8 @@ class AvatarPlayer(
             // and no second set of bitmaps — decoded by the SDK straight into the slot.
             if (slotSeq[slot] > presentedSeq) nRingOverrun++
             where = "idle-decode"
-            val idx = idleLoop.next(speechFrames[slot])
+            val idx = if (hw) idleLoop.nextSlot()?.let { install(slot, it); it.index } ?: -1
+                      else idleLoop.next(speechFrames[slot])
             if (idx < 0) { nIdleStall++; Thread.sleep(2); continue }
             where = "idle-admit"
             nIdle++; stats.idleUnits = nIdle
@@ -583,6 +602,8 @@ class AvatarPlayer(
             if (idx == 0 && nIdle > 1)
                 Log.i("bhav", "IDLE wrap ${idleLoop.wraps}: frame ${idleLoop.frameCount - 1} -> 0 (clip ${idleLoop.frameCount} frames, idle units=$nIdle)")
         }
+        // The engine's frames go back to it: nothing will present them now.
+        for (i in slotHw.indices) { slotHw[i]?.release(); slotHw[i] = null }
         // ★ THE PLAYER DOES NOT CLOSE THE ENGINE IT DID NOT CREATE. It used to, here,
         // and it cost the demos lane a crash on the first re-adoption: in an app that
         // HOLDS one avatar across several players (hide/show, idle hold), stopping a
