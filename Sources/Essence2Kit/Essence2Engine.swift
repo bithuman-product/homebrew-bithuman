@@ -12,9 +12,9 @@
 //   let engine = try await Essence2Engine.create(identity: identityURL)
 //   engine.feed(samples16kHz)                 // Float, mono, 16 kHz
 //   engine.flushTail()                        // that was the whole reply
-//   for await f in engine.frames(audioClock: { player.playedSeconds }) {   // 25 per second
+//   for await f in engine.frames(following: player) {   // 25 per second, on the player's audio
 //       show(f.bgr, f.width, f.height)        // B, G, R bytes
-//       if f.audioTime == 0 { player.play(reply) }   // the reply's first speech frame: start its audio
+//       if f.audioTime == 0 { player.stop(); player.scheduleBuffer(reply); player.play() }
 //       if f.endsReply { break }              // the reply is over; idle frames follow
 //   }
 //   engine.interrupt()                        // barge-in: rides on the current frame
@@ -32,6 +32,7 @@
 
 import Foundation
 import CryptoKit
+import AVFoundation
 import Essence2
 
 // MARK: - Credential
@@ -478,6 +479,31 @@ public final class Essence2Engine: @unchecked Sendable {
         let n = be_essence2_last_refusal(&buf, Int32(buf.count))
         guard n > 0 else { return nil }
         return Essence2Engine.text(buf)
+    }
+}
+
+// MARK: - Following an AVAudioPlayerNode
+
+extension Essence2Engine {
+    /// ``frames(audioClock:)`` following an `AVAudioPlayerNode` that plays each reply FROM THE
+    /// START when the reply's first speech frame arrives (`audioTime == 0`):
+    /// `player.stop(); player.scheduleBuffer(reply); player.play()`. The reply's frames are then
+    /// handed out as the player plays their audio, so lips follow the voice whatever the output's
+    /// start latency (measured on a Mac: ~50-60 ms that a plain 25 fps loop shows too early).
+    public func frames(following player: AVAudioPlayerNode) -> AsyncStream<Essence2Frame> {
+        let clock = Essence2PlayerClock(player)
+        return frames(audioClock: { clock.played() })
+    }
+}
+
+/// Seconds of the current reply an `AVAudioPlayerNode` has played, from its own render timeline.
+final class Essence2PlayerClock: @unchecked Sendable {
+    private let player: AVAudioPlayerNode
+    init(_ player: AVAudioPlayerNode) { self.player = player }
+    func played() -> Double? {
+        guard player.isPlaying, let nt = player.lastRenderTime, nt.isSampleTimeValid,
+              let pt = player.playerTime(forNodeTime: nt), pt.sampleRate > 0 else { return nil }
+        return max(0, Double(pt.sampleTime) / pt.sampleRate)
     }
 }
 
