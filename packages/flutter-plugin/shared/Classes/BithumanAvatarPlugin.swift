@@ -26,6 +26,7 @@ import FlutterMacOS
 import AVFoundation   // AVCaptureDevice — mic-permission gate (authorizationStatus / requestAccess / Settings deep-link)
 #endif
 import Accelerate
+import Expression2   // the published binary: Expression2Engine statics, Expression2Container
 import CoreVideo
 import Foundation
 

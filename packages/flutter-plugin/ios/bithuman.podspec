@@ -88,7 +88,7 @@ Pod::Spec.new do |s|
   # its C ABI header (Engines/**), folded into THIS pod's own umbrella module so
   # the staged engine Swift calls be_essence2_* with no `import` (INVARIANT #1's
   # mechanism, generalized to N engines).
-  s.source_files        = 'Classes/**/*.{swift,h,m}', 'Engines/**/Classes/**/*.swift', 'Engines/**/include/**/*.h'
+  s.source_files        = 'Classes/**/*.{swift,h,m}', 'Engines/**/include/**/*.h'
   s.public_header_files = 'Classes/**/*.h', 'Engines/**/include/**/*.h'
   # Assets/embody — the per-agent embody CoreML models (the A42 demo bundle).
   # Expression2Runtime probes Bundle subdirectory "embody". Populated by
@@ -149,7 +149,15 @@ Pod::Spec.new do |s|
   converse_fw = File.directory?(File.join(__dir__, 'Frameworks/libconverse.xcframework'))
   module_map_xcframeworks = converse_fw ? ['Frameworks/libconverse.xcframework'] : []
   raise "INVARIANT #1 violated: at most 1 module-map xcframework (libconverse), got #{module_map_xcframeworks.length}: #{module_map_xcframeworks.inspect}" unless module_map_xcframeworks.length <= 1
-  s.vendored_frameworks = ['Frameworks/onnxruntime.xcframework'] + module_map_xcframeworks
+  # ★THE EXPRESSION 2 ENGINE IS THE PUBLISHED BINARY (2.6.19). Three Swift binary frameworks — not
+  # Clang module-map xcframeworks, so INVARIANT #1 (at most one of those: libconverse) is untouched:
+  # Expression2, BithumanEngineProtocol and UnifiedModelHeader, exactly the Swift package's
+  # `Expression2` product, staged by scripts/bootstrap.sh. UnifiedModelHeader also satisfies the
+  # symbols libessence2.a references.
+  x2_frameworks = %w[Expression2 BithumanEngineProtocol UnifiedModelHeader].map { |m| "Frameworks/#{m}.xcframework" }
+  missing_x2 = x2_frameworks.reject { |f| File.directory?(File.join(__dir__, f)) }
+  raise "run scripts/bootstrap.sh first: #{missing_x2.inspect} not staged" unless missing_x2.empty?
+  s.vendored_frameworks = ['Frameworks/onnxruntime.xcframework'] + module_map_xcframeworks + x2_frameworks
   # Each staged engine's native core = a plain static lib (NEVER a 2nd module-map
   # xcframework). Auto-picked from Engines/*/Vendor/*.a (design §2.2's Dir.glob).
   # libessence2 (OPTIONAL on-device Essence2 / essence2 — the be_essence2_* C ABI

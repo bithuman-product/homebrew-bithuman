@@ -76,7 +76,7 @@ Pod::Spec.new do |s|
   # umbrella module (DEFINES_MODULE + public_header_files), so the staged engine
   # Swift calls be_essence2_* with no `import` — INVARIANT #1's mechanism, now
   # generalized from one optional engine to N.
-  s.source_files        = 'Classes/**/*.{swift,h,m}', 'Engines/**/Classes/**/*.swift', 'Engines/**/include/**/*.h'
+  s.source_files        = 'Classes/**/*.{swift,h,m}', 'Engines/**/include/**/*.h'
   s.public_header_files = 'Classes/**/*.h', 'Engines/**/include/**/*.h'
   # Assets/embody — the per-agent embody CoreML models (the A42 demo bundle).
   # Expression2Runtime probes Bundle subdirectory "embody". Populated by
@@ -146,7 +146,11 @@ Pod::Spec.new do |s|
   converse_fw = File.directory?(File.join(__dir__, 'Frameworks/libconverse.xcframework'))
   module_map_xcframeworks = converse_fw ? ['Frameworks/libconverse.xcframework'] : []
   raise "INVARIANT #1 violated: at most 1 module-map xcframework (libconverse), got #{module_map_xcframeworks.length}: #{module_map_xcframeworks.inspect}" unless module_map_xcframeworks.length <= 1
-  s.vendored_frameworks = module_map_xcframeworks unless module_map_xcframeworks.empty?
+  # ★THE EXPRESSION 2 ENGINE IS THE PUBLISHED BINARY (2.6.19) — see the iOS podspec.
+  x2_frameworks = %w[Expression2 BithumanEngineProtocol UnifiedModelHeader].map { |m| "Frameworks/#{m}.xcframework" }
+  missing_x2 = x2_frameworks.reject { |f| File.directory?(File.join(__dir__, f)) }
+  raise "run scripts/bootstrap.sh first: #{missing_x2.inspect} not staged" unless missing_x2.empty?
+  s.vendored_frameworks = module_map_xcframeworks + x2_frameworks
   # Each staged engine's native core = a plain static lib (NEVER a 2nd module-map
   # xcframework). Auto-picked from Engines/*/Vendor/*.a (design §2.2's Dir.glob).
   s.vendored_libraries  = engine_libs.map { |p| p.sub(__dir__ + '/', '') } if essence2_lib
