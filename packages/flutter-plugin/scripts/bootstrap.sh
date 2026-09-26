@@ -125,6 +125,9 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # Expression2Download). The essence-2 adapter sources are unchanged since essence2-apple-v1.12.1 (8bae6d8f3).
 BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-fd37bdfb78ceffa8f1a64233e0215501f77ca169}"
 
+# ★MOVED 2026-09-26 to essence2-v1.14.0 (bithuman-models #1473, essence2-apple-v1.14.0 @ 3485848d2): the engine's
+# meter names the install (a UUIDv4 in Application Support, not ""), and the C interface gains two ADDITIVE calls
+# (be_essence2_end_utterance, be_essence2_last_frame_kind) the adapter does not need, so BITHUMAN_MODELS_REF stays.
 # ★MOVED 2026-09-25 to essence2-v1.13.0 (bithuman-models #1461, essence2-apple-v1.13.0 @ 2cc2a334f): the
 # engine carries NO MLX, so an app with its own MLX pod links beside it under CocoaPods' -ObjC; the resources
 # archive has no .bundle any more (the *.bundle glob in the podspecs is empty, correctly). The C interface is
@@ -133,10 +136,10 @@ BITHUMAN_MODELS_REF="${BITHUMAN_MODELS_REF:-fd37bdfb78ceffa8f1a64233e0215501f77c
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
 # `libessence2.xcframework.zip` binaryTarget checksum and the release's own
 # resources sidecar. Passed to the engine SDK bootstrap explicitly below.
-LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.13.0}"
-LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-ada8bbb0ecdfa71766e4e34e051448e609a6def2ea2938f61925dbf093989016}"
-LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.13.0}"
-LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-11843e96d01cc673618c0b3da68aacad85c9704bc5369efe383e4892e5a19928}"
+LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.14.0}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-00f4c6127346497c7ee1cd98a5137466d0920f346646504bf9a8c40583dd7f96}"
+LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.14.0}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-151e52288aa651052db745b20efbd8c6f66a443dc5fca59aa6b41d150b790faa}"
 
 # The UnifiedModelHeader module, as a plain static .a per slice.
 #

@@ -1,3 +1,12 @@
+## 2.6.18 — 2026-09-26 — iOS/macOS: the Essence 2 engine names its install on every usage report
+
+Tag `flutter-plugin-v2.6.18`.
+
+* **iOS/macOS:** the Essence 2 engine moves to `essence2-v1.14.0` (libessence2 `00f4c612…`, resources
+  `151e5228…`). Its usage reports carry a per-install id (a random UUID kept in the app's Application
+  Support directory) instead of an empty one; set `BITHUMAN_INSTALL_ID` to choose it yourself. The engine's
+  C interface gains two additive calls; the plugin's adapter is unchanged (bithuman-models #1473).
+
 ## 2.6.17 — 2026-09-25 — iOS/macOS: an app can link its own MLX beside the Essence 2 engine
 
 Tag `flutter-plugin-v2.6.17`.
