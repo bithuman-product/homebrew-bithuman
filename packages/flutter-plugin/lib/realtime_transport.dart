@@ -611,7 +611,23 @@ RealtimeTransport pickTransport({
         vadThreshold: vadThreshold,
         systemPrompt: systemPrompt,
       );
-    case 'webrtc' when apiKey.startsWith('sk-') || apiKey.startsWith('ek_'):
+    case 'webrtc':
+      // ★THE RELAY (2.6.20): WebRTC dials OpenAI's own calls endpoint, which needs an
+      // OpenAI credential. With a bitHuman API secret the session goes to bitHuman's
+      // relay over WebSocket instead (the relay speaks WebSocket only).
+      if (!(apiKey.startsWith('sk-') || apiKey.startsWith('ek_'))) {
+        try {
+          avatar.nativeLog('[transport] webrtc needs an OpenAI key (sk-…); a bitHuman secret uses the relay over WebSocket');
+        } catch (_) {}
+        return WebSocketTransport(
+          apiKey: apiKey,
+          avatar: avatar,
+          model: model,
+          voice: voice,
+          systemPrompt: systemPrompt,
+          vadThreshold: vadThreshold,
+        );
+      }
       return WebRTCTransport(
         apiKey: apiKey,
         avatar: avatar,
@@ -620,16 +636,8 @@ RealtimeTransport pickTransport({
         systemPrompt: systemPrompt,
         vadThreshold: vadThreshold,
       );
-    // ★THE RELAY (2.6.20): WebRTC dials OpenAI's own calls endpoint, which needs an
-    // OpenAI credential. With a bitHuman API secret the session goes to bitHuman's
-    // relay over WebSocket instead (the relay speaks WebSocket only).
     case 'websocket':
     default:
-      if (d.id == 'webrtc') {
-        try {
-          avatar.nativeLog('[transport] webrtc needs an OpenAI key (sk-…); a bitHuman secret uses the relay over WebSocket');
-        } catch (_) {}
-      }
       return WebSocketTransport(
         apiKey: apiKey,
         avatar: avatar,
