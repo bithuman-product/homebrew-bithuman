@@ -1,3 +1,23 @@
+## 2.6.20 — 2026-09-27 — Realtime voice through bitHuman's relay; iOS/macOS link the published engines
+
+Tag `flutter-plugin-v2.6.20`.
+
+* **Realtime voice:** `BithumanRealtimeSession(apiKey: …)` now takes your **bitHuman API secret** and
+  dials bitHuman's realtime relay (`wss://api.bithuman.ai/v1/realtime`). The relay speaks the OpenAI
+  Realtime protocol and bills the conversation to your account (10 credits per minute, the avatar
+  included); the plugin sends no meter of its own. There is no `ek_…` token to mint any more:
+  `RealtimeService.mintEphemeralToken` is deprecated and the mint endpoint is being retired. An OpenAI
+  API key (`sk-…`) still dials OpenAI directly. A refusal a retry cannot fix (a rejected secret, no
+  credits, a plan without realtime, the session time limit) stops the session once and is reported
+  on the new `errorStream` / `lastError`; it no longer loops through reconnects. The WebRTC opt-in
+  needs an OpenAI key; with a bitHuman secret it uses the relay.
+* **iOS/macOS:** the Expression 2 engine is linked as the published Swift package binaries
+  (`Expression2`, `BithumanEngineProtocol`, `UnifiedModelHeader` from tag `v2.18.0`, sha256-checked);
+  the build no longer fetches engine source from anywhere. Essence 2 moves to `essence2-v1.14.2`
+  (memory stays flat in long sessions that feed audio without pauses).
+* **Android:** `ai.bithuman:essence2-android` 0.8.0 -> **0.8.1** (the same long-session memory fix).
+  `expression2-android` stays 0.5.1.
+
 ## 2.6.19 — 2026-09-26 — Android: Essence 2 frames reach the screen without a CPU copy; both engines fixed billing
 
 Tag `flutter-plugin-v2.6.19`.

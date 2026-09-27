@@ -149,7 +149,7 @@ Pod::Spec.new do |s|
   converse_fw = File.directory?(File.join(__dir__, 'Frameworks/libconverse.xcframework'))
   module_map_xcframeworks = converse_fw ? ['Frameworks/libconverse.xcframework'] : []
   raise "INVARIANT #1 violated: at most 1 module-map xcframework (libconverse), got #{module_map_xcframeworks.length}: #{module_map_xcframeworks.inspect}" unless module_map_xcframeworks.length <= 1
-  # ★THE EXPRESSION 2 ENGINE IS THE PUBLISHED BINARY (2.6.19). Three Swift binary frameworks — not
+  # ★THE EXPRESSION 2 ENGINE IS THE PUBLISHED BINARY (2.6.20). Three Swift binary frameworks — not
   # Clang module-map xcframeworks, so INVARIANT #1 (at most one of those: libconverse) is untouched:
   # Expression2, BithumanEngineProtocol and UnifiedModelHeader, exactly the Swift package's
   # `Expression2` product, staged by scripts/bootstrap.sh. UnifiedModelHeader also satisfies the

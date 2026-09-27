@@ -98,8 +98,8 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # Env overrides stay honoured for development; the committed values are what a
 # tag ships.
 
-# (Until 2.6.18 a BITHUMAN_MODELS_REF pinned the private repository revision whose engine
-# ADAPTER SOURCE this pod compiled. Since 2.6.19 no engine source is fetched: see below.)
+# (Through 2.6.19 a BITHUMAN_MODELS_REF pinned the private repository revision whose engine
+# ADAPTER SOURCE this pod compiled. Since 2.6.20 no engine source is fetched: see below.)
 
 # ★MOVED 2026-09-26 to essence2-v1.14.2 (bithuman-models #1542 @ 2a33fd99d): a long session's memory stays flat
 # (the audio-to-motion stage keeps a window, not the whole utterance). The C interface is unchanged.
@@ -147,18 +147,18 @@ LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-ec6e959a82d1cca5e7
 # UnifiedModelHeader bytes — nothing compared them. scripts/check-apple-engine-pin.sh
 # now does (A6): these two values must equal `expression2Tag` and the
 # UnifiedModelHeaderBinary checksum in Package.swift.
-# ★THE EXPRESSION 2 ENGINE IS LINKED AS THE PUBLISHED BINARY (2026-09-26). Until 2.6.18 this script
+# ★THE EXPRESSION 2 ENGINE IS LINKED AS THE PUBLISHED BINARY (2.6.20, 2026-09-27). Through 2.6.19 this script
 # cloned the PRIVATE bithuman-models repo for the engine adapters' Swift source, so the iOS/macOS half
 # of every published plugin tag failed with a 404 for anyone outside the company. The plugin now links
 # the three xcframeworks the Swift package's `Expression2` product ships (Expression2,
 # BithumanEngineProtocol, UnifiedModelHeader), from the same tap release and checked against the same
 # checksums Package.swift pins; the Essence 2 adapter is the plugin's own (shared/Classes). No engine
 # source is fetched, from anywhere. X2_XCF_DIR=<dir holding the three zips> stages a candidate build.
-EXPRESSION2_RELEASE="${EXPRESSION2_RELEASE:-v2.8.0}"
-EXPRESSION2_SHA256="${EXPRESSION2_SHA256:-__X2_SHA__}"
-BEP_SHA256="${BEP_SHA256:-__BEP_SHA__}"
-UMH_RELEASE="${UMH_RELEASE:-v2.8.0}"
-UMH_SHA256="${UMH_SHA256:-__UMH_SHA__}"
+EXPRESSION2_RELEASE="${EXPRESSION2_RELEASE:-v2.18.0}"
+EXPRESSION2_SHA256="${EXPRESSION2_SHA256:-83c3a87179e432f440bef78a0d576e060609482b2081e9a04243e3ed28c4881a}"
+BEP_SHA256="${BEP_SHA256:-cd3b31f19897c2de4fb49689139cff93e76eb403f4e3a9d3f7b7842f23a30f35}"
+UMH_RELEASE="${UMH_RELEASE:-v2.18.0}"
+UMH_SHA256="${UMH_SHA256:-e65594ff447fa59aa6cc123eb2c478c85bd4f580cd9fbf455506558bec4843dd}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so

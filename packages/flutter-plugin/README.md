@@ -55,6 +55,11 @@ podspec **asserts** this — it `raise`s the pod build if any staged engine ever
 vendors an `.xcframework` instead of a `.a`, or if there is ever more than one
 module-map xcframework. See `ARCHITECTURE.md` for the full mechanism.
 
+**Revised in 2.6.20:** the Expression 2 engine is linked as the published Swift binary
+frameworks (`Expression2`, `BithumanEngineProtocol`, `UnifiedModelHeader`), which are Swift
+modules, not Clang module maps, so they do not take `libconverse`'s slot. The pod compiles no
+engine source, and no engine source is fetched from anywhere.
+
 A second class, `BithumanRealtimeSession`, wires the avatar to OpenAI's Realtime API for
 full-duplex voice chat. The plugin owns a single VP-IO `AVAudioEngine` graph: Apple's Voice
 Processing I/O subtracts the bot's voice from the mic input (no self-talk feedback), the

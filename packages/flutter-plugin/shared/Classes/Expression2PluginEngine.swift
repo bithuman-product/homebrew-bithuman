@@ -1,6 +1,6 @@
 // Expression2PluginEngine.swift — the Expression 2 engine as this plugin's BithumanEngine.
 //
-// Since 2.6.19 the plugin LINKS the published Expression2 binary (the same Expression2,
+// Since 2.6.20 the plugin LINKS the published Expression2 binary (the same Expression2,
 // BithumanEngineProtocol and UnifiedModelHeader xcframeworks the Swift package's `Expression2`
 // product vends; scripts/bootstrap.sh fetches them sha256-checked) instead of compiling engine
 // source. The binary's Expression2Engine conforms to the Swift package's BithumanEngine protocol;
