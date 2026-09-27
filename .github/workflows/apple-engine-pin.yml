@@ -68,12 +68,15 @@ jobs:
             echo "  refused: $1"
             restore
           }
-          arm "BITHUMAN_MODELS_REF becomes a branch name" \
-              's|BITHUMAN_MODELS_REF:-[0-9a-f]\{40\}|BITHUMAN_MODELS_REF:-main|'
-          arm "the source pin is deleted" \
-              '/^BITHUMAN_MODELS_REF=/d'
-          arm "a locate_engine_sdk call site drops the ref" \
-              's| "\$BITHUMAN_MODELS_REF"; then|; then|'
+          # A1 NO-SOURCE (2.6.20): the pod links the published engine binaries; a bootstrap that
+          # clones the private engine repo again is refused.
+          arm "bootstrap clones the private engine repository again" \
+              's|^fetch_tap_zip() {$|git clone --depth 1 https://github.com/bithuman-product/bithuman-models "$TMP/m"\nfetch_tap_zip() {|'
+          # A2 X2-AGREES: the pod's Expression 2 pins drift from Package.swift's.
+          arm "the pod stages an older Expression 2 release" \
+              's|EXPRESSION2_RELEASE:-v[0-9.]*|EXPRESSION2_RELEASE:-v2.7.0|'
+          arm "the Expression 2 digest is a different valid sha256" \
+              's|EXPRESSION2_SHA256:-[0-9a-f]\{64\}|EXPRESSION2_SHA256:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|'
           arm "the resources digest is deleted" \
               '/^LIBESSENCE2_RESOURCES_SHA256=/d'
           arm "the pod rolls back to the superseded essence2-v1.2.0" \
