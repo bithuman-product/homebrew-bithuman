@@ -171,8 +171,8 @@ LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-ec6e959a82d1cca5e7
 # UnifiedModelHeader bytes — nothing compared them. scripts/check-apple-engine-pin.sh
 # now does (A6): these two values must equal `expression2Tag` and the
 # UnifiedModelHeaderBinary checksum in Package.swift.
-UMH_RELEASE="${UMH_RELEASE:-v2.7.0}"
-UMH_SHA256="${UMH_SHA256:-8cd64a4a1539c336f752d594e77833cd178a8cd5e3bd1ff4d379751b378447db}"
+UMH_RELEASE="${UMH_RELEASE:-v2.18.0}"
+UMH_SHA256="${UMH_SHA256:-e65594ff447fa59aa6cc123eb2c478c85bd4f580cd9fbf455506558bec4843dd}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so
