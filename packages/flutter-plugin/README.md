@@ -6,6 +6,12 @@ widget + the method channel `ai.bithuman.avatar` + `RealtimeAudioIO`/`Converse*`
 (OpenAI Realtime + on-device brain) — and it **statically aggregates N avatar
 engine SDKs** under INVARIANT #1. macOS (Apple Silicon); iOS is cloud-only.
 
+**Apple platforms (2.6.20):** the pod needs **iOS 16.0** and **macOS 13.0** (Apple silicon). A new
+`flutter create` app targets lower, so raise both before `pod install`: `platform :ios, '16.0'` in
+`ios/Podfile`, `platform :osx, '13.0'` in `macos/Podfile`, and the Runner targets' deployment
+versions to match. Run `scripts/bootstrap.sh` once in the plugin checkout first: it fetches the
+published engines (sha256-checked) into the pod.
+
 > **This is Layer 2 of the `engine → sdk → app` architecture.** For the full,
 > canonical map — both engines, all of their serving tiers, the bootstrap chain,
 > the podspec mechanics, and the exact recipe to add a 3rd engine — read
