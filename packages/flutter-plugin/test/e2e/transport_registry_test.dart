@@ -138,8 +138,10 @@ void main() {
     setUp(() => host = RecordingVoiceHost());
     tearDown(() => host.close());
 
-    RealtimeTransport build({String? override}) => pickTransport(
-          apiKey: 'k',
+    // An OpenAI key: WebRTC dials OpenAI's own endpoint, so only an OpenAI
+    // credential may take it (2.6.20; a bitHuman secret goes to the relay).
+    RealtimeTransport build({String? override, String apiKey = 'sk-test'}) => pickTransport(
+          apiKey: apiKey,
           avatar: host, // ← not a BithumanAvatar: the factory never needed one
           model: 'gpt-realtime-mock',
           voice: 'shimmer',
@@ -159,6 +161,14 @@ void main() {
       expect(rtc, isA<WebRTCTransport>());
       expect(rtc.descriptor, same(kWebRtcTransport));
       await rtc.dispose();
+    });
+
+    test('the relay: a bitHuman secret never takes WebRTC (it needs an OpenAI key)',
+        () async {
+      final t = build(override: 'webrtc', apiKey: 'a-bithuman-api-secret');
+      expect(t, isA<WebSocketTransport>());
+      expect(host.log.last, contains('relay'));
+      await t.dispose();
     });
 
     test('canMute IS the record, not a copy of it', () async {

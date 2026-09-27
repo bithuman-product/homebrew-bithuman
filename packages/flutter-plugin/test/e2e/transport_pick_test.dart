@@ -55,7 +55,7 @@ void main() {
     String? override,
   }) {
     return pickTransport(
-      apiKey: 'k',
+      apiKey: 'sk-test', // an OpenAI key: the only credential WebRTC takes (2.6.20)
       avatar: avatar,
       model: 'gpt-realtime-mock',
       voice: 'shimmer',
