@@ -509,7 +509,7 @@ let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/release
 // and Essence2Kit's Essence2Download.identity(agentCode:) ask the door for ?slice=apple&abi_max=1 and
 // refuse bytes that miss its raw_sha256. The apple slice renders like the universal through this SDK's
 // own API (x2: frame-identical, 3/3; e2: the same members opened with the same bytes, 3/3).
-let expression2Tag = "v2.7.0"
+let expression2Tag = "v2.18.0"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 
@@ -994,17 +994,17 @@ let package = Package(
         .binaryTarget(
             name: "Expression2Binary",
             url: "\(expression2Base)/Expression2.xcframework.zip",
-            checksum: "d1a86576dd88eedbb86d3444bae72aadb173d96297ffe5ef4deb4c04308f5472"
+            checksum: "83c3a87179e432f440bef78a0d576e060609482b2081e9a04243e3ed28c4881a"
         ),
         .binaryTarget(
             name: "BithumanEngineProtocolBinary",
             url: "\(expression2Base)/BithumanEngineProtocol.xcframework.zip",
-            checksum: "383642736440b7e4d691212f82bfd035234260b76cc156d0c5bbf513d1b689c7"
+            checksum: "cd3b31f19897c2de4fb49689139cff93e76eb403f4e3a9d3f7b7842f23a30f35"
         ),
         .binaryTarget(
             name: "UnifiedModelHeaderBinary",
             url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
-            checksum: "8cd64a4a1539c336f752d594e77833cd178a8cd5e3bd1ff4d379751b378447db"
+            checksum: "e65594ff447fa59aa6cc123eb2c478c85bd4f580cd9fbf455506558bec4843dd"
         ),
         // The essence-2 engine itself. The target name matches the xcframework
         // inside the archive; the MODULES it vends are `CLibEssence2` and, since
