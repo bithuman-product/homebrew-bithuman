@@ -1,4 +1,4 @@
-// bithuman_realtime — OpenAI Realtime session wired to the bitHuman avatar.
+// bithuman_realtime — a realtime voice session (bitHuman's relay) wired to the bitHuman avatar.
 //
 // Audio I/O is owned by the plugin's native VP-IO graph (see
 // macos/Classes/RealtimeAudioIO.swift). This session is responsible for
@@ -8,9 +8,17 @@
 // at the same instant — A/V cannot drift, and Apple's VP-IO subtracts
 // the bot's voice from the mic so self-talk is impossible.
 //
+// ★THE RELAY (2.6.20, 2026-09-27). The session dials bitHuman's realtime relay,
+// wss://api.bithuman.ai/v1/realtime?model=…, with your bitHuman API SECRET. The relay
+// speaks the OpenAI Realtime protocol unchanged and bills the conversation to your
+// account server-side (active session time; the avatar is included). This plugin
+// sends no chat meter of its own. There is no `ek_…` mint any more: the mint endpoint
+// is retired. An OpenAI API key (`sk-…`) still dials OpenAI directly, billed by OpenAI.
+//
 // Wire format (per https://platform.openai.com/docs/guides/realtime):
-//   - Transport: wss://api.openai.com/v1/realtime?model=…
-//   - Auth: `Authorization: Bearer <api_key>` (GA — no Beta header)
+//   - Transport: wss://api.bithuman.ai/v1/realtime?model=… (relay), or
+//     wss://api.openai.com/v1/realtime?model=… with an OpenAI key
+//   - Auth: `Authorization: Bearer <credential>` (the relay also takes `api-secret:`)
 //   - Audio: PCM16 mono @ 24 kHz, base64-encoded inside JSON events
 //   - session.update uses the GA shape: top-level `type: 'realtime'`,
 //     `output_modalities`, nested `audio.input.*` / `audio.output.*`.
@@ -50,11 +58,19 @@ class BithumanRealtimeSession {
     _liveSystemPrompt = systemPrompt;
   }
 
-  /// The OpenAI Realtime credential: your OpenAI API key, or an `ek_…`
-  /// ephemeral token minted with your bitHuman API secret at
-  /// `POST /v1/realtime/ephemeral-token`. It is NOT your bitHuman API secret —
-  /// that goes to [BithumanAvatar.load] as `apiSecret:`.
+  /// The credential: your bitHuman API SECRET (the same one [BithumanAvatar.load]
+  /// takes). The session dials bitHuman's realtime relay with it and the
+  /// conversation is billed to your account. An OpenAI API key (`sk-…`) dials
+  /// OpenAI directly instead. The `ek_…` mint (`POST /v1/realtime/ephemeral-token`)
+  /// is retired: pass the secret itself.
   final String apiKey;
+
+  /// bitHuman's realtime relay (the OpenAI Realtime protocol, billed by bitHuman).
+  static const String relayEndpoint = 'wss://api.bithuman.ai/v1/realtime';
+
+  /// True when [apiKey] is an OpenAI credential (`sk-…`, or a leftover `ek_…`):
+  /// the session then dials OpenAI directly instead of the relay.
+  bool get usesOpenAIDirectly => apiKey.startsWith('sk-') || apiKey.startsWith('ek_');
   /// The platform surface this session drives — mic, speaker, echo canceller
   /// and (if it has one) a mouth. Declared as the PROTOCOL, never as the render
   /// class: `BithumanAvatar` conforms, and so does a test double with no engine
@@ -81,7 +97,9 @@ class BithumanRealtimeSession {
       debugEndpointOverride ??
       (_envEndpointOverride.isNotEmpty
           ? _envEndpointOverride
-          : 'wss://api.openai.com/v1/realtime?model=$model');
+          : usesOpenAIDirectly
+              ? 'wss://api.openai.com/v1/realtime?model=$model'
+              : '$relayEndpoint?model=${Uri.encodeQueryComponent(model)}');
 
   WebSocketChannel? _ws;
   StreamSubscription? _wsSub;
@@ -277,6 +295,39 @@ class BithumanRealtimeSession {
 
   final _status = StreamController<RealtimeStatus>.broadcast();
   Stream<RealtimeStatus> get statusStream => _status.stream;
+
+  /// Why the session stopped, when it stopped for a reason a retry cannot fix:
+  /// the relay refused the credential (`UNAUTHORIZED`, HTTP 401), the account has
+  /// no credits (`INSUFFICIENT_BALANCE`, 402), the plan does not include it
+  /// (`PLAN_REQUIRED` / `FORBIDDEN`, 403), or the session reached its time limit
+  /// (`SESSION_DURATION_LIMIT`). Emitted once, right before [RealtimeStatus.error];
+  /// the session does NOT reconnect after it.
+  final _errors = StreamController<RealtimeSessionError>.broadcast();
+  Stream<RealtimeSessionError> get errorStream => _errors.stream;
+  RealtimeSessionError? _terminalError;
+  RealtimeSessionError? get lastError => _terminalError;
+
+  // Codes the relay ends a session with (an `error` event, then close 1008) or
+  // refuses the handshake with. None of them heals on a retry.
+  static const Set<String> _terminalCodes = {
+    'UNAUTHORIZED', 'INSUFFICIENT_BALANCE', 'PLAN_REQUIRED', 'FORBIDDEN',
+    'SESSION_DURATION_LIMIT', 'MODEL_LOCKED', 'BAD_REQUEST',
+  };
+
+  void _terminal(String code, String message) {
+    if (_terminalError != null) return;
+    _terminalError = RealtimeSessionError(code, message);
+    // ignore: avoid_print
+    print('[realtime] stopped: $code — $message');
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _open = false;
+    _errors.add(_terminalError!);
+    _status.add(RealtimeStatus.error);
+    try {
+      _ws?.sink.close();
+    } catch (_) {}
+  }
 
   /// Streaming text of what the bot is saying — emitted from
   /// `response.audio_transcript.delta` events. Each event carries one
@@ -482,8 +533,17 @@ class BithumanRealtimeSession {
   }
 
   void _handleDone() {
+    final code = _ws?.closeCode;
     // ignore: avoid_print
-    print('[realtime] ws closed');
+    print('[realtime] ws closed${code == null ? '' : ' ($code ${_ws?.closeReason ?? ''})'}');
+    // 1008 = the relay ended the session on policy (no credits, time limit, forbidden);
+    // the `error` event before it usually named the code already.
+    if (code == 1008 && _terminalError == null) {
+      final why = _ws?.closeReason ?? '';
+      _terminal(why.isEmpty ? 'FORBIDDEN' : why, 'the realtime service ended the session');
+      return;
+    }
+    if (_terminalError != null) return;
     if (_open) {
       // Unsolicited drop — caller still wants the session up. Schedule
       // a reconnect; the status flip to `closed` is suppressed so the
@@ -902,6 +962,10 @@ class BithumanRealtimeSession {
         final err = evt['error'] as Map<String, dynamic>?;
         final code = (err?['code'] as String?) ?? '';
         final msg = (err?['message'] as String?) ?? '';
+        if (_terminalCodes.contains(code)) {
+          _terminal(code, msg);
+          break;
+        }
         // Soft / non-fatal server errors — log but DO NOT flip the UI
         // to "Connection error". Examples:
         //   - cancellation_failed: we tried to cancel when nothing
@@ -930,6 +994,17 @@ class BithumanRealtimeSession {
   void _handleError(Object e) {
     // ignore: avoid_print
     print('[realtime] ws error: $e');
+    // A refused handshake surfaces here as "… was not upgraded to websocket, HTTP
+    // status code: N". 400/401/402/403 are answers, not outages: stop, say why.
+    final m = RegExp(r'status code:? *(\d{3})').firstMatch(e.toString());
+    final http = m == null ? null : int.tryParse(m.group(1)!);
+    const refused = {
+      400: 'BAD_REQUEST', 401: 'UNAUTHORIZED', 402: 'INSUFFICIENT_BALANCE', 403: 'FORBIDDEN',
+    };
+    if (http != null && refused.containsKey(http)) {
+      _terminal(refused[http]!, 'the realtime service refused the session (HTTP $http)');
+      return;
+    }
     if (_open) {
       // Treat as a drop and reconnect — don't flip to .error yet, the
       // backoff schedule will surface .error itself if all retries
@@ -940,6 +1015,15 @@ class BithumanRealtimeSession {
     }
   }
 
+}
+
+/// Why a realtime session stopped for good (see [BithumanRealtimeSession.errorStream]).
+class RealtimeSessionError {
+  const RealtimeSessionError(this.code, this.message);
+  final String code;
+  final String message;
+  @override
+  String toString() => '$code: $message';
 }
 
 enum RealtimeStatus {
