@@ -322,6 +322,39 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     expect(fake.callCount('playSpeakerPCM'), frozen);
   });
+
+  // ★THE RELAY (2.6.20). The relay ends a session it will not continue with an
+  // `error` event and close 1008. That is an answer, not an outage: the session
+  // says why once and never reconnects.
+  test('relay: a terminal error stops the session, says why once, never reconnects',
+      () async {
+    final conn = await connect();
+    final before = statuses.length;
+    final errors = <RealtimeSessionError>[];
+    final sub = session.errorStream.listen(errors.add);
+    conn.send({
+      'type': 'error',
+      'error': {'code': 'INSUFFICIENT_BALANCE', 'message': 'no credits left'},
+    });
+    await conn.close(1008);
+    await _waitFor(() => errors.isNotEmpty);
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+    expect(errors.map((e) => e.code), ['INSUFFICIENT_BALANCE']);
+    expect(session.lastError?.code, 'INSUFFICIENT_BALANCE');
+    expect(statuses.last, RealtimeStatus.error);
+    expect(statuses.sublist(before).where((s) => s == RealtimeStatus.connecting), isEmpty,
+        reason: 'no reconnect after a terminal error');
+    await sub.cancel();
+  });
+
+  test('relay: a bitHuman secret dials the relay; an OpenAI key dials OpenAI', () {
+    BithumanRealtimeSession.debugEndpointOverride = null;
+    BithumanRealtimeSession mk(String key) => BithumanRealtimeSession(
+        apiKey: key, avatar: avatar, model: 'gpt-realtime-mini', vadThreshold: 0);
+    expect(mk('a-bithuman-api-secret').usesOpenAIDirectly, isFalse);
+    expect(mk('sk-openai-key').usesOpenAIDirectly, isTrue);
+    expect(BithumanRealtimeSession.relayEndpoint, 'wss://api.bithuman.ai/v1/realtime');
+  });
 }
 
 /// Poll [cond] (with real timers — these tests run on the live event loop)

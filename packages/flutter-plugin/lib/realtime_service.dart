@@ -95,6 +95,8 @@ class RealtimeService {
   /// account [apiSecret]. ONE bounded attempt (50 s); a dropped socket that is
   /// not a timeout is retried once. A timeout or any non-200 is raised — never
   /// retried, because the server being slow is exactly when a retry does harm.
+  @Deprecated('The ek_ mint is retired (the endpoint answers 410). Pass your bitHuman API '
+      'secret to BithumanRealtimeSession(apiKey:): the session dials bitHuman\'s realtime relay.')
   Future<EphemeralToken> mintEphemeralToken(String apiSecret, {String? model}) async {
     final uri = Uri.parse('$apiBase/v1/realtime/ephemeral-token');
 
