@@ -15,8 +15,8 @@ Tag `flutter-plugin-v2.6.20`.
   (`Expression2`, `BithumanEngineProtocol`, `UnifiedModelHeader` from tag `v2.18.0`, sha256-checked);
   the build no longer fetches engine source from anywhere. Essence 2 moves to `essence2-v1.14.2`
   (memory stays flat in long sessions that feed audio without pauses).
-* **Android:** `ai.bithuman:essence2-android` 0.8.0 -> **0.8.1** (the same long-session memory fix).
-  `expression2-android` stays 0.5.1.
+* **Android:** `ai.bithuman:essence2-android` 0.8.0 -> **0.8.1** (the same long-session memory fix) and
+  `ai.bithuman:expression2-android` 0.5.1 -> **0.5.2**.
 
 ## 2.6.19 — 2026-09-26 — Android: Essence 2 frames reach the screen without a CPU copy; both engines fixed billing
 

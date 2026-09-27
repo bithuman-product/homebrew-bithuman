@@ -79,7 +79,7 @@ dependencies {
     // 25 ms after); the frame count is unchanged. Store retries share one budget per store.
     // 0.5.1 (2026-09-26): each installation names itself on the meter; the meter talks only to
     // bitHuman hosts (an app-set endpoint elsewhere is ignored).
-    implementation 'ai.bithuman:expression2-android:0.5.1'
+    implementation 'ai.bithuman:expression2-android:0.5.2'
     // 0.5.10 (public on Central since 2026-09-16, lastUpdated 20260916205927): A BARGE-IN
     // NO LONGER REWINDS THE DRIVER VIDEO TO ITS FIRST FRAME. Interrupt the agent mid-reply
     // and the video behind the avatar used to snap back to the start of its clip — every
