@@ -146,7 +146,7 @@ Pod::Spec.new do |s|
   converse_fw = File.directory?(File.join(__dir__, 'Frameworks/libconverse.xcframework'))
   module_map_xcframeworks = converse_fw ? ['Frameworks/libconverse.xcframework'] : []
   raise "INVARIANT #1 violated: at most 1 module-map xcframework (libconverse), got #{module_map_xcframeworks.length}: #{module_map_xcframeworks.inspect}" unless module_map_xcframeworks.length <= 1
-  # ★THE EXPRESSION 2 ENGINE IS THE PUBLISHED BINARY (2.6.19) — see the iOS podspec.
+  # ★THE EXPRESSION 2 ENGINE IS THE PUBLISHED BINARY (2.6.20) — see the iOS podspec.
   x2_frameworks = %w[Expression2 BithumanEngineProtocol UnifiedModelHeader].map { |m| "Frameworks/#{m}.xcframework" }
   missing_x2 = x2_frameworks.reject { |f| File.directory?(File.join(__dir__, f)) }
   raise "run scripts/bootstrap.sh first: #{missing_x2.inspect} not staged" unless missing_x2.empty?

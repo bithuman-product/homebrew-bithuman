@@ -172,6 +172,17 @@ more `stage_<engine>` call.
 
 ### INVARIANT #1 — exactly one module-map xcframework per pod
 
+**Revised deliberately in 2.6.20 (2026-09-27, owner ruling: the engine's Swift source is
+proprietary and is never published).** The one Clang module-map slot stays `libconverse`. The
+Expression 2 engine is no longer compiled from source: the pod vendors the three **Swift binary
+frameworks** the Swift package's `Expression2` product ships (`Expression2`,
+`BithumanEngineProtocol`, `UnifiedModelHeader`, sha256-checked from the public tap release). A
+Swift binary framework carries a Swift module interface, not a Clang module map, so it does not
+take the slot and the clash below cannot happen with it. The rule is therefore: at most one
+**Clang** module-map xcframework (`libconverse`), any number of **Swift** binary frameworks, and
+**no engine source** in the pod (`scripts/check-apple-engine-pin.sh` A1 NO-SOURCE). Essence 2
+stays a plain static `.a` behind the pod's umbrella module, as below.
+
 A CocoaPods `static_framework` pod cannot host two vendored **module-map**
 (C-module) xcframeworks — their module maps collide and break each other's Clang
 module resolution (the clash commit `3b53fc0` fixed). Therefore:

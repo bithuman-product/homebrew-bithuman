@@ -39,7 +39,7 @@
 # refuses a commit where they drift apart again.
 #
 # CHECKS (all offline — no network, no credential, runs on a fork)
-#   A1 NO-SOURCE       bootstrap.sh fetches and copies no engine source (2.6.19:
+#   A1 NO-SOURCE       bootstrap.sh fetches and copies no engine source (2.6.20:
 #                      the pod links the published binaries).
 #   A2 X2-AGREES       the pod's Expression 2 release + checksums == Package.swift's.
 #   A3 ENGINE-PINNED   bootstrap.sh defaults all four engine coordinates
@@ -84,7 +84,7 @@ RES_TAG="$(pin LIBESSENCE2_RESOURCES_RELEASE)"
 RES_SHA="$(pin LIBESSENCE2_RESOURCES_SHA256)"
 
 # ── A1 NO-SOURCE ────────────────────────────────────────────────────────────
-# ★Since 2.6.19 the pod links the PUBLISHED engine binaries and compiles no engine source
+# ★Since 2.6.20 the pod links the PUBLISHED engine binaries and compiles no engine source
 # (owner ruling 2026-09-26: engine source is proprietary). bootstrap.sh must not clone the
 # engine repository or copy engine Classes, and must pin the Expression 2 binaries.
 if grep -nE 'locate_engine_sdk [A-Z]|git clone .*bithuman-models|gh repo clone|/sdk/Classes' "$BOOT" | grep -v '^[0-9]*:\s*#' | grep -q .; then

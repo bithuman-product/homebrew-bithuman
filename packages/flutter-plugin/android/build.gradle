@@ -150,7 +150,7 @@ dependencies {
     // per store; renders are bit-identical to 0.5.15.
     // 0.8.0 (2026-09-26): useHardwareBuffers takes up to 32 slots (was 16), which the zero-copy
     // path below needs: the player's ring holds one frame per slot until the slot comes round.
-    implementation 'ai.bithuman:essence2-android:0.8.0'
+    implementation 'ai.bithuman:essence2-android:0.8.1'
 }
 
 // ★ The app that imports this plugin must ALSO set, in its own android/app build file:
