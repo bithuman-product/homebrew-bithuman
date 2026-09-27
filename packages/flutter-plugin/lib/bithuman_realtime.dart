@@ -425,7 +425,7 @@ class BithumanRealtimeSession {
       }
 
       await _connectAndConfigure();
-      _status.add(RealtimeStatus.open);
+      if (_terminalError == null && _open) _status.add(RealtimeStatus.open);
     } catch (e) {
       _status.add(RealtimeStatus.error);
       rethrow;
@@ -449,6 +449,17 @@ class BithumanRealtimeSession {
     _wsSub = _ws!.stream.listen(_handleMessage,
         onError: _handleError,
         onDone: _handleDone);
+    // ★THE HANDSHAKE IS AWAITED (2.6.20). `connect` returns before the server answers, and a
+    // refused upgrade (401 / 402 / 403 from the relay) completes `ready` with an error that
+    // nothing awaited: an uncaught async exception in the host app, while the session had
+    // already reported `open`. Now a refusal is handled here (the stream's onError sees it too;
+    // both paths are idempotent) and the caller does not announce an open session.
+    try {
+      await _ws!.ready;
+    } catch (e) {
+      _handleError(e);
+      return;
+    }
     // The echo row this session will run on, stated in the log BEFORE the config that
     // carries it. The native half of the same `[bhaec]` line says what the platform
     // canceller actually is; this half says what threshold the server was asked for.
@@ -591,7 +602,7 @@ class BithumanRealtimeSession {
       // a beat later). Resetting on TCP-success masked that as an infinite
       // `connecting` loop. The reset now lives in `_handleMessage` on the
       // first inbound event, which proves the server actually accepted us.
-      _status.add(RealtimeStatus.open);
+      if (_terminalError == null && _open && _reconnectTimer == null) _status.add(RealtimeStatus.open);
     } catch (e) {
       // ignore: avoid_print
       print('[realtime] reconnect failed: $e');
