@@ -390,7 +390,7 @@ class BithumanCli < Formula
   # pin is now ffd348f2…, cli-v2.6.9, the same render path) and
   # is recorded under `caveats` below:
   # the tarball ships the essence-2 runtime as `lib/lible_core.dylib`, and
-  # `bithuman render <essence-2>.imx -a speech.wav -o out.mp4 --json` returns
+  # `bithuman render <essence-2>.imx speech.wav -o out.mp4 --json` returns
   # rc=0 — 300 frames, 1920x1080 @25 fps, on the CLI's own local render path.
   # It is a render, on this machine, with no engine fetch, and the mouth
   # tracks the drive audio. (`libessence2.dylib` is the APPLE/Swift engine — a
@@ -443,7 +443,7 @@ class BithumanCli < Formula
   #
   #   $ bithuman run <essence-2>.imx --json
   #   {"error":{"code":"UNAVAILABLE","command":"run", …}}     # rc=69, no serve
-  #   $ bithuman render <essence-2>.imx -a a.wav -o out.mp4 --json
+  #   $ bithuman render <essence-2>.imx a.wav -o out.mp4 --json
   #   {"error":{"code":"UNAVAILABLE","command":"render", …}}  # rc=69, no MP4
   #
   #   GREEN CONTROL — the same `run`, same host, /opt/homebrew/bin back on

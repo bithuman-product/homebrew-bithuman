@@ -143,7 +143,7 @@ All requests require `api-secret: YOUR_SECRET` header.
 |---|---|
 | `bithuman login` | Sign in through the browser; stores a per-device API secret in `~/.bithuman/config` |
 | `bithuman run [model]` | Run the live avatar — embedded LiveKit + brain + browser UI at `http://127.0.0.1:8088` |
-| `bithuman render <model> -a <audio> -o out.mp4` | Offline render a lip-synced MP4 |
+| `bithuman render <model> <audio> -o out.mp4` | Offline render a lip-synced MP4 |
 | `bithuman pull <slug>` | Download a showcase avatar into the local cache |
 | `bithuman list` | Browse showcase avatars + cache state |
 | `bithuman info <model>` | Show `.imx` model metadata |
