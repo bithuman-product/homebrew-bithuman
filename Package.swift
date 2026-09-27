@@ -748,6 +748,15 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // asset, so its checksum does not move; it must be attached to this tag too,
 // because `essence2Base` is the tag both URLs are read from.
 // ---------------------------------------------------------------------------
+// ★ ROLLED 2026-09-26 ONTO essence2-v1.14.2 (package tag v2.17.3) — A LONG SESSION'S MEMORY STAYS FLAT.
+// Through essence2-v1.14.1 the engine's audio-to-motion stage kept every frame of the current utterance
+// (~40 KiB per frame, about 1 MiB per second of speech) until the next utterance began, and an utterance ends
+// only on endUtterance or a 0.6 s pause in the audio. An app that fed audio continuously grew for the whole
+// session: an iPhone 15 went from 791 to 1633 MiB phys_footprint over 600 s of continuous speech.
+// essence2-v1.14.2 (bithuman-models #1542 @ 2a33fd99d) keeps a window instead; the frames it hands out are
+// byte-identical. Re-hosted byte-for-byte by publish-essence2-apple.yml: libessence2.xcframework.zip sha256
+// ac1f3157d1cc9d47…, its checksum below; resources ec6e959a…. onnxruntime is carried forward byte-identical.
+// ---------------------------------------------------------------------------
 // ★ ROLLED 2026-09-26 ONTO essence2-v1.14.1 (package tag v2.17.2) — A RELEASE ENGINE CANNOT BE SWITCHED UNMETERED.
 // Through essence2-v1.14.0 the Release libessence2 read BITHUMAN_UNMETERED / BITHUMAN_METER_OWNED_BY_HOST from
 // the process environment (an app that set the first rendered unbilled, measured on an iPhone 15) and took its
@@ -834,7 +843,7 @@ let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/rel
 // the 300 s grace refuses at 7,500 frames since the last ack and resumes on reconnect,
 // the outage claimed as accrued. iPhone 15 floor series on these bytes: see the
 // release notes. onnxruntime is carried forward byte-identical again.
-let essence2Tag = "essence2-v1.14.1"
+let essence2Tag = "essence2-v1.14.2"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -1004,7 +1013,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "e999f6aabd5be8e958cb1b3ddccaf4c55d4e52e282380afe8b7af6707f39b1bd"
+            checksum: "ac1f3157d1cc9d47a3e42f51d9ade611288ea59ae63e1b5de3169ee41a75f93a"
         ),
         // Not optional, and not a convenience: without it the engine's ONNX
         // Runtime symbols are undefined at the app's final link (measured — see
