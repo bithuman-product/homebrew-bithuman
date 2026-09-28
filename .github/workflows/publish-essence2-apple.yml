@@ -80,9 +80,16 @@ jobs:
           gh release download "$ORT_TAG" --repo "$SOURCE_REPO" \
             --pattern 'onnxruntime.xcframework.zip*' --clobber
           # EngineCore.xcframework (engine_core, macOS only), on source tags that carry it
-          # (bithuman-models #1621 onward). Optional: older source tags have none.
-          gh release download "$SOURCE_TAG" --repo "$SOURCE_REPO" \
-            --pattern 'EngineCore.xcframework.zip*' --clobber 2>/dev/null || true
+          # (bithuman-models #1621 onward). Older source tags have none. When the source
+          # release LISTS it, the download must succeed: a transient failure here would cut
+          # an immutable tap tag without it.
+          # (the list is captured first: under pipefail an early-exiting grep -q can
+          # SIGPIPE the producer and read as "absent")
+          SRC_ASSETS="$(gh release view "$SOURCE_TAG" --repo "$SOURCE_REPO" --json assets -q '.assets[].name')"
+          if printf '%s\n' "$SRC_ASSETS" | grep -qx 'EngineCore.xcframework.zip'; then
+            gh release download "$SOURCE_TAG" --repo "$SOURCE_REPO" \
+              --pattern 'EngineCore.xcframework.zip*' --clobber
+          fi
           ls -la
 
       - name: The bytes are the ones that were proven — sha256 equals the builder's sidecar AND the caller's measurement
