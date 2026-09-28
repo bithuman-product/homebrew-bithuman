@@ -49,6 +49,22 @@ final class LocalConverseController: @unchecked Sendable {
     private var lastBotLevelAt = Date.distantPast
     private static let levelEmitInterval = 0.05  // ~20 Hz
     private let lock = NSLock()
+    // ── Turn assembly ──────────────────────────────────────────────────────
+    // One spoken utterance can reach us as several ASR finals ("Hi Wise Pup!" …
+    // "How are you?"): the recognizer commits at every short pause, more so with
+    // .fastResults. The second part used to be DROPPED (it arrived while the bot
+    // was already replying, so it looked like a backchannel). A final whose
+    // segment STARTED before the reply to the previous spoken turn became audible
+    // is the rest of that turn, not a reaction to the bot — it cannot be echo
+    // either, since the bot had not made a sound yet. Such a final barges the
+    // in-flight reply and is committed as a CONTINUATION: the brain retracts the
+    // reply to the first part and answers the whole utterance once.
+    // All guarded by `lock`.
+    private var engineState: Int32 = 1          // last bc_state from the brain
+    private var lastAsrCommitAt: Date?          // last SPOKEN turn committed (nil after a typed turn)
+    private var replyAudibleAt: Date?           // first TTS audio of the reply to that turn
+    private var segmentStartAt: Date?           // first partial of the segment now being recognized
+    private static let continuationMaxSecs: TimeInterval = 10
     /// Barge-latency instrumentation. Set BITHUMAN_DEBUG_BARGE=1 to log the
     /// timeline (bot-speaking edge, each ASR partial/final with word count, and
     /// the stop) so we can pinpoint the stop-the-moment-I-talk delay.
@@ -96,6 +112,9 @@ final class LocalConverseController: @unchecked Sendable {
             self.botAudibleUntil = base.addingTimeInterval(secs)
             self.lock.unlock()
             if wasSilent, self.dbgBarge { NSLog("[barge-dbg] %@ BOT speaking ▶", Self.ts()) }
+            self.lock.lock()
+            if self.replyAudibleAt == nil { self.replyAudibleAt = Date() }
+            self.lock.unlock()
             // NB: we deliberately do NOT flip to a "speaking/responding" state here.
             // The neon "thinking" rim stays ON through the bot's reply (engine
             // SPEAKING(3) maps to thinking in Dart) and turns off only when the
@@ -111,7 +130,11 @@ final class LocalConverseController: @unchecked Sendable {
         }
         converse.onBotChunk  = { [weak self] t in self?.onEvent?(["kind": "bot", "text": t]) }
         converse.onUserFinal = { [weak self] t in self?.onEvent?(["kind": "user", "text": t]) }
-        converse.onState     = { [weak self] s in self?.onEvent?(["kind": "state", "state": Int(s.rawValue)]) }
+        converse.onState     = { [weak self] s in
+            guard let self else { return }
+            self.lock.lock(); self.engineState = Int32(s.rawValue); self.lock.unlock()
+            self.onEvent?(["kind": "state", "state": Int(s.rawValue)])
+        }
         // Brain turn-end: flush the final partial lipsync chunk so the last word
         // renders. This is the DEFERRED end — ConverseSession latches the raw
         // BC_EVENT_BOT_TURN_END (which fires at generation-end) and re-emits it
@@ -173,6 +196,9 @@ final class LocalConverseController: @unchecked Sendable {
             for await ev in sp.events {
                 switch ev {
                 case .partial(let t):
+                    self.lock.lock()
+                    if self.segmentStartAt == nil { self.segmentStartAt = Date() }
+                    self.lock.unlock()
                     // The energy VAD already barged the bot at speech onset; the
                     // partials are now only for live debug visibility.
                     if self.dbgBarge {
@@ -181,6 +207,13 @@ final class LocalConverseController: @unchecked Sendable {
                     }
                 case .final(let t):
                     let wc = Self.wordCount(t)
+                    self.lock.lock()
+                    let segStart = self.segmentStartAt ?? Date()
+                    self.segmentStartAt = nil
+                    let lastCommit = self.lastAsrCommitAt
+                    let audibleAt = self.replyAudibleAt ?? .distantFuture
+                    let busy = self.engineState == 2 || self.engineState == 3   // THINKING / SPEAKING
+                    self.lock.unlock()
                     if self.dbgBarge {
                         NSLog("[barge-dbg] %@ FINAL wc=%d botSpeaking=%@ '%@'",
                               Self.ts(), wc, self.botSpeaking() ? "Y" : "n", t)
@@ -193,7 +226,21 @@ final class LocalConverseController: @unchecked Sendable {
                     // speaking never crossed the (echo-margined) barge threshold —
                     // i.e. a backchannel ("mhm"/"yeah") — so it is dropped rather
                     // than spawning a spurious extra reply.
-                    if wc >= 1 && !self.botSpeaking() {
+                    // A final with no letters or digits ("." / "?") is recognizer
+                    // noise, never a turn.
+                    guard wc >= 1, t.contains(where: { $0.isLetter || $0.isNumber }) else { continue }
+                    let continuation = lastCommit.map { Date().timeIntervalSince($0) < Self.continuationMaxSecs } == true
+                        && segStart < audibleAt
+                    if continuation {
+                        // Rest of the previous spoken turn: cancel the reply to the first
+                        // part (flushes speaker + avatar; no-op if already cancelled) and
+                        // let the brain answer the whole utterance.
+                        if busy || self.botSpeaking() { self.io?.barge(reason: "asr-continuation") }
+                        self.lock.lock(); self.lastAsrCommitAt = Date(); self.replyAudibleAt = nil; self.lock.unlock()
+                        self.converse.pushText(t, continuation: true)
+                        self.onEvent?(["kind": "state", "state": 2])
+                    } else if !self.botSpeaking() {
+                        self.lock.lock(); self.lastAsrCommitAt = Date(); self.replyAudibleAt = nil; self.lock.unlock()
                         self.converse.pushText(t)
                         // Drive the "thinking" neon rim the instant the user's spoken
                         // turn commits to the brain — the local analogue of cloud's
@@ -263,6 +310,8 @@ final class LocalConverseController: @unchecked Sendable {
         // clears the FIFOs — identical to the energy-VAD barge. Without this, typed
         // input stacks onto the reply the agent is still giving.
         io?.barge()
+        // A typed turn (or the greeting directive) is never continued by speech.
+        lock.lock(); lastAsrCommitAt = nil; replyAudibleAt = nil; lock.unlock()
         converse.pushText(t)
     }
 

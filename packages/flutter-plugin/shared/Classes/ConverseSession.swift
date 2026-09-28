@@ -37,15 +37,24 @@ final class ConverseSession: @unchecked Sendable {
     private var turnGen: UInt64 = 0
     private let outputLock = NSLock()
     // Pacing clock: wall-clock time when the audio forwarded so far finishes
-    // playing. We only forward when < paceAheadSecs ahead of real time, so the
-    // PLAYER never buffers more than that — a barge then flushes a tiny buffer
-    // (the engine's ring holds the rest, which the discard drops). Without this
-    // the loop bursts the whole reply into the player and a barge can't stop it.
+    // playing. We forward while < feedLeadSecs ahead of real time.
+    //
+    // ★FEED LEAD 3 s (was 0.1 s). The avatar renders speech in chunks and needs
+    // audio IN FRONT of it to start moving: with a 0.1 s lead it received the
+    // reply at playback speed and the mouth started ~3.4 s after the first TTS
+    // audio (measured 2026-09-28, iPhone 15 + M4, Wise Pup / Expression 2);
+    // handing the PCM over as fast as it is synthesized (≤3 s ahead) starts the
+    // mouth in ~0.85 s — the same onset as a cloud reply, which also arrives as a
+    // burst. Lip-sync is unaffected: the speaker and the avatar still take the
+    // SAME bytes in playSpeakerPCM24k, released on the avatar's audio clock. A
+    // barge still cuts instantly: io.barge() flushes the player, the paced
+    // speaker FIFO and the avatar's audio queue (exactly as for a cloud burst),
+    // and the gen fence below drops anything already pulled.
     private var bufferedUntil = Date.distantPast
-    private static let paceAheadSecs: TimeInterval = 0.1   // keep the player buffer tiny so a barge cuts fast
+    private static let feedLeadSecs: TimeInterval = 3.0
     // Deferred turn-end. BC_EVENT_BOT_TURN_END fires at GENERATION-end, but the
-    // pull-loop keeps draining the engine's already-synthesized PCM ring and
-    // pacing it to the speaker for up to ~bufferedUntil AFTER that. Firing
+    // pull-loop may still be draining the engine's already-synthesized PCM ring
+    // (the feed lead caps how far ahead of playback it forwards). Firing
     // onTurnEnd (→ embody flushTail) at generation-end would advance the runtime's
     // ci MID-DELIVERY while more lipsync audio is still being forwarded → A/V
     // desync → freeze. So we LATCH the end here (stamped with the turn it ended in)
@@ -69,6 +78,12 @@ final class ConverseSession: @unchecked Sendable {
     init?(gguf: String, supertonicAssets: String?, voice: String = "M1",
           systemPrompt: String = "") {
         if let a = supertonicAssets, !a.isEmpty { setenv("BITHUMAN_SUPERTONIC_ASSETS", a, 1) }
+        // The first TWO TTS chunks may end at a clause (libconverse reads it per
+        // reply; a brain without the knob ignores it). The avatar enters speech on
+        // its first 1.6 s window once the audio for the second one (3.2 s) is in —
+        // see AvatarTexture.fastSpeechOnset — and a long second sentence took ~1 s
+        // just to synthesize on iPhone 15. A value the host set is kept.
+        setenv("BITHUMAN_CONVERSE_CLAUSE_CHUNKS", "2", 0)
 
         var cfg = bc_config_t()
         cfg.abi_version = UInt32(BC_ABI_VERSION)
@@ -141,10 +156,10 @@ final class ConverseSession: @unchecked Sendable {
                 let ahead = self.bufferedUntil.timeIntervalSinceNow
                 let turn = self.turnGen
                 self.outputLock.unlock()
-                // Pace ONLY when forwarding: don't run more than paceAheadSecs
+                // Pace ONLY when forwarding: don't run more than feedLeadSecs
                 // ahead of real-time playback. While discarding we drain the ring
                 // as fast as possible (no pacing).
-                if !discard && ahead > Self.paceAheadSecs {
+                if !discard && ahead > Self.feedLeadSecs {
                     usleep(20_000)  // 20 ms — let playback catch up
                     continue
                 }
@@ -178,18 +193,23 @@ final class ConverseSession: @unchecked Sendable {
                     // here clears cleanly on the empty boundary that follows pushText.
                     self.outputLock.lock()
                     if self.discardOutput && self.armResume { self.discardOutput = false; self.armResume = false }
-                    // Deferred turn-end. The ring is empty (all synthesized audio
-                    // pulled) AND the paced delivery has fully drained to the speaker
-                    // (bufferedUntil reached). Now — and only now — is it safe to
-                    // flush the avatar's tail: no more lipsync audio will arrive for
-                    // this turn, so flushTail can't advance ci mid-delivery. Gen-gate:
-                    // fire only if the latch still matches the LIVE turn (a barge
-                    // bumped turnGen → drop the flush, exactly like cloud's _audioGen
-                    // check around notifyTurnEnd). Fire OUTSIDE the lock so onTurnEnd
-                    // (which hops to the embody runtime) never runs under outputLock.
-                    let drained = self.bufferedUntil.timeIntervalSinceNow <= 0
+                    // Deferred turn-end. Generation has ended (the latch) AND the
+                    // ring is empty, so every sample of this reply has now been
+                    // HANDED OVER to the speaker + avatar (onTTSChunk runs
+                    // synchronously above). That is the moment to flush the avatar's
+                    // tail: no more lipsync audio will arrive for this turn, so
+                    // flushTail can't advance ci mid-delivery. It must NOT wait for
+                    // playback to finish (the old `bufferedUntil` drain): with the
+                    // 3 s feed lead the avatar would sit on an unflushed partial
+                    // chunk for seconds and stall at the end of every reply
+                    // (measured: speech coverage 0.84 without this, 0.98 with it).
+                    // Gen-gate: fire only if the latch still matches the LIVE turn
+                    // (a barge bumped turnGen → drop the flush, exactly like cloud's
+                    // _audioGen check around notifyTurnEnd). Fire OUTSIDE the lock so
+                    // onTurnEnd (which hops to the embody runtime) never runs under
+                    // outputLock.
                     let fireEnd = self.turnEndPending && !self.discardOutput
-                        && self.turnEndPendingGen == self.turnGen && drained
+                        && self.turnEndPendingGen == self.turnGen
                     if fireEnd { self.turnEndPending = false }
                     self.outputLock.unlock()
                     if fireEnd { self.onTurnEnd?() }
@@ -204,7 +224,10 @@ final class ConverseSession: @unchecked Sendable {
     /// lock-free read for the audio/forward path.
     var currentTurnGen: UInt64 { outputLock.lock(); defer { outputLock.unlock() }; return turnGen }
 
-    func pushText(_ t: String) {
+    /// Commit a user turn. `continuation` = these words are the rest of the
+    /// PREVIOUS user turn (the recognizer split one utterance in two); the brain
+    /// retracts the reply to the first part and answers both as one message.
+    func pushText(_ t: String, continuation: Bool = false) {
         // If the PREVIOUS turn's deferred end is still latched (its paced delivery
         // hadn't fully drained when this new turn was committed — rare, only on a
         // very fast back-to-back), fire it NOW, before the new turn's audio starts
@@ -219,7 +242,13 @@ final class ConverseSession: @unchecked Sendable {
         if firePrev { turnEndPending = false }
         outputLock.unlock()
         if firePrev { onTurnEnd?() }
+        #if CONVERSE_PUSH_EX
+        let flags: UInt32 = continuation ? UInt32(BC_PUSH_CONTINUATION) : 0
+        _ = t.withCString { bc_session_push_text_ex(handle, $0, flags) }
+        #else
+        _ = continuation  // libconverse < 2.4: no merge — the part is a turn of its own
         _ = t.withCString { bc_session_push_text(handle, $0) }
+        #endif
     }
 
     /// Barge: cancel the in-flight reply immediately and flush everything it

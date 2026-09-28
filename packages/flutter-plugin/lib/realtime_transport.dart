@@ -30,11 +30,15 @@ import 'dart:io' show Platform;
 
 import 'package:bithuman/bithuman_realtime.dart';
 
+import 'bithuman.dart' show BithumanAvatar;
 import 'openai_webrtc_session.dart';
 import 'src/transport_protocol.dart';
 import 'src/dev_levers.dart';
 
 export 'src/transport_protocol.dart';
+// The on-device brain's shipped defaults (persona prompts, measured model set,
+// required license notices) — see lib/src/local_brain.dart.
+export 'src/local_brain.dart';
 // Re-exported WITHOUT a matching import on purpose: `VoiceHost` already reaches
 // this library through bithuman_realtime.dart (the voice library exports the
 // voice protocol), so importing it here is what the analyzer calls an
@@ -394,6 +398,7 @@ class LocalConverseTransport implements RealtimeTransport {
   StreamSubscription<Map<dynamic, dynamic>>? _evSub;
   bool _muted = false;
   bool _greeted = false;   // welcome-on-connect fires once per session
+  bool _stopped = false;
 
   // Welcome-on-connect: the on-device brain speaks a short in-character greeting
   // when it's ready (parity with the cloud transport's response.create greeting).
@@ -462,7 +467,7 @@ class LocalConverseTransport implements RealtimeTransport {
         if (!_greeted) {
           _greeted = true;
           _status.add(TransportStatus.thinking);   // rim on until the greeting plays
-          avatar.localPushText(_greetingPrompt);
+          _greetWhenAvatarReady();
         }
       case 'error':
         _status.add(TransportStatus.error);
@@ -496,8 +501,24 @@ class LocalConverseTransport implements RealtimeTransport {
     }
   }
 
+  // ★The greeting waits for the AVATAR, not just the brain. On a warm iPhone 15
+  // launch the brain is ready ~2 s after start but the Expression 2 engine needs
+  // ~9 s to warm its CoreML graphs; a greeting pushed at brain-ready was spoken
+  // over the idle loop, before the character could move its mouth. A headless
+  // session (no avatar picture) greets at once, as before.
+  Future<void> _greetWhenAvatarReady() async {
+    final a = avatar;
+    if (a is BithumanAvatar && !a.isReady) {
+      await a.ready;
+      if (!a.isReady) return;   // disposed while warming
+    }
+    if (_stopped) return;
+    await avatar.localPushText(_greetingPrompt);
+  }
+
   @override
   Future<void> stop() async {
+    _stopped = true;
     await avatar.localAudioStop();
     await _evSub?.cancel();
     _evSub = null;
