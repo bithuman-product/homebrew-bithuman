@@ -17,6 +17,16 @@ final class ConverseSession: @unchecked Sendable {
     private var handle: OpaquePointer?
     private var pulling = false
     private let pullQ = DispatchQueue(label: "ai.bithuman.converse.pull", qos: .userInitiated)
+    // ★SYSTEM VOICE (voice = "system" | "system:<id>", SystemVoice.swift). The
+    // brain is created with the HOST voice (BC_TTS_VOICE_HOST: no voice model is
+    // loaded) and every text chunk is rendered by AVSpeechSynthesizer into the
+    // SAME output ring, so pacing, barge-in and lip-sync below are unchanged.
+    // nil = the built-in (downloaded) Supertonic voice.
+    private var systemVoice: SystemVoiceRenderer?
+    /// The voice actually speaking, for the UI: ["backend": "system" | "builtin",
+    /// plus id/name/language/quality/gender/personal for a system voice], and
+    /// "fallback": the reason when "system" was asked for but not used.
+    private(set) var voiceInfo: [String: Any] = [:]
     // Set by interrupt(): bc_session_interrupt cancels FUTURE generation but does
     // NOT flush the reply already synthesized into the engine's PCM ring, so the
     // pull-loop would keep feeding the cancelled reply to the speaker. While this
@@ -79,6 +89,28 @@ final class ConverseSession: @unchecked Sendable {
           systemPrompt: String = "") {
         if let a = supertonicAssets, !a.isEmpty { setenv("BITHUMAN_SUPERTONIC_ASSETS", a, 1) }
 
+        // "system" → the best installed Premium/Enhanced Apple voice, rendered by
+        // the host; nothing installed (or a brain without the host voice) → the
+        // built-in voice, which needs its downloaded assets (supertonicAssets).
+        var voice = voice
+        var fallback: String?
+        if SystemVoiceCatalog.isSystemVoice(voice) {
+            #if CONVERSE_HOST_TTS
+            if let v = SystemVoiceCatalog.resolve(voice) {
+                systemVoice = SystemVoiceRenderer(voice: v)
+                voice = BC_TTS_VOICE_HOST
+            } else {
+                fallback = "no Premium or Enhanced system voice is installed"
+            }
+            #else
+            fallback = "this brain (libconverse) has no host voice"
+            #endif
+            if let fallback {
+                NSLog("[Converse] system voice unavailable (%@); using the built-in voice", fallback)
+                voice = "M1"
+            }
+        }
+
         var cfg = bc_config_t()
         cfg.abi_version = UInt32(BC_ABI_VERSION)
         cfg.use_mock_backends = 0
@@ -110,6 +142,27 @@ final class ConverseSession: @unchecked Sendable {
             return nil
         }
         handle = h
+        #if CONVERSE_HOST_TTS
+        if let r = systemVoice {
+            // The C callback runs on the brain's TTS thread; the renderer blocks it
+            // (never the main thread) until AVSpeechSynthesizer has delivered the
+            // chunk. The session owns the renderer, so it outlives the handle.
+            let rud = Unmanaged.passUnretained(r).toOpaque()
+            bc_session_set_host_tts(h, { ud, text, sink in
+                guard let ud, let text, let sink else { return 1 }
+                let r = Unmanaged<SystemVoiceRenderer>.fromOpaque(ud).takeUnretainedValue()
+                return r.render(String(cString: text)) { pcm in
+                    pcm.withUnsafeBufferPointer { _ = bc_tts_sink_write(sink, $0.baseAddress, $0.count) }
+                }
+            }, rud)
+            r.warm()
+            voiceInfo = r.info.merging(["backend": "system"]) { _, b in b }
+        }
+        #endif
+        if systemVoice == nil {
+            voiceInfo = ["backend": "builtin", "name": voice]
+            if let fallback { voiceInfo["fallback"] = fallback }
+        }
         installCallback()
         startPullLoop()
     }
@@ -278,6 +331,10 @@ final class ConverseSession: @unchecked Sendable {
 
     func stop() {
         pulling = false
+        // A system-voice chunk in flight waits for main-queue buffers, and
+        // bc_session_destroy (below, often ON the main thread) waits for that
+        // chunk: cancel the renderer first so the chunk returns at once.
+        systemVoice?.cancel()
         // Drain the pull queue: wait for any in-flight pull-loop iteration to
         // observe pulling=false and exit BEFORE freeing the handle. Without this
         // the loop can be inside bc_session_pull_audio on a handle we then
