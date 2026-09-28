@@ -16,7 +16,6 @@ import com.k2fsa.sherpa.onnx.OfflineTtsSupertonicModelConfig
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
 import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.LinkedBlockingQueue
@@ -50,7 +49,7 @@ import kotlin.math.sqrt
 internal class ConverseEngine private constructor(
     private val cfg: Config,
     private val listener: Listener,
-    private val llm: LlamaBrain,
+    private val llm: ReplyModel,
     private val tts: OfflineTts,
     private val vad: Vad,
     private val asr: OfflineRecognizer,
@@ -81,6 +80,12 @@ internal class ConverseEngine private constructor(
         /** Completed exchanges kept as context (the KV cache slides with it, see bh_llm_jni.cpp). */
         val historyExchanges: Int = 4,
         val temperature: Float = 0.7f,
+        /**
+         * The reply stage. Null = llama.cpp on [llmPath] ([LlamaBrain]). Any other
+         * [ReplyModel] (LiteRT-LM, an OS model, ...) drops in here; [llmPath] is then only
+         * what that factory makes of it.
+         */
+        val replyModel: ((Config) -> ReplyModel)? = null,
     )
 
     fun interface Listener { fun onEvent(kind: Int, state: Int, text: String) }
@@ -363,31 +368,19 @@ internal class ConverseEngine private constructor(
             ttsJobs.offer(TtsJob.End(gen))
             return
         }
-        val roles = ArrayList<String>()
-        val contents = ArrayList<ByteArray>()
-        roles.add("system"); contents.add(system.toByteArray())
+        val messages = ArrayList<Pair<String, String>>()
+        messages.add("system" to system)
         synchronized(lock) {
-            for ((u, a) in history) {
-                roles.add("user"); contents.add(u.toByteArray())
-                roles.add("assistant"); contents.add(a.toByteArray())
-            }
+            for ((u, a) in history) { messages.add("user" to u); messages.add("assistant" to a) }
         }
-        roles.add("user"); contents.add(turn.userText.toByteArray())
+        messages.add("user" to turn.userText)
 
         val chunker = TextShaping.Chunker()
-        val bytes = ByteArrayOutputStream()
         var first = true
         var sentences = 0
-        val n = llm.generate(roles.toTypedArray(), contents.toTypedArray(), cfg.maxTokens, cfg.temperature,
-            (System.nanoTime() and 0x7fffffff).toInt()) { piece ->
+        val n = llm.generate(messages, cfg.maxTokens, cfg.temperature) { text ->
             if (gen != turnGen || !running) return@generate false
             if (first) { first = false; Log.i(TAG, "[bhbrain] llm first_token gen=$gen ms=${System.currentTimeMillis() - t0} hostMs=${System.currentTimeMillis()}") }
-            bytes.write(piece)
-            val all = bytes.toByteArray()
-            val ok = completeUtf8(all)
-            if (ok == 0) return@generate true
-            val text = String(all, 0, ok, Charsets.UTF_8)
-            bytes.reset(); if (ok < all.size) bytes.write(all, ok, all.size - ok)
             for (c in chunker.push(text)) {
                 if (emitChunk(turn, c)) sentences++
                 if (sentences >= cfg.maxSentences) return@generate false
@@ -518,7 +511,8 @@ internal class ConverseEngine private constructor(
                         cachedDecoder = need("$sd/cached_decode.int8.onnx")),
                     tokens = need("$sd/tokens.txt"), numThreads = cfg.sttThreads)))
             val t2 = SystemClock.elapsedRealtime()
-            val llm = LlamaBrain.load(need(cfg.llmPath), cfg.llmContext, cfg.llmThreads, cfg.llmThreads)
+            val llm = cfg.replyModel?.invoke(cfg)
+                ?: LlamaBrain.load(need(cfg.llmPath), cfg.llmContext, cfg.llmThreads, cfg.llmThreads)
                 ?: error("the LLM did not load: ${cfg.llmPath}")
             val t3 = SystemClock.elapsedRealtime()
             Log.i(TAG, "[bhbrain] loaded tts=${t1 - t0}ms stt=${t2 - t1}ms llm=${t3 - t2}ms total=${t3 - t0}ms " +
@@ -540,21 +534,6 @@ internal class ConverseEngine private constructor(
             for (v in x) s += v * v
             val rms = sqrt(s / maxOf(1, x.size))
             return 20 * Math.log10(maxOf(rms, 1e-9))
-        }
-
-        /** Length of the longest prefix of [b] made of complete UTF-8 sequences. */
-        fun completeUtf8(b: ByteArray): Int {
-            var i = b.size
-            var k = 0
-            while (k < 4 && i - k - 1 >= 0) {
-                val c = b[i - k - 1].toInt() and 0xFF
-                if (c and 0xC0 != 0x80) {
-                    val need = when { c < 0x80 -> 1; c >= 0xF0 -> 4; c >= 0xE0 -> 3; c >= 0xC0 -> 2; else -> 1 }
-                    return if (k + 1 >= need) b.size else i - k - 1
-                }
-                k++
-            }
-            return b.size
         }
     }
 }
