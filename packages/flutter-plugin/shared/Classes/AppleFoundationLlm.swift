@@ -77,7 +77,7 @@ final class AppleFoundationLlm: @unchecked Sendable {
 
     private let model = SystemLanguageModel.default
     private let lock = NSLock()
-    private static let debug = ProcessInfo.processInfo.environment["BITHUMAN_CONVERSE_DEBUG"] == "1"
+    private static let debug = DevLevers.converseDebug
     private var session: LanguageModelSession?
     // What `session` has seen, to decide reuse (see the type doc).
     private var seenSystem: String?

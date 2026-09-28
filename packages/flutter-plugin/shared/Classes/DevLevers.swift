@@ -60,6 +60,9 @@ enum DevLevers {
   static let debugAudio = flag("BITHUMAN_DEBUG_AUDIO")
   /// Barge-calibration logs: post-AEC mic peak vs the effective threshold.
   static let debugBarge = flag("BITHUMAN_DEBUG_BARGE")
+  /// On-device brain logs (the C++ side reads the same name itself): whether each turn
+  /// reused Apple's LanguageModelSession or rebuilt it.
+  static let converseDebug = flag("BITHUMAN_CONVERSE_DEBUG")
   /// Disable VP-IO ⇒ raw mic, NO echo cancellation (macOS 26 bring-up only).
   static let noVPIO = flag("BITHUMAN_NO_VPIO")
   /// Per-frame texture counter logs ("texture frames=N" every 100).
