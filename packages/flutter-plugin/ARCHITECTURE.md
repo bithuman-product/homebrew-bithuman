@@ -48,8 +48,8 @@ Gold path: `audio → wav2vec2 → student_v4 → TAEHV → 416×720 @ 20 fps`.
 
 | tier | backend | dispatch | runs on | role in this stack |
 |---|---|---|---|---|
-| **GPU** | `engine/gpu/` torch CUDA fp16 (`Expression2GpuEngine`) | `?model=embody-gpu` | lafayette 4090 (primary) · Cerebrium `expression2-gpu-worker` ADA_L40 (overflow) | cloud serving (platform) |
-| **CPU** | `engine/cpu/` C++ `libembody.so` (oneDNN/AMX int8) | `?model=embody-cpu` | Cerebrium Ice Lake | cloud serving (platform) |
+| **GPU** | `engine/gpu/` torch CUDA fp16 (`Expression2GpuEngine`) | `?model=embody-gpu` | bitHuman cloud (GPU) | cloud serving (platform) |
+| **CPU** | `engine/cpu/` C++ `libembody.so` (oneDNN/AMX int8) | `?model=embody-cpu` | bitHuman cloud (CPU) | cloud serving (platform) |
 | **ANE** | `engine/ane/` CoreML export → `sdk/` runtime | n/a (no server) | Apple Silicon, **on-device** | **← consumed here** (Layer 1 = `models/expression-2/sdk`) |
 
 The **ANE** tier is `models/expression-2/sdk` (Layer 1): `Expression2Engine.swift` loads
@@ -64,9 +64,9 @@ w2v + taehv + warm) + `.avatar` (per-identity: student + atok + canon + idle.mp4
 
 | tier | backend | dispatch | runs on | role in this stack |
 |---|---|---|---|---|
-| **light · GPU** | `engine/light/gpu/` le_a2x + m4b director, ORT-CUDA | `?model=elevate-gpu-light` | Cerebrium `essence2-light-gpu-worker` (lafayette pool decommissioned 06-25) | cloud serving (platform) |
-| **light · CPU** | `engine/light/cpu/` C++ `lible_core.so` | `?model=elevate-cpu` | Cerebrium `essence2-light-cpu-worker` | cloud serving (deprioritized) |
-| **light · ANE (cloud)** | `engine/light/ane/ane/moraga_serve` native Mac-ANE | `?model=elevate-ane` | moraga `:8091` | cloud serving (owned HW overflow) |
+| **light · GPU** | `engine/light/gpu/` le_a2x + m4b director, ORT-CUDA | `?model=elevate-gpu-light` | bitHuman cloud (GPU) | cloud serving (platform) |
+| **light · CPU** | `engine/light/cpu/` C++ `lible_core.so` | `?model=elevate-cpu` | bitHuman cloud (CPU) | cloud serving (deprioritized) |
+| **light · ANE (cloud)** | `engine/light/ane/` native Mac-ANE | `?model=elevate-ane` | bitHuman cloud (Apple silicon) | cloud serving (owned HW overflow) |
 | **light · ANE (on-device)** | `engine/light/ane/` Essence2 Swift pkg → CoreML/ANE a2x | n/a (no server) | Apple Silicon, **on-device** | **← consumed here** (Layer 1 = `models/essence-2/sdk`) |
 
 The on-device **light/ANE** tier is `models/essence-2/sdk` (Layer 1):

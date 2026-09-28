@@ -63,7 +63,7 @@ jobs:
           xcodebuild -version
 
       # ★ A COLD RESOLVE EXITS 1 ON A HEADLESS MAC EVEN WHEN THE DOWNLOAD SUCCEEDED
-      # — measured on alpharetta 2026-08-25: `error: Failed to find credentials for
+      # — measured on a release Mac 2026-08-25: `error: Failed to find credentials for
       # 'https://github.com' in keychain: status -25308`, no build attempted, and
       # the very next invocation exits 0. `--disable-keychain` is one flag apart on
       # the same cold state and is cold-clean, so it is used here deliberately, not

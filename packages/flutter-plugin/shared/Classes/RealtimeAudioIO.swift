@@ -441,7 +441,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   // here: it takes speech-level mic energy WHILE NOTHING IS PLAYING, which is not
   // something the agent's own echo can produce.
   //
-  // ── MEASURED, 2026-09-16, iMac M4 (echelon), macOS 26.6.2, essence-2, speaker 40 %,
+  // ── MEASURED, 2026-09-16, iMac M4, macOS 26.6.2, essence-2, speaker 40 %,
   //    VP-IO on + AGC off (`[bhaec] vpioIn=1 vpioOut=1 agc=0`), gate attested on by
   //    `[bhduplex] GATE on thr=2500` ──
   //

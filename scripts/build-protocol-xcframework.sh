@@ -12,7 +12,7 @@
 # That arrangement is now impossible, and the impossibility is what this file
 # answers. SwiftPM requires target names AND product names to be unique across
 # the whole graph, and this manifest publishes an `Expression2` product whose
-# name the engine SDK also declares. Measured on echelon 2026-09-11:
+# name the engine SDK also declares. Measured on the release Mac 2026-09-11:
 #     multiple packages ('homebrew-bithuman', 'sdk') declare targets with a
 #     conflicting name: 'Expression2'                 (before the …Binary rename)
 #     The workspace contains multiple targets with the same GUID

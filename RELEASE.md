@@ -55,7 +55,7 @@ not a signing one.
 every one of those was built by hand and, since `cli-v2.6.3`, by the CLI repo's
 tracked `scripts/release-macos.sh` + `scripts/release-linux.sh` (one `CLI_SHA`
 for both halves, every input pinned by digest, `PROVENANCE.json` in the tarball)
-and packed by `scripts/release_pack.sh`, on alpharetta and lafayette, unattended.
+and packed by `scripts/release_pack.sh`, on the macOS and Linux release hosts, unattended.
 Its standing red — `linux-tarball` gate 2 refusing the published showcase
 `.imx` (runs 33602563547 / 33603750648) — was a true refusal, and the same gate
 runs inside `release-linux.sh` (via the CLI repo's `build-linux.sh` /

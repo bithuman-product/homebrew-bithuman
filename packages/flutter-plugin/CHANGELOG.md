@@ -217,7 +217,7 @@ Tag `flutter-plugin-v2.6.9`.
   exposed; the engine output is unchanged (same handset proof as 0.5.12: lip contour bound,
   generated mouth share 0.000000 / 0.000000).
 
-**Measured 2026-09-23 on echelon**, a clean clone of `bithuman-examples` (`afa0bb4`) with only its
+**Measured 2026-09-23 on an iMac M4**, a clean clone of `bithuman-examples` (`afa0bb4`) with only its
 plugin `ref:` pointed at this change, cold Gradle and pub caches, `flutter build apk --release
 --target-platform android-arm64` → rc 0. Gradle resolved `expression2-android-0.4.8.aar`,
 `essence2-android-0.5.13.aar`, `qnn-litert-delegate-2.49.0.aar` and `qnn-runtime-2.49.0.aar` from
@@ -828,7 +828,7 @@ interrupts — duplex, VAD unified with iOS (#44).
   the `vendor-v1` GitHub release (`embody-vendor.tar.gz` = libconverse.xcframework
   + A42 CoreML models), sha256-verifies it, and a Runner build phase bundles the
   models into the `.app` (no sibling SDK / no `~/embody-ane` needed).
-  * **Downloadable agent gallery (8 identities).** A Supabase manifest +
+  * **Downloadable agent gallery (8 identities).** A hosted manifest +
     per-identity `~88 MB` bundles (student + audiotokenizer + canon + idle.mp4);
     `Expression2Runtime.activeAgentDir` loads per-agent weights while the shared
     w2v/taehv graphs ship once in the app. Switching also applies a gender-matched

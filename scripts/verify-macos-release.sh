@@ -114,18 +114,18 @@ echo "== run the quarantined binary (the customer's first launch) =="
 # rc=137 (SIGKILL) and prints nothing.
 #
 # ★AND ON A MAC WITH A CONSOLE USER IT NEVER RETURNS AT ALL (measured on
-# echelon 2026-09-23, the cli-v2.7.1 cut). There Gatekeeper does not decide
+# the release Mac 2026-09-23, the cli-v2.7.1 cut). There Gatekeeper does not decide
 # alone: syspolicyd logs `Found console users` and then `Prompt shown (…),
 # waiting for response`, and the launch sits in _dyld_start until a human
 # clicks. The notarized Developer ID binary waited 14 min before it was killed
 # by PID; this script had no timeout, so the release rail hung with the host's
-# measure lock held. alpharetta (no console user) had passed the same step in
+# measure lock held. A Mac with no console user had passed the same step in
 # 19 s. So the launch is bounded, and when it is still waiting the verdict is
 # read from what Gatekeeper ALREADY DECIDED for this launch, in its own log:
 #   evaluateScanResult 0, team G64NFNZX84, id bithuman, Prompt (5, …) ->
 #       ACCEPTED: the Developer ID + notarization passed; the prompt is macOS
 #       asking a person to confirm opening a downloaded tool (measured);
-#   evaluateScanResult 1 or 2 (the ad-hoc control on echelon read 1, then
+#   evaluateScanResult 1 or 2 (the ad-hoc control on the release Mac read 1, then
 #       Prompt (6, …) "cannot verify") -> FAIL, as before.
 # A bounded wait with no decision in the log is a FAIL too: a gate that cannot
 # see is not a pass.

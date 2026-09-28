@@ -54,7 +54,7 @@ public enum Bhci {
 
     /// The five ruled target names — docs/NAMING.md §6b, owner ruling
     /// 2026-09-03. Spelled exactly, slash and capitals included.
-    /// ★`apple` (our moraga serving plane) and `macOS/iOS` (the xcframework a
+    /// ★`apple` (our own Apple serving plane) and `macOS/iOS` (the xcframework a
     /// customer links) are DIFFERENT targets and §6b forbids treating them as
     /// one. This package is `macOS/iOS`.
     public static let targets = ["gpu", "apple", "web", "android", "macOS/iOS"]
