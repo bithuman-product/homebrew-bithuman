@@ -1,3 +1,17 @@
+## 2.6.21 — 2026-09-28 — engine update; macOS EngineCore included
+
+Tag `flutter-plugin-v2.6.21`.
+
+* **iOS/macOS:** Expression 2 moves to the Swift package's `v2.19.0` binaries and Essence 2 to
+  `essence2-v1.15.0` (both sha256-checked by `scripts/bootstrap.sh`, and the same bytes as Swift
+  package 2.19.0). On macOS the engines' licensing and metering core is now linked once from
+  `EngineCore` (a plain static library from the `essence2-v1.15.0` release): `bootstrap.sh`
+  stages it and the macOS pod links it with `Security` and `curl`. iOS links nothing from it.
+  Run `scripts/bootstrap.sh` again after upgrading.
+* **Android:** unchanged — `ai.bithuman:essence2-android` 0.8.1 and `ai.bithuman:expression2-android` 0.5.2.
+* Sessions bill active session time, talking or idle (the service's rule since 2026-09-26); the
+  comments that still said "talking time only" are corrected.
+
 ## 2.6.20 — 2026-09-27 — Realtime voice through bitHuman's relay; iOS/macOS link the published engines
 
 Tag `flutter-plugin-v2.6.20`.
