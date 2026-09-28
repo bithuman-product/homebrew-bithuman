@@ -33,6 +33,11 @@ older brain (the split-sentence merge is then off).
   could reach the avatar's end-of-reply flush before the audio tick had seen it; the tick's reset
   for the new reply then wiped it, and the reply was neither shown nor heard (1–2 replies in 12 in
   scripted iPhone 15 runs; none in 48 since). The flush now applies that reset first.
+* **The voice starts ~0.35 s sooner, and chunk gaps shrink by as much.** The voice model opens every
+  chunk it speaks with 0.35–0.56 s of silence; the brain (libconverse, bithuman-models #1643) now
+  trims it to 30 ms. Before, the avatar's first "speech" frames were that silence (a closed mouth),
+  so the first word was heard ~0.37 s after the mouth-onset times above. Nothing to change here;
+  `BITHUMAN_CONVERSE_TTS_TRIM_LEAD=0` restores the old audio.
 * **The greeting waits for the character.** The brain is ready ~2 s after start on a warm iPhone
   15 launch, the Expression 2 engine ~9 s; the greeting used to be spoken over the loading loop.
   `LocalConverseTransport` now greets once the avatar is ready (a session with no avatar greets at
