@@ -53,6 +53,9 @@
 #                      the artifact — no second download here.
 #   A6 UMH-AGREES      the pod's UnifiedModelHeader pin == the SwiftPM binaryTarget.
 #   A7 KIT-AGREES      Essence2Kit's Essence2Resources.releaseTag == essence2Tag.
+#   A8 CORE-AGREES     the pod's EngineCore pin (ENGINECORE_RELEASE + sha256) == Package.swift's
+#                      essence2Tag and EngineCore binaryTarget checksum (macOS link, from
+#                      essence2-v1.15.0), when Package.swift declares EngineCore.
 #
 # Usage:  check-apple-engine-pin.sh [repo-root]
 # Exit:   0 PASS   1 REFUSE   2 could not run (never a silent pass)
@@ -192,6 +195,32 @@ if [ -f "$KIT" ]; then
     else
         pass "A7 Essence2Kit's runtime files come from $SPM_TAG, the engine SwiftPM serves"
     fi
+fi
+
+# A8 — EngineCore, the macOS link of Expression 2 and Essence 2 (essence2-v1.15.0+): the plain
+# static lib the pod stages must be the bytes SwiftPM's EngineCore binaryTarget serves, from the
+# same essence2Tag release. A manifest that declares EngineCore and a pod that pins another (or
+# none) link two different cores into a Flutter app and a Swift app of the same tag.
+SPM_CORE_SHA="$(python3 - "$MANIFEST" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r'name:\s*"EngineCore"\s*,\s*url:\s*"[^"]*/EngineCore\.xcframework\.zip"\s*,\s*checksum:\s*"([0-9a-fA-F]{64})"', src)
+print(m.group(1).lower() if m else "")
+PY
+)"
+CORE_TAG="$(pin ENGINECORE_RELEASE)"
+CORE_SHA="$(pin ENGINECORE_SHA256)"
+if [ -z "$SPM_CORE_SHA" ]; then
+    if grep -q '"EngineCore"' "$MANIFEST"; then
+        cannot "Package.swift names EngineCore but its binaryTarget checksum could not be read"
+    fi
+    [ -z "$CORE_TAG$CORE_SHA" ] || refuse "A8 the pod pins EngineCore ($CORE_TAG) but Package.swift declares none"
+elif [ -z "$CORE_TAG" ] || [ -z "$CORE_SHA" ]; then
+    refuse "A8 Package.swift links EngineCore but bootstrap.sh declares no ENGINECORE_RELEASE/ENGINECORE_SHA256 default — the pod's macOS link would miss the engine core"
+elif [ "$CORE_TAG" != "$SPM_TAG" ] || [ "$CORE_SHA" != "$SPM_CORE_SHA" ]; then
+    refuse "A8 the pod stages EngineCore $CORE_TAG (${CORE_SHA:0:16}…), SwiftPM serves $SPM_TAG (${SPM_CORE_SHA:0:16}…) — roll ENGINECORE_RELEASE/ENGINECORE_SHA256 with essence2Tag"
+else
+    pass "A8 EngineCore pinned at $CORE_TAG, the SwiftPM binaryTarget's bytes (${SPM_CORE_SHA:0:16}…)"
 fi
 
 if [ "$FAIL" -ne 0 ]; then
