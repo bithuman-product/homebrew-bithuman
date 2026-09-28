@@ -92,8 +92,8 @@ jobs:
           arm "the UnifiedModelHeader digest is a different valid sha256" \
               's|UMH_SHA256:-[0-9a-f]\{64\}|UMH_SHA256:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|'
           # A8: the pod's EngineCore (the macOS link, essence2-v1.15.0+) drifts from the manifest's.
-          arm "the pod stages EngineCore from an older essence2 release" \
-              's|ENGINECORE_RELEASE:-essence2-v[0-9.]*|ENGINECORE_RELEASE:-essence2-v1.14.2|'
+          arm "the pod stages an older EngineCore release" \
+              's|ENGINECORE_RELEASE:-enginecore-v[0-9.]*|ENGINECORE_RELEASE:-enginecore-v1.0.0|'
           arm "the EngineCore digest is a different valid sha256" \
               's|ENGINECORE_SHA256:-[0-9a-f]\{64\}|ENGINECORE_SHA256:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|'
           arm "the EngineCore digest is deleted" \
