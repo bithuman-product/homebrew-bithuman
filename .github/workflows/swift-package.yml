@@ -68,8 +68,13 @@ jobs:
       # the very next invocation exits 0. `--disable-keychain` is one flag apart on
       # the same cold state and is cold-clean, so it is used here deliberately, not
       # as a workaround for something this repo could fix.
+      # ★PIPEFAIL (2026-09-28): the step shell is `bash -e` with no pipefail, so `| tail -40`
+      # made this step exit 0 on a FAILED build — measured on #140, where every v2.19.0
+      # binaryTarget 404'd ("badResponseStatusCode(404)") and the job read green.
       - name: swift build (this downloads and CHECKSUM-VERIFIES every binaryTarget)
-        run: swift build --disable-keychain -v 2>&1 | tail -40
+        run: |
+          set -o pipefail
+          swift build --disable-keychain -v 2>&1 | tail -40
 
       # "Build complete!" on a package whose products were all silently omitted
       # would be a vacuous pass, so assert the manifest actually declares binary
@@ -85,4 +90,6 @@ jobs:
           fi
 
       - name: swift test (the source Layer-0 protocol)
-        run: swift test --disable-keychain 2>&1 | tail -30
+        run: |
+          set -o pipefail
+          swift test --disable-keychain 2>&1 | tail -30
