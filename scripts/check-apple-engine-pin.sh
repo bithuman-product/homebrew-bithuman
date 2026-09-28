@@ -208,6 +208,11 @@ m = re.search(r'name:\s*"EngineCore"\s*,\s*url:\s*"[^"]*/EngineCore\.xcframework
 print(m.group(1).lower() if m else "")
 PY
 )"
+# EngineCore has its OWN tap tag since enginecore-v1.0.1 (the restricted rebuild, #1636): it
+# rolls on its own security cadence, not with essence2Tag. Grade ENGINECORE_RELEASE against the
+# manifest's enginecoreTag, and the digest against the EngineCore binaryTarget checksum.
+SPM_CORE_TAG="$(sed -n 's/^let enginecoreTag = "\([^"]*\)"$/\1/p' "$MANIFEST" | head -1)"
+[ -n "$SPM_CORE_TAG" ] || SPM_CORE_TAG="$SPM_TAG"   # older manifests carried EngineCore on essence2Tag
 CORE_TAG="$(pin ENGINECORE_RELEASE)"
 CORE_SHA="$(pin ENGINECORE_SHA256)"
 if [ -z "$SPM_CORE_SHA" ]; then
@@ -217,8 +222,8 @@ if [ -z "$SPM_CORE_SHA" ]; then
     [ -z "$CORE_TAG$CORE_SHA" ] || refuse "A8 the pod pins EngineCore ($CORE_TAG) but Package.swift declares none"
 elif [ -z "$CORE_TAG" ] || [ -z "$CORE_SHA" ]; then
     refuse "A8 Package.swift links EngineCore but bootstrap.sh declares no ENGINECORE_RELEASE/ENGINECORE_SHA256 default — the pod's macOS link would miss the engine core"
-elif [ "$CORE_TAG" != "$SPM_TAG" ] || [ "$CORE_SHA" != "$SPM_CORE_SHA" ]; then
-    refuse "A8 the pod stages EngineCore $CORE_TAG (${CORE_SHA:0:16}…), SwiftPM serves $SPM_TAG (${SPM_CORE_SHA:0:16}…) — roll ENGINECORE_RELEASE/ENGINECORE_SHA256 with essence2Tag"
+elif [ "$CORE_TAG" != "$SPM_CORE_TAG" ] || [ "$CORE_SHA" != "$SPM_CORE_SHA" ]; then
+    refuse "A8 the pod stages EngineCore $CORE_TAG (${CORE_SHA:0:16}…), SwiftPM serves $SPM_CORE_TAG (${SPM_CORE_SHA:0:16}…) — roll ENGINECORE_RELEASE/ENGINECORE_SHA256 with the manifest's enginecoreTag"
 else
     pass "A8 EngineCore pinned at $CORE_TAG, the SwiftPM binaryTarget's bytes (${SPM_CORE_SHA:0:16}…)"
 fi

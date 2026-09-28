@@ -1,3 +1,11 @@
+## 2.6.22 — 2026-09-28 — security fix: restrict internal symbols in the macOS engine core
+
+Tag `flutter-plugin-v2.6.22`.
+
+* **Security (macOS):** the macOS `EngineCore` moves to `enginecore-v1.0.1`, a rebuild that keeps
+  only its public C doors linkable. Please update. iOS is unaffected; Expression 2 and Essence 2
+  are unchanged (`v2.19.0` / `essence2-v1.15.0`). Run `scripts/bootstrap.sh` again.
+
 ## 2.6.21 — 2026-09-28 — engine update; macOS EngineCore included
 
 Tag `flutter-plugin-v2.6.21`.
