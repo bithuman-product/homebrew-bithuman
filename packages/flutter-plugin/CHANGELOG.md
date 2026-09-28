@@ -22,6 +22,25 @@ older brain (the split-sentence merge is then off).
 * The brain strips emoji, markdown and `*actions*` from captions and speech, and answers a turn
   about suicide or self-harm with a fixed crisis message (988 / local crisis line).
 
+### Apple's on-device model as the brain's LLM (needs libconverse 2.5.0)
+
+* **No LLM download on Apple Intelligence devices.** On iOS / macOS 26 with Apple Intelligence
+  turned on, LOCAL mode can run Apple's on-device model (the Foundation Models framework) instead
+  of Llama 3.2 1B, so the app downloads only the voice: 200.6 MB instead of 1008 MB.
+  `BithumanAvatar.appleIntelligenceStatus()` says whether that works here and why not
+  (`deviceNotEligible`, `appleIntelligenceNotEnabled` — the user can turn it on in Settings —,
+  `modelNotReady`, …); `LocalBrainModels.assetsFor(apple:)` is the download for that answer.
+* `localAudioStart` / `LocalConverseTransport` take `llm:` (`auto` = Apple's model where it is
+  available, else the GGUF; `apple`; `llama`). `ggufPath` is optional when Apple's model runs.
+* When Apple's model refuses a turn (its own guardrail), the avatar says an in-character line
+  (`LocalBrainPersona.wisePupRefusal`) and the refused turn leaves the history, so it cannot make
+  the model refuse the turns after it. The 988 crisis reply is still decided before any model
+  sees the turn. The first reply is prewarmed at load.
+* **It is not faster.** Apple's model takes about 0.4 s to its first words on an M4 Mac, against
+  about 0.05 s for Llama, so the first audio comes about 0.35 s later (see the PR for the full
+  measurement). Choose it for the download size, not for speed.
+* FoundationModels is weak-linked: the plugin still loads on older systems.
+
 ## 2.6.22 — 2026-09-28 — security fix: restrict internal symbols in the macOS engine core
 
 Tag `flutter-plugin-v2.6.22`.

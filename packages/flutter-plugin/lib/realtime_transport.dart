@@ -33,6 +33,7 @@ import 'package:bithuman/bithuman_realtime.dart';
 import 'openai_webrtc_session.dart';
 import 'src/transport_protocol.dart';
 import 'src/dev_levers.dart';
+import 'src/local_brain.dart';
 
 export 'src/transport_protocol.dart';
 // The on-device brain's shipped defaults (persona prompts, measured model set,
@@ -376,14 +377,23 @@ class WebRTCTransport implements RealtimeTransport {
 class LocalConverseTransport implements RealtimeTransport {
   LocalConverseTransport({
     required this.avatar,
-    required this.ggufPath,
+    this.ggufPath,
     this.supertonicAssets,
     this.voice,
     this.vadThreshold = 0,
     this.systemPrompt = '',
+    this.llm = LocalBrainLlm.auto,
+    this.refusalReply = '',
   });
   final VoiceHost avatar;
-  final String ggufPath;
+  /// The Llama GGUF. Null is fine when Apple's on-device model runs the brain
+  /// (see [llm] and [AppleIntelligenceStatus]).
+  final String? ggufPath;
+  /// Which LLM the brain runs; [LocalBrainLlm.auto] = Apple's model where it is
+  /// available, else the GGUF.
+  final LocalBrainLlm llm;
+  /// Spoken when Apple's model refuses a turn ('' = the brain's default line).
+  final String refusalReply;
   final String? supertonicAssets;
   final String? voice;
   final int vadThreshold;
@@ -443,6 +453,8 @@ class LocalConverseTransport implements RealtimeTransport {
         voice: voice,
         vadThreshold: vadThreshold,
         systemPrompt: systemPrompt,
+        llm: llm.name,
+        refusalReply: refusalReply,
       );
       _evSub = avatar.converseEvents.listen(_onEvent);
       // The native mic only exists after localAudioStart, so a mute requested
@@ -584,6 +596,7 @@ RealtimeTransport pickTransport({
   bool localMode = false,
   String? ggufPath,
   String? supertonicAssets,
+  bool appleLlm = false,     // the brain runs Apple's on-device model: no GGUF needed
   String? transportOverride, // test injection; defaults to the dart-define
   String? operatingSystem,   // test injection; defaults to Platform's
 }) {
@@ -591,6 +604,7 @@ RealtimeTransport pickTransport({
   final d = pickTransportDescriptor(
     localMode: localMode,
     ggufPath: ggufPath,
+    appleLlm: appleLlm,
     transportOverride: transportOverride,
     operatingSystem: os,
   );
@@ -608,7 +622,8 @@ RealtimeTransport pickTransport({
     case 'local':
       return LocalConverseTransport(
         avatar: avatar,
-        ggufPath: ggufPath!,
+        ggufPath: ggufPath,
+        llm: appleLlm ? LocalBrainLlm.apple : LocalBrainLlm.auto,
         supertonicAssets: supertonicAssets,
         voice: voice,
         vadThreshold: vadThreshold,
@@ -676,10 +691,10 @@ TransportDescriptor pickTransportDescriptor({
   required String? ggufPath,
   required String? transportOverride,
   required String operatingSystem,
+  bool appleLlm = false,
 }) {
   if (localMode &&
-      ggufPath != null &&
-      ggufPath.isNotEmpty &&
+      (appleLlm || (ggufPath != null && ggufPath.isNotEmpty)) &&
       kLocalConverseTransport.runsOn(operatingSystem)) {
     return kLocalConverseTransport;
   }

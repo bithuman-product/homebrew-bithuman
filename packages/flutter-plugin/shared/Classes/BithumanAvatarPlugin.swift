@@ -250,6 +250,12 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
     case "engineVersion":
       result("expression-2 (pure-Swift/CoreML)")
 
+    case "appleIntelligenceStatus":
+      // Whether the on-device brain can run Apple's model (Foundation Models)
+      // here instead of downloading Llama — see AppleLlmStatus for the values.
+      // Asked BEFORE the app downloads the brain's models.
+      result(AppleLlmStatus.current())
+
     case "isLocalModeSupported":
       // LOCAL mode (on-device converse brain) binds Apple's SpeechAnalyzer,
       // which is `@available(macOS 26.0, iOS 26.0)`. Probe the running OS so
@@ -682,10 +688,9 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // ★NO TEXTURE REQUIRED — same cut as `audioStart` above. The on-device
       // brain drives the same RealtimeAudioIO; the avatar is optional there too.
       guard let args = call.arguments as? [String: Any],
-            let textureId = args["textureId"] as? Int64,
-            let gguf = args["ggufPath"] as? String else {
+            let textureId = args["textureId"] as? Int64 else {
         result(FlutterError(code: "BAD_ARGS",
-                            message: "localAudioStart requires textureId + ggufPath", details: nil))
+                            message: "localAudioStart requires textureId", details: nil))
         return
       }
       guard #available(macOS 26.0, iOS 26.0, *) else {
@@ -693,6 +698,26 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
                             message: "local mode requires macOS 26 / iOS 26 (SpeechAnalyzer)", details: nil))
         return
       }
+      // The brain's LLM: "apple" = Apple's on-device model (no download),
+      // "llama" = the downloaded GGUF at ggufPath, "auto" (default) = Apple's
+      // model when AppleLlmStatus says "available", else the GGUF.
+      let gguf = (args["ggufPath"] as? String) ?? ""
+      let llmChoice = (args["llm"] as? String) ?? "auto"
+      let appleStatus = AppleLlmStatus.current()
+      let appleLlm = llmChoice == "apple" || (llmChoice == "auto" && appleStatus == "available")
+      if appleLlm && appleStatus != "available" {
+        result(FlutterError(code: "APPLE_LLM_UNAVAILABLE",
+                            message: "Apple's on-device model is not available here (\(appleStatus))",
+                            details: appleStatus))
+        return
+      }
+      if !appleLlm && gguf.isEmpty {
+        result(FlutterError(code: "BAD_ARGS",
+                            message: "localAudioStart needs ggufPath: Apple's on-device model is not available here (\(appleStatus))",
+                            details: appleStatus))
+        return
+      }
+      let refusalReply = (args["refusalReply"] as? String) ?? ""
       if audioIOs[textureId] == nil {
         let io = RealtimeAudioIO()
         io.lipsyncSink = textures[textureId]   // nil = headless local voice session
@@ -729,7 +754,8 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       result(nil)
       DispatchQueue.global(qos: .userInitiated).async { [weak self] in
         let ctrl = LocalConverseController(io: io, gguf: gguf, supertonicAssets: supertonicAssets,
-                                           voice: voice, systemPrompt: systemPrompt)
+                                           voice: voice, systemPrompt: systemPrompt,
+                                           appleLlm: appleLlm, refusalReply: refusalReply)
         DispatchQueue.main.async {
           guard let self = self, self.audioIOs[textureId] != nil else { return }  // disposed mid-load
           guard let ctrl = ctrl else {
@@ -741,7 +767,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
           self.converseControllers[textureId] = ctrl
           do {
             try io.start(vadThreshold: vad)
-            handler.emit(["kind": "ready"])
+            handler.emit(["kind": "ready", "llm": appleLlm ? "apple" : "llama"])
           } catch {
             handler.emit(["kind": "error", "message": error.localizedDescription])
           }

@@ -109,12 +109,19 @@ abstract class VoiceHost {
   /// Run the on-device converse brain (ASR → LLM → TTS) instead of a cloud
   /// provider. Registers the event channel synchronously and returns promptly;
   /// the model load runs off-thread and reports through [converseEvents].
+  ///
+  /// [llm] picks the brain's LLM: `auto` (Apple's on-device model where it is
+  /// available, else the GGUF at [ggufPath]), `apple`, or `llama`. [ggufPath]
+  /// may be null only when Apple's model will be used. [refusalReply] is spoken
+  /// when Apple's model refuses a turn ('' = the brain's default line).
   Future<void> localAudioStart({
-    required String ggufPath,
+    String? ggufPath,
     String? supertonicAssets,
     String? voice,
     int vadThreshold,
     String systemPrompt,
+    String llm,
+    String refusalReply,
   });
 
   /// Tear down the local brain and its audio unit.
