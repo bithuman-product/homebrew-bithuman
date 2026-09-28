@@ -1,3 +1,22 @@
+## Unreleased — the on-device brain can speak with an Apple system voice
+
+Needs a libconverse with the host voice (`bc_session_set_host_tts`); against an older brain the
+option falls back to the built-in voice.
+
+* **`LocalConverseTransport(voice: LocalBrainVoice.system)`** speaks the on-device replies with
+  the best Premium or Enhanced Apple voice the user already has, so the ~200 MB built-in voice
+  (Supertonic) need not be downloaded. `LocalBrainVoice.systemVoice(id)` picks a specific voice.
+  With only the compact default voices installed, `system` falls back to the built-in voice
+  (which then needs its assets); `activeVoice` reports what is speaking and why.
+* **`SystemVoices.query()`** lists the installed voices with their quality (for a picker),
+  `requestPersonalVoice()` asks for the user's Personal Voice, `openSettings()` opens the closest
+  settings page (macOS: Accessibility → Spoken Content; iOS allows no link into Accessibility, so
+  it opens the app's page — show `downloadSteps`). No API can download a voice for the user.
+* Siri voices are not available: Apple does not offer them to other apps.
+* The speech is rendered to PCM (`AVSpeechSynthesizer.write`), never straight to the speaker, and
+  goes through the same path as the built-in voice: speaker and avatar lip-sync take the same
+  bytes, barge-in is unchanged.
+
 ## Unreleased — the on-device brain, fast enough for a free tier
 
 Needs libconverse **2.4.0**. Until a vendor bundle carries it, stage a local build with

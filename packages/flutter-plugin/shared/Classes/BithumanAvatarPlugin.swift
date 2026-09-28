@@ -262,6 +262,24 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
         result(false)
       }
 
+    // LOCAL mode voices (SystemVoice.swift). The on-device brain can speak with an
+    // Apple system voice the user already has (voice: "system" / "system:<id>").
+    // Siri voices are not available to apps; Premium / Enhanced voices are, once
+    // the user has downloaded them in Settings (no API can download them).
+    case "localSystemVoices":
+      let lang = (call.arguments as? [String: Any])?["language"] as? String ?? "en"
+      let best = SystemVoiceCatalog.best(language: lang)?.identifier
+      result(["voices": SystemVoiceCatalog.voices(language: lang).map(SystemVoiceCatalog.describe),
+              "best": best.map { $0 as Any } ?? NSNull(),
+              "personalVoice": SystemVoiceCatalog.personalVoiceStatus(),
+              "downloadSteps": SystemVoiceCatalog.downloadSteps])
+
+    case "localRequestPersonalVoice":
+      SystemVoiceCatalog.requestPersonalVoice { result($0) }
+
+    case "localOpenVoiceSettings":
+      SystemVoiceCatalog.openVoiceSettings { result($0) }
+
     // dual-accept: "setExpression2AgentDir" is canonical; "setEmbodyAgentDir" stays
     // accepted forever (cross-boundary SDK↔app channel string contract).
     case "setExpression2AgentDir", "setEmbodyAgentDir":
@@ -741,6 +759,8 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
           }
           ctrl.onEvent = { [weak handler] ev in handler?.emit(ev) }
           self.converseControllers[textureId] = ctrl
+          // Which voice is speaking (a system voice, or the built-in one and why).
+          handler.emit((["kind": "voice"] as [String: Any]).merging(ctrl.voiceInfo) { a, _ in a })
           do {
             try io.start(vadThreshold: vad)
             handler.emit(["kind": "ready"])

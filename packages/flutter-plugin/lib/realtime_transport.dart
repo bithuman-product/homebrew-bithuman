@@ -39,6 +39,9 @@ export 'src/transport_protocol.dart';
 // The on-device brain's shipped defaults (persona prompts, measured model set,
 // required license notices) — see lib/src/local_brain.dart.
 export 'src/local_brain.dart';
+// The on-device brain's voice choice: the built-in character voice, or an Apple
+// system voice the user already has (no download) — see lib/src/local_voice.dart.
+export 'src/local_voice.dart';
 // Re-exported WITHOUT a matching import on purpose: `VoiceHost` already reaches
 // this library through bithuman_realtime.dart (the voice library exports the
 // voice protocol), so importing it here is what the analyzer calls an
@@ -430,6 +433,16 @@ class LocalConverseTransport implements RealtimeTransport {
   @override
   TransportDescriptor get descriptor => kLocalConverseTransport;
 
+  // `voice`: [LocalBrainVoice.builtIn] (default) or [LocalBrainVoice.system] /
+  // [LocalBrainVoice.systemVoice] for an Apple system voice (no download).
+  Map<String, dynamic>? _activeVoice;
+
+  /// The voice speaking in this session, once the brain is loaded:
+  /// {'backend': 'system', 'id', 'name', 'quality', …} for an Apple voice, or
+  /// {'backend': 'builtin', 'name', 'fallback'?} for the built-in voice
+  /// ('fallback' says why a requested system voice was not used).
+  Map<String, dynamic>? get activeVoice => _activeVoice;
+
   @override
   Future<void> start({bool mic = true}) async {
     _status.add(TransportStatus.connecting);
@@ -498,6 +511,8 @@ class LocalConverseTransport implements RealtimeTransport {
         _interrupt.add(null); // new user turn → flush the bot caption
       case 'bot':
         _bot.add(ev['text'] as String? ?? '');
+      case 'voice':
+        _activeVoice = Map<String, dynamic>.from(ev)..remove('kind');
     }
   }
 
