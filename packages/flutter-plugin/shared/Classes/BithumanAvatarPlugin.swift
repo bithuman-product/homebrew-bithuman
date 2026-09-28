@@ -698,6 +698,8 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
         io.lipsyncSink = textures[textureId]   // nil = headless local voice session
         audioIOs[textureId] = io
       }
+      // The brain feeds faster than realtime → the mouth may start on ci=0 (fastSpeechOnset).
+      textures[textureId]?.fastSpeechOnset = true
       guard let io = audioIOs[textureId] else {
         result(FlutterError(code: "NO_AUDIO_IO", message: "audio IO unavailable", details: nil)); return
       }
@@ -762,6 +764,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       #endif
       converseControllers.removeValue(forKey: textureId)
       converseChannels.removeValue(forKey: textureId)
+      textures[textureId]?.fastSpeechOnset = false
       audioIOs[textureId]?.stop()
       audioIOs.removeValue(forKey: textureId)
       result(nil)
@@ -983,6 +986,7 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     // the deep feed-ahead queue, deferring even one tick lets it keep talking.
     avatar?.resetState()   // barge: full reset stops generation instantly + clean next utterance
     embodySpeaking = false
+    audioLock.lock(); onsetFedSamples = 0; onsetReplyComplete = false; audioLock.unlock()
     embodyDrainWaitTicks = 0      // a fresh utterance starts the drain watchdog clean
     #endif
     #if os(macOS) || os(iOS)
@@ -1006,8 +1010,24 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     audioLock.lock()
     let remaining = audioQueue
     audioQueue.removeAll(keepingCapacity: true)
+    // ★A REPLY THAT ARRIVED WHOLE. The on-device brain hands a reply over as fast
+    // as it is synthesized and signals the end as soon as the last sample is handed
+    // over, so a one-chunk reply ("Rome is the capital of France.", 2.3 s) can reach
+    // here before the 40 ms audio tick has consumed it — with the new utterance's
+    // pending reset still unapplied. Feeding + flushing here and letting the next
+    // tick apply that reset WIPED the whole reply: no mouth and, since the speaker
+    // is released by mouth frames, no voice either (measured 09-28, iPhone 15:
+    // 1 reply in 29 lost). Apply the reset HERE, before the feed — the same order
+    // the audio tick uses.
+    let needsReset = !lipsyncPaused && pendingUtteranceReset
+    if needsReset { pendingUtteranceReset = false }
+    audioFed += remaining.count
+    onsetFedSamples += remaining.count
+    onsetReplyComplete = true
     audioLock.unlock()
-    NSLog("[embody-av] onTurnEnd: feeding %d residual lipsync samples + flushTail", remaining.count)
+    NSLog("[embody-av] onTurnEnd: feeding %d residual lipsync samples + flushTail%@", remaining.count,
+          needsReset ? " (new utterance: reset first)" : "")
+    if needsReset { avatar?.resetState() }
     if !remaining.isEmpty { avatar?.feed(remaining) }
     avatar?.flushTail()
     #endif
@@ -1268,6 +1288,27 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
   /// that frame's slice, so the click lands in the same unit.
   var markerOnNextRelease = false
   private static let maxDrainWaitTicks = 60
+  /// ★FAST SPEECH ONSET (on-device brain). The embody display normally enters
+  /// speech only at `speechCushion` (32) queued frames, i.e. after ci=0 AND ci=1
+  /// have RENDERED: at a cloud stream's realtime arrival rate ci=1 lands ~1.5 s
+  /// after ci=0, and starting on ci=0's 21 frames alone would drain and hold ~1 s
+  /// in. The on-device brain hands its PCM over as fast as it is synthesized, so
+  /// with it the display enters speech on ci=0 as soon as the audio ci=1 renders
+  /// from is IN (2 chunks = 3.2 s, or the whole reply when shorter): ci=1 then
+  /// lands ~0.3 s later, well inside ci=0's 1.05 s of frames. Measured on iPhone
+  /// 15 (Wise Pup, 09-28): avatar onset after the first TTS audio 843 → ~600 ms
+  /// median, no holds. Entering on ci=0 WITHOUT waiting for that audio started
+  /// ~300 ms sooner still but held the display (voice and mouth, paired) for
+  /// 100–560 ms whenever the second TTS chunk was long — coverage 0.969.
+  /// Set by localAudioStart, cleared by localAudioStop; the cloud paths keep the
+  /// full cushion.
+  var fastSpeechOnset = false
+  private static let fastOnsetCushionFrames = 16     // ≤ ci=0's 21 frames: enter the moment ci=0 lands
+  private static let engineSamplesPerChunk = 25_600  // Expression 2: 1.6 s @ 16 kHz per chunk
+  /// Reply audio fed since the display last left speech, and whether the brain has
+  /// handed the whole reply over (onTurnEnd). Guarded by audioLock.
+  private var onsetFedSamples = 0
+  private var onsetReplyComplete = false
   // --- essence2 (Essence2) drive constants — verbatim from the proven canonical
   // composeTickElevate. Only composeTickEssence2 reads these; embody is untouched.
   // (idleResetSecs already exists above.)
@@ -1549,7 +1590,7 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     // so this cannot outrun the engine — the engine is the bound.
     let take = paused ? 0 : audioQueue.count
     let samples = take > 0 ? audioQueue : []
-    if take > 0 { audioQueue.removeAll(keepingCapacity: true); audioFed += take }
+    if take > 0 { audioQueue.removeAll(keepingCapacity: true); audioFed += take; onsetFedSamples += take }
     let fedTotal = audioFed
     audioLock.unlock()
     if take > 0 {
@@ -1707,7 +1748,15 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
       // realtime stream rate — so starting at ci=0 drains ~1 s in and freezes.
       // The idle loop covers this short wait (no freeze; costs ~1.5 s on the
       // first reply). After ci=1 the queue stays ahead, so it's smooth.
-      if rt.queuedFrames >= rt.speechCushion {
+      // (The on-device brain enters earlier: see `fastSpeechOnset`.)
+      var cushion = rt.speechCushion
+      if fastSpeechOnset {
+        audioLock.lock(); let fed = onsetFedSamples, complete = onsetReplyComplete; audioLock.unlock()
+        if complete || fed >= 2 * Self.engineSamplesPerChunk {
+          cushion = min(cushion, Self.fastOnsetCushionFrames)
+        }
+      }
+      if rt.queuedFrames >= cushion {
         embodySpeaking = true   // cushion ready → live speech
         if holdTicks > 0 { noteHoldRunEnded() }
       } else { publishIdleLoopFrame(rt); return }
@@ -1744,6 +1793,7 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
       embodyDrainWaitTicks = 0
       holdTicks = 0              // the reply ended; not a hold
       embodySpeaking = false; publishIdleLoopFrame(rt)
+      audioLock.lock(); onsetFedSamples = 0; onsetReplyComplete = false; audioLock.unlock()
       return
     }
     embodyDrainWaitTicks = 0   // got a frame → disarm watchdog

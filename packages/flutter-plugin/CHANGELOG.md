@@ -21,6 +21,22 @@ older brain (the split-sentence merge is then off).
   licenses require). See `THIRD_PARTY_NOTICES.md`.
 * The brain strips emoji, markdown and `*actions*` from captions and speech, and answers a turn
   about suicide or self-harm with a fixed crisis message (988 / local crisis line).
+* **The mouth starts on the avatar's first window (LOCAL mode, Expression 2).** The display used
+  to wait until the engine had rendered its first TWO 1.6 s windows, i.e. until 3.2 s of reply
+  speech was synthesized and both windows rendered. With the on-device brain it now starts on the
+  first window as soon as the audio for the second is in (or the whole reply, if shorter), so it
+  never runs dry mid-word. The brain also lets its first two speech chunks end at a clause, so
+  that audio arrives sooner. iPhone 15, Wise Pup: recognizer final → first mouth frame 1.84 s →
+  1.43 s median; end of speech → mouth 2.71 s → 2.13 s median (n=12). Cloud sessions are
+  unchanged.
+* **A one-sentence reply is no longer lost.** A reply short enough to be synthesized in one piece
+  could reach the avatar's end-of-reply flush before the audio tick had seen it; the tick's reset
+  for the new reply then wiped it, and the reply was neither shown nor heard (1–2 replies in 12 in
+  scripted iPhone 15 runs; none in 48 since). The flush now applies that reset first.
+* **The greeting waits for the character.** The brain is ready ~2 s after start on a warm iPhone
+  15 launch, the Expression 2 engine ~9 s; the greeting used to be spoken over the loading loop.
+  `LocalConverseTransport` now greets once the avatar is ready (a session with no avatar greets at
+  once, as before).
 
 ## 2.6.22 — 2026-09-28 — security fix: restrict internal symbols in the macOS engine core
 

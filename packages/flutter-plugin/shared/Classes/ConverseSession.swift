@@ -78,6 +78,12 @@ final class ConverseSession: @unchecked Sendable {
     init?(gguf: String, supertonicAssets: String?, voice: String = "M1",
           systemPrompt: String = "") {
         if let a = supertonicAssets, !a.isEmpty { setenv("BITHUMAN_SUPERTONIC_ASSETS", a, 1) }
+        // The first TWO TTS chunks may end at a clause (libconverse reads it per
+        // reply; a brain without the knob ignores it). The avatar enters speech on
+        // its first 1.6 s window once the audio for the second one (3.2 s) is in —
+        // see AvatarTexture.fastSpeechOnset — and a long second sentence took ~1 s
+        // just to synthesize on iPhone 15. A value the host set is kept.
+        setenv("BITHUMAN_CONVERSE_CLAUSE_CHUNKS", "2", 0)
 
         var cfg = bc_config_t()
         cfg.abi_version = UInt32(BC_ABI_VERSION)
