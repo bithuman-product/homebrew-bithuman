@@ -366,12 +366,13 @@ class BithumanAvatar implements VoiceHost {
   }
 
   /// Whether LOCAL mode (the on-device converse brain) can run on this OS.
-  /// The brain binds Apple's SpeechAnalyzer, which is `@available(macOS 26.0,
+  /// On Apple the brain binds SpeechAnalyzer, which is `@available(macOS 26.0,
   /// iOS 26.0)`, so on older systems [localAudioStart] would fail with
-  /// UNSUPPORTED_OS at session start. Probe this once at startup and disable the
-  /// LOCAL-mode toggle (with a clear reason) when it returns false, rather than
-  /// surfacing a cryptic runtime error. False on non-Apple platforms and on
-  /// older plugin builds without the probe.
+  /// UNSUPPORTED_OS at session start. On Android it needs an arm64 device on
+  /// Android 10+ whose brain libraries load. Probe this once at startup and
+  /// disable the LOCAL-mode toggle (with a clear reason) when it returns false,
+  /// rather than surfacing a cryptic runtime error. False on other platforms and
+  /// on older plugin builds without the probe.
   static Future<bool> isLocalModeSupported() async {
     try {
       return await _channel.invokeMethod<bool>('isLocalModeSupported') ?? false;
@@ -380,13 +381,16 @@ class BithumanAvatar implements VoiceHost {
     }
   }
 
-  /// LOCAL mode (macOS): run the on-device converse brain (Apple SpeechAnalyzer
-  /// → Qwen → Supertonic) instead of the cloud Realtime WebSocket. Reuses the
-  /// same VP-IO audio + avatar Texture as [audioStart]; the brain feeds the
-  /// avatar lipsync + speaker directly on-device. [ggufPath] is the local LLM
-  /// .gguf; [supertonicAssets] is the Supertonic ONNX assets dir. The metered
-  /// avatar render still needs your API secret — the `apiSecret:` passed to
-  /// [load] (or BITHUMAN_API_SECRET in the process environment).
+  /// LOCAL mode: run the on-device converse brain instead of the cloud Realtime
+  /// WebSocket — on macOS/iOS Apple SpeechAnalyzer → Qwen → Supertonic
+  /// (libconverse), on Android Moonshine → llama.cpp → Supertonic. Reuses the
+  /// same audio + avatar Texture as [audioStart]; the brain feeds the avatar
+  /// lipsync + speaker directly on-device. [ggufPath] is the local LLM .gguf;
+  /// [supertonicAssets] is the Supertonic ONNX assets dir. On Android the
+  /// Supertonic dir holds sherpa-onnx's int8 layout and the speech-in models sit
+  /// in `stt/` next to the .gguf (see the plugin README, "Android LOCAL mode").
+  /// The metered avatar render still needs your API secret — the `apiSecret:`
+  /// passed to [load] (or BITHUMAN_API_SECRET in the process environment).
   @override
   Future<void> localAudioStart({
     required String ggufPath,

@@ -244,6 +244,7 @@ The session auto-reconnects WS drops with 1/2/4/8/16/30 s backoff (cap 30 s, 8 a
 | Platform | Status |
 | --- | --- |
 | macOS (Apple Silicon, 13.0+) | shipped — on-device expression-2 (CoreML/ANE) + optional on-device essence-2 render + cloud/local brain |
+| Android (arm64, 10+) | on-device expression-2 / essence-2 render + cloud brain, or the on-device LOCAL brain (see below) |
 | iOS (device, 16.0+) | cloud brain only — on-device avatar render is macOS-only today (`platforms: [macos]` in each engine manifest) |
 
 ## Set your Apple signing team
@@ -282,6 +283,64 @@ native deps into `<plat>/Frameworks/` + each engine under `<plat>/Engines/<engin
 macOS needs two Homebrew dylibs at link + runtime via `@rpath`:
 `brew install llama.cpp onnxruntime` (the app's xcconfig wires the `@rpath`). The
 cloud OpenAI-Realtime mode needs neither — it's pure Swift.
+
+## Android LOCAL mode (the on-device brain)
+
+`localAudioStart` works on Android (arm64, Android 10+): speech in, the reply and the voice
+all run on the phone, with no cloud and no OpenAI key. The Dart side is the same
+`LocalConverseTransport` that drives Apple's libconverse, with the same channel names and events,
+so an app that runs LOCAL mode on iPhone runs it on a Galaxy unchanged.
+
+| stage | Android | Apple (libconverse) |
+| --- | --- | --- |
+| speech in | silero VAD (400 ms endpoint) + **Moonshine tiny** (sherpa-onnx) | Apple SpeechAnalyzer |
+| reply | **llama.cpp** on the CPU, any chat GGUF (Llama-3.2-1B-Instruct Q4_K_M measured) | llama.cpp (Metal), Qwen2.5-0.5B |
+| voice | **Supertonic** (sherpa-onnx int8 export), voice `M1` by default | Supertonic (fp32) |
+
+The contract is Apple's `libconverse.h` (BC_ABI_VERSION 2) mirrored member for member in
+`android/.../brain/ConverseEngine.kt`: push_audio / push_text / pull_audio / interrupt / reset /
+state, and the same event kinds and states. What the Apple measurements taught is built in from the
+start: reply audio goes to the avatar **as fast as it is synthesized** with an in-order
+end-of-reply flush (no real-time pacing); endpointing is the VAD's own trailing silence (no forced
+finalize); history is capped and the KV cache is reused turn to turn (the prompt prefix is kept,
+and a trimmed history is slid down in the cache instead of re-prefilled); emoji, markdown and
+*stage directions* are stripped; a turn the VAD splits in two is merged; a self-harm mention
+gets a fixed crisis-line reply without asking the model, and the persona's house rules (never
+claims to be human, no romance) are appended to any app prompt.
+
+### Files the app provides
+
+Two paths come from Dart (the same two Apple takes); the speech-in models sit beside the LLM:
+
+```
+<dir>/<model>.gguf                     ggufPath: the LLM
+<supertonicAssets | <dir>/supertonic>/  duration_predictor.int8.onnx text_encoder.int8.onnx
+                                       vector_estimator.int8.onnx vocoder.int8.onnx
+                                       tts.json unicode_indexer.bin voice.bin
+<dir>/stt/                             silero_vad.onnx preprocess.onnx encode.int8.onnx
+                                       uncached_decode.int8.onnx cached_decode.int8.onnx tokens.txt
+```
+
+| asset | source | size | license |
+| --- | --- | --- | --- |
+| Llama-3.2-1B-Instruct Q4_K_M | `bartowski/Llama-3.2-1B-Instruct-GGUF` | 808 MB | Llama 3.2 Community License (attribution "Built with Llama"; 700 M MAU cap; AUP) |
+| — or Qwen2.5-0.5B-Instruct Q4_K_M (Apple's) | `Qwen/Qwen2.5-0.5B-Instruct-GGUF` | 491 MB | Apache-2.0 |
+| Supertonic 3, int8 | sherpa-onnx `tts-models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11` | 145 MB (128 MB .tar.bz2) | model OpenRAIL-M, code MIT |
+| Moonshine tiny, int8 | sherpa-onnx `asr-models/sherpa-onnx-moonshine-tiny-en-int8` | 124 MB | MIT |
+| silero VAD | sherpa-onnx `asr-models/silero_vad.onnx` | 0.6 MB | MIT |
+
+The app adds **26.5 MB** of native code (`libsherpa-onnx-jni.so` 23.6 MB, ONNX Runtime linked in
+statically, and `libbhbrain.so` 3.0 MB, llama.cpp). Nothing in the shipped path is GPL: sherpa-onnx is
+built from source with its espeak-ng dependency replaced by a no-op stand-in
+(`android/src/main/cpp/no-espeak/`, see its README); Supertonic does not phonemize.
+
+### Build notes
+
+The Android native build compiles llama.cpp (pinned commit) and sherpa-onnx v1.13.8 from source
+through CMake (NDK + CMake 3.22.1); the first build takes a few minutes. Offline builds:
+`BH_LLAMA_CPP_DIR=/path/to/llama.cpp` and `BH_SHERPA_ONNX_DIR=/path/to/sherpa-onnx@v1.13.8`.
+The ISA baseline is armv8.2-a + dotprod + fp16 (no i8mm assumed); on a Galaxy S25+ that costs
+nothing measurable against an armv8.7-a build (prefill 237 vs 251 tok/s, generation 69 vs 66).
 
 ## Hardware floor
 
