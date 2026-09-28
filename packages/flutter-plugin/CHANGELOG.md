@@ -1,3 +1,21 @@
+## Unreleased — sessions on a short-lived session token
+
+* **`BithumanCredential`**: an API secret (`BithumanCredential.apiSecret`), or a provider of
+  short-lived session tokens that your backend mints and refreshes
+  (`BithumanCredential.provider(({required forceRefresh}) => ...)`). An `apiKey` keeps working
+  exactly as before.
+* **Realtime:** `BithumanRealtimeSession(credential: ...)` is the alternative to `apiKey`. When the
+  relay refuses the token (it expired, or it was already used by another session), the session
+  asks the provider once with `forceRefresh: true` and dials again. A second refusal in a row is
+  final. Insufficient balance, plan and time-limit answers are final at once.
+* **Avatar:** `BithumanAvatar.load(credential: ...)` opens the avatar with the provider's token,
+  and while an avatar is loaded the plugin hands a changed token to the engines
+  (`BithumanAvatar.setCredential`). When the service refuses the token an engine's meter started
+  with, the meter moves to the newer one only after the service confirms that it belongs to the
+  same account. This needs the engine releases that follow this one.
+* Nothing here can turn metering off or pick a price: the service validates every credential and
+  prices every second itself.
+
 ## 2.6.22 — 2026-09-28 — security fix: restrict internal symbols in the macOS engine core
 
 Tag `flutter-plugin-v2.6.22`.

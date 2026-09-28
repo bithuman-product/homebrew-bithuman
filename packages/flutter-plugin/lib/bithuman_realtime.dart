@@ -35,10 +35,12 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 
+import 'src/credential.dart';
 import 'src/voice_host.dart';
 import 'src/dev_levers.dart';
 import 'src/echo_profile.dart';
 
+export 'src/credential.dart' show BithumanCredential, BithumanCredentialProvider;
 export 'src/voice_host.dart' show VoiceHost;
 
 /// One Realtime session over a single WebSocket.
@@ -48,13 +50,16 @@ export 'src/voice_host.dart' show VoiceHost;
 /// conversation. Use [statusStream] and [onError] to drive the UI.
 class BithumanRealtimeSession {
   BithumanRealtimeSession({
-    required this.apiKey,
+    this.apiKey = '',
+    this.credential,
     required this.avatar,
     this.model = 'gpt-realtime',
     this.systemPrompt = '',
     this.voice = 'alloy',
     required this.vadThreshold,
   }) {
+    assert(apiKey != '' || credential != null,
+        'pass apiKey (an API secret) or credential (a session-token provider)');
     _liveSystemPrompt = systemPrompt;
   }
 
@@ -65,12 +70,40 @@ class BithumanRealtimeSession {
   /// is retired: pass the secret itself.
   final String apiKey;
 
+  /// The alternative to [apiKey] for an app that holds no API secret: a
+  /// [BithumanCredential.provider] of short-lived bitHuman session tokens. The session
+  /// asks it for the token when it starts, and ONCE MORE with `forceRefresh: true` when
+  /// the relay refuses the token (it expired, or it was already spent on another
+  /// session), before that refusal ends the session. The relay reports a spent token as
+  /// FORBIDDEN, so for a provider an UNAUTHORIZED or FORBIDDEN refusal gets that one
+  /// fresh try; a second refusal in a row is final. An account's answers
+  /// (INSUFFICIENT_BALANCE, PLAN_REQUIRED, the time limit) are final at once, and an
+  /// [apiKey] session behaves exactly as before.
+  final BithumanCredential? credential;
+
+  /// The credential the current connection presents.
+  String _bearer = '';
+
+  /// One fresh credential per refusal: set when one is tried, cleared by the first event
+  /// of a connection the relay accepted.
+  bool _freshTried = false;
+
+  /// Refusals a fresh session token may cure. The relay reports a spent single-session
+  /// token as FORBIDDEN, and a refused handshake carries only its HTTP status.
+  static const Set<String> _freshCodes = {'UNAUTHORIZED', 'FORBIDDEN', 'TOKEN_SPENT'};
+
+  /// Bumped for every socket this session dials, and when a fresh token replaces one: a
+  /// late error or close from a socket that is no longer the current one is ignored (a
+  /// refused handshake reports through both the stream and `ready`).
+  int _connGen = 0;
+
   /// bitHuman's realtime relay (the OpenAI Realtime protocol, billed by bitHuman).
   static const String relayEndpoint = 'wss://api.bithuman.ai/v1/realtime';
 
   /// True when [apiKey] is an OpenAI credential (`sk-…`, or a leftover `ek_…`):
   /// the session then dials OpenAI directly instead of the relay.
-  bool get usesOpenAIDirectly => apiKey.startsWith('sk-') || apiKey.startsWith('ek_');
+  bool get usesOpenAIDirectly =>
+      credential == null && (apiKey.startsWith('sk-') || apiKey.startsWith('ek_'));
   /// The platform surface this session drives — mic, speaker, echo canceller
   /// and (if it has one) a mouth. Declared as the PROTOCOL, never as the render
   /// class: `BithumanAvatar` conforms, and so does a test double with no engine
@@ -314,6 +347,48 @@ class BithumanRealtimeSession {
     'SESSION_DURATION_LIMIT', 'MODEL_LOCKED', 'BAD_REQUEST',
   };
 
+  /// A refusal a fresh session token may cure ([_freshCodes]) on a [credential] provider
+  /// session that has not tried one since its last accepted connection: drop this socket,
+  /// ask the provider ONCE for a different token and dial again with it. Returns false
+  /// when the refusal stands (an API secret, a code no token changes, or the fresh try
+  /// already spent), and the caller ends the session as before.
+  bool _tryFreshCredential(String code) {
+    final c = credential;
+    if (c == null || !c.rotates || _freshTried || !_open || _terminalError != null) return false;
+    if (!_freshCodes.contains(code)) return false;
+    _freshTried = true;
+    _connGen++;   // the refused socket's remaining callbacks are stale from here on
+    // ignore: avoid_print
+    print('[realtime] the relay refused the session token ($code); asking the app for a fresh one, once');
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    final sub = _wsSub;
+    final ws = _ws;
+    _wsSub = null;
+    _ws = null;
+    sub?.cancel();
+    try {
+      ws?.sink.close();
+    } catch (_) {}
+    _status.add(RealtimeStatus.connecting);
+    () async {
+      final next = await c.fresh(_bearer);
+      if (!_open || _terminalError != null) return;
+      if (next == null) {
+        _terminal(code, 'the realtime service refused the session token, and the app offered no new one');
+        return;
+      }
+      _bearer = next;
+      try {
+        await _connectAndConfigure();
+        if (_terminalError == null && _open && _ws != null) _status.add(RealtimeStatus.open);
+      } catch (e) {
+        _handleError(e);
+      }
+    }();
+    return true;
+  }
+
   void _terminal(String code, String message) {
     if (_terminalError != null) return;
     _terminalError = RealtimeSessionError(code, message);
@@ -362,6 +437,18 @@ class BithumanRealtimeSession {
     if (_open) return;
     _open = true;
     _status.add(RealtimeStatus.connecting);
+    final c = credential;
+    if (c != null) {
+      // A session-token provider: the token it holds now. None = nothing to bill to.
+      final token = await c.current();
+      if (token == null) {
+        _terminal('UNAUTHORIZED', 'no credential: the credential provider returned none');
+        return;
+      }
+      _bearer = token;
+    } else {
+      _bearer = apiKey;
+    }
     try {
       // Bring up the native audio engine FIRST so VP-IO is already
       // running by the time the WS opens — the very first mic packet
@@ -425,7 +512,8 @@ class BithumanRealtimeSession {
       }
 
       await _connectAndConfigure();
-      if (_terminalError == null && _open) _status.add(RealtimeStatus.open);
+      // `_ws == null`: the handshake was refused and a fresh session token is being tried.
+      if (_terminalError == null && _open && _ws != null) _status.add(RealtimeStatus.open);
     } catch (e) {
       _status.add(RealtimeStatus.error);
       rethrow;
@@ -440,15 +528,20 @@ class BithumanRealtimeSession {
     // ignore: avoid_print
     print('[realtime] connecting to $_endpoint');
     _serverAcked = false;
+    final gen = ++_connGen;
     _ws = IOWebSocketChannel.connect(
       Uri.parse(_endpoint),
       headers: {
-        'Authorization': 'Bearer $apiKey',
+        'Authorization': 'Bearer $_bearer',
       },
     );
     _wsSub = _ws!.stream.listen(_handleMessage,
-        onError: _handleError,
-        onDone: _handleDone);
+        onError: (Object e) {
+          if (gen == _connGen) _handleError(e);
+        },
+        onDone: () {
+          if (gen == _connGen) _handleDone();
+        });
     // ★THE HANDSHAKE IS AWAITED (2.6.20). `connect` returns before the server answers, and a
     // refused upgrade (401 / 402 / 403 from the relay) completes `ready` with an error that
     // nothing awaited: an uncaught async exception in the host app, while the session had
@@ -457,7 +550,7 @@ class BithumanRealtimeSession {
     try {
       await _ws!.ready;
     } catch (e) {
-      _handleError(e);
+      if (gen == _connGen) _handleError(e);
       return;
     }
     // The echo row this session will run on, stated in the log BEFORE the config that
@@ -551,6 +644,7 @@ class BithumanRealtimeSession {
     // the `error` event before it usually named the code already.
     if (code == 1008 && _terminalError == null) {
       final why = _ws?.closeReason ?? '';
+      if (_tryFreshCredential(why.isEmpty ? 'FORBIDDEN' : why)) return;
       _terminal(why.isEmpty ? 'FORBIDDEN' : why, 'the realtime service ended the session');
       return;
     }
@@ -602,7 +696,9 @@ class BithumanRealtimeSession {
       // a beat later). Resetting on TCP-success masked that as an infinite
       // `connecting` loop. The reset now lives in `_handleMessage` on the
       // first inbound event, which proves the server actually accepted us.
-      if (_terminalError == null && _open && _reconnectTimer == null) _status.add(RealtimeStatus.open);
+      if (_terminalError == null && _open && _reconnectTimer == null && _ws != null) {
+        _status.add(RealtimeStatus.open);
+      }
     } catch (e) {
       // ignore: avoid_print
       print('[realtime] reconnect failed: $e');
@@ -808,6 +904,7 @@ class BithumanRealtimeSession {
     if (!_serverAcked) {
       _serverAcked = true;
       _reconnectAttempt = 0;
+      _freshTried = false;   // this credential was accepted: a later refusal gets its own fresh try
     }
     switch (type) {
       case 'response.output_audio.delta':
@@ -974,6 +1071,7 @@ class BithumanRealtimeSession {
         final code = (err?['code'] as String?) ?? '';
         final msg = (err?['message'] as String?) ?? '';
         if (_terminalCodes.contains(code)) {
+          if (_tryFreshCredential(code)) break;
           _terminal(code, msg);
           break;
         }
@@ -1013,6 +1111,7 @@ class BithumanRealtimeSession {
       400: 'BAD_REQUEST', 401: 'UNAUTHORIZED', 402: 'INSUFFICIENT_BALANCE', 403: 'FORBIDDEN',
     };
     if (http != null && refused.containsKey(http)) {
+      if (_tryFreshCredential(refused[http]!)) return;
       _terminal(refused[http]!, 'the realtime service refused the session (HTTP $http)');
       return;
     }
