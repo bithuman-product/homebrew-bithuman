@@ -94,15 +94,17 @@ const TransportDescriptor kWebRtcTransport = TransportDescriptor(
   canMute: true,
 );
 
-/// The on-device converse brain — no cloud, no OpenAI key. Apple only: the brain
-/// binds Apple SpeechAnalyzer for ASR, so off macOS/iOS the factory correctly
+/// The on-device converse brain — no cloud, no OpenAI key. macOS and iOS run
+/// libconverse (Apple SpeechAnalyzer in); Android runs the plugin's own brain
+/// (android/src/main/kotlin/ai/bithuman/flutter/brain: Moonshine in, llama.cpp,
+/// Supertonic out) behind the same channel and events. Anywhere else the factory
 /// falls through to a cloud transport.
 const TransportDescriptor kLocalConverseTransport = TransportDescriptor(
   id: 'local',
   label: 'on-device converse brain',
   canMute: true,
   requiresLocalBrain: true,
-  platforms: <String>['macos', 'ios'],
+  platforms: <String>['macos', 'ios', 'android'],
 );
 
 /// The registered transports. A 4th appends one entry here, one `case` in

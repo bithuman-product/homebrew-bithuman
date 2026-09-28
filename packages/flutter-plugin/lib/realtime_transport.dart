@@ -367,7 +367,7 @@ class WebRTCTransport implements RealtimeTransport {
   }
 }
 
-/// LOCAL mode (macOS): the on-device converse brain via the plugin, no cloud.
+/// LOCAL mode (macOS, iOS, Android): the on-device converse brain via the plugin, no cloud.
 /// Status + captions come from the plugin's converse EventChannel; the avatar
 /// + VP-IO audio are driven natively, so this transport is thin.
 class LocalConverseTransport implements RealtimeTransport {
@@ -540,7 +540,7 @@ class LocalConverseTransport implements RealtimeTransport {
 /// what the A/B measures). Local mode is unaffected — no cloud transport.
 const String _kTransportDefine = DevLevers.transport;
 
-/// Platform-conditional factory. Local mode (macOS/iOS) → on-device
+/// Platform-conditional factory. Local mode (macOS/iOS/Android) → on-device
 /// converse; EVERY cloud platform — Android, iOS, macOS — → WebSocket + the
 /// plugin's native audio (unless [_kTransportDefine] opts into WebRTC — see
 /// above). Adding a new transport = one branch here, no UI change.
@@ -659,9 +659,9 @@ RealtimeTransport pickTransport({
 ///
 ///   1. LOCAL is a request for a CAPABILITY, not a name. An explicit
 ///      `localMode` that carries a brain on disk wins over any override — and
-///      is refused where the registry says the brain cannot run (Apple only:
-///      it binds Apple SpeechAnalyzer), falling through to a cloud transport
-///      rather than failing.
+///      is refused where the registry says the brain cannot run (anything but
+///      macOS, iOS and Android), falling through to a cloud transport rather
+///      than failing.
 ///   2. A NAMED transport (`transportOverride`, else `BITHUMAN_TRANSPORT`),
 ///      matched case-insensitively against the registry. A name that needs the
 ///      local brain is not reachable this way — the brain has no path here — and

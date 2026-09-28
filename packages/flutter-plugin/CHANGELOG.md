@@ -1,3 +1,29 @@
+## Unreleased — Android LOCAL mode: the on-device brain
+
+* **Android:** `localAudioStart` / `localPushText` / `localSetMuted` / `localAudioStop` and
+  `isLocalModeSupported` now work on Android (arm64, Android 10+): speech in (silero VAD +
+  Moonshine tiny), the reply (llama.cpp on the CPU, any chat GGUF) and the voice (Supertonic,
+  voice `M1`) all run on the phone. The Dart `LocalConverseTransport` is unchanged — same channel,
+  same events — and the transport registry now routes LOCAL on Android too. The brain mirrors
+  Apple's libconverse C ABI (`brain/ConverseEngine.kt`) and ships with what the Apple measurements taught
+  built in: reply audio is fed to the avatar as fast as it is synthesized with an in-order
+  end-of-reply flush, VAD endpointing without a forced finalize, capped history with KV-cache
+  reuse (a trimmed history is shifted in the cache, not re-prefilled), emoji/markdown stripping,
+  split-turn merging, persona house rules, and a deterministic crisis-line reply for self-harm.
+  See README "Android LOCAL mode" for the model files, sizes and licenses.
+* **Android brain:** each Supertonic chunk's leading silence (~0.25-0.45 s, the model's own
+  padding) is cut to a 30 ms pre-roll with a 5 ms fade-in, as on Apple (libconverse
+  `audio_trim.hpp`): end of speech -> first audible word p50 2.87 -> 2.55 s on a Galaxy S25+.
+  `ConverseEngine.Config.trimLeadingSilence = false` (or `debug.bh.brain.keeplead=1` in a
+  debuggable app) keeps it.
+* **Android player:** a reply fed as one burst (LOCAL mode) no longer loses its first-frame mark
+  when its end-of-reply arrives before its first frame is shown — `bhttfa first speech frame` is
+  logged for every reply again (instrumentation only; presentation is unchanged).
+* **Build:** the Android half now compiles native code: llama.cpp (pinned commit) and
+  sherpa-onnx v1.13.8 (with ONNX Runtime 1.28.2 static, and **without espeak-ng** — a no-op
+  stand-in replaces its GPL-3.0 dependency, see `android/src/main/cpp/no-espeak/`). Needs the
+  NDK and CMake 3.22.1; the first build takes a few minutes. +26.5 MB of native libraries.
+
 ## 2.6.22 — 2026-09-28 — security fix: restrict internal symbols in the macOS engine core
 
 Tag `flutter-plugin-v2.6.22`.

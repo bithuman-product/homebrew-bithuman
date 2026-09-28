@@ -22,6 +22,11 @@
 // Audio: the realtime session (Dart, WebSocket) hands the agent's 24 kHz PCM16 in via
 // playSpeakerPCM and takes the microphone's 24 kHz PCM16 out over the mic EventChannel;
 // MicCapture keeps the microphone open on the platform's communication path (full duplex).
+//
+// LOCAL mode (localAudioStart): no cloud at all. The on-device brain (LocalConverseController
+// -> brain/ConverseEngine: Moonshine speech-in, llama.cpp reply, Supertonic voice) takes the
+// same microphone and feeds the same player, and reports over the same converse
+// EventChannel the Apple half uses — so Dart's LocalConverseTransport runs unchanged.
 
 package ai.bithuman.flutter
 
@@ -82,6 +87,11 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         var mic: MicCapture? = null
         var micSink: EventChannel.EventSink? = null
         var micChannel: EventChannel? = null
+        var local: LocalConverseController? = null
+        var converseChannel: EventChannel? = null
+        var converseSink: EventChannel.EventSink? = null
+        /** Brain events emitted before Dart subscribed (it subscribes after localAudioStart returns). */
+        val conversePending = ArrayList<Map<String, Any?>>()
         var framesDrawn = 0L
         private val hwCanvas = avatar.hardwareFrames
 
@@ -185,8 +195,16 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 result.success(null)
             }
 
+            // --- LOCAL mode: the on-device brain ---
+            "isLocalModeSupported" -> result.success(LocalBrainSupport.available())
+            "localAudioStart" -> localAudioStart(call, result)
+            "localAudioStop" -> { session(call)?.let { stopLocal(it) }; result.success(null) }
+            // Dart sends these two without a textureId (one local session at a time).
+            "localPushText" -> { activeLocal()?.pushText(call.argument<String>("text") ?: ""); result.success(null) }
+            "localSetMuted" -> { activeLocal()?.muted = call.argument<Boolean>("muted") ?: false; result.success(null) }
+
             // --- Apple-only surface, answered honestly ---
-            "pipAvailable", "isLocalModeSupported", "setDisplayMode" -> result.success(false)
+            "pipAvailable", "setDisplayMode" -> result.success(false)
             "pipStart", "pipStop", "fitWindowToCanvas", "setExpression2AgentDir",
             "attachWebrtcRemoteAudio", "detachWebrtcRemoteAudio" -> result.success(null)
 
@@ -295,11 +313,72 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     private fun destroy(id: Long) {
         val s = sessions.remove(id) ?: return
         s.stopped.set(true)
+        stopLocal(s)
         stopMic(s)
         runCatching { s.player?.stop() }
         runCatching { s.avatar.close() }
         runCatching { s.surface.release() }
         runCatching { s.entry.release() }
+    }
+
+    // ---------------------------------------------------------------- local mode
+
+    private fun activeLocal(): LocalConverseController? = sessions.values.firstNotNullOfOrNull { it.local }
+
+    private fun localAudioStart(call: MethodCall, result: Result) {
+        val s = session(call) ?: return result.error("no_session", "unknown textureId", null)
+        val gguf = call.argument<String>("ggufPath")
+        if (gguf.isNullOrBlank()) return result.error("bad_args", "ggufPath is required", null)
+        if (!LocalBrainSupport.available()) return result.error("unsupported",
+            "the on-device brain needs an arm64 Android 10+ device: ${LocalBrainSupport.reason}", null)
+        stopLocal(s); stopMic(s)          // local mode owns the microphone
+        // Registered BEFORE returning: Dart subscribes right after this call completes.
+        val ch = EventChannel(messenger, "ai.bithuman.avatar.converse/${s.entry.id()}")
+        ch.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(args: Any?, sink: EventChannel.EventSink) {
+                s.converseSink = sink
+                val held = synchronized(s.conversePending) { s.conversePending.toList().also { s.conversePending.clear() } }
+                held.forEach { sink.success(it) }
+            }
+            override fun onCancel(args: Any?) { s.converseSink = null }
+        })
+        s.converseChannel = ch
+        val ctl = LocalConverseController(context,
+            player = { s.player },
+            emit = { ev -> main.post {
+                if (s.stopped.get() || s.converseChannel !== ch) return@post
+                val sink = s.converseSink
+                if (sink != null) sink.success(ev)
+                else synchronized(s.conversePending) { if (s.conversePending.size < 64) s.conversePending.add(ev) }
+            } },
+            openMic = { onChunk -> main.post { openLocalMic(s, ch, onChunk) }; null })
+        s.local = ctl
+        ctl.start(gguf, call.argument<String>("supertonicAssets"), call.argument<String>("voice"),
+            call.argument<String>("systemPrompt"), enableMic = true)
+        result.success(null)
+    }
+
+    /** The same capture the cloud path opens, behind the same permission flow. Main thread. */
+    private fun openLocalMic(s: AvatarSession, ch: EventChannel, onChunk: (ByteArray, Int) -> Unit) {
+        val go = {
+            if (!s.stopped.get() && s.converseChannel === ch) {
+                val mic = MicCapture(context, onChunk)
+                if (mic.start()) s.mic = mic else Log.w(TAG, "local mode: the microphone did not open")
+            }
+        }
+        if (micGranted()) go() else requestMic { granted ->
+            if (granted) go() else Log.w(TAG, "microphone permission denied — local mode is text-only")
+        }
+    }
+
+    private fun stopLocal(s: AvatarSession) {
+        val ctl = s.local ?: return
+        s.local = null
+        stopMic(s)
+        runCatching { ctl.stop() }
+        s.converseChannel?.setStreamHandler(null); s.converseChannel = null
+        s.converseSink = null
+        synchronized(s.conversePending) { s.conversePending.clear() }
     }
 
     // ---------------------------------------------------------------- microphone

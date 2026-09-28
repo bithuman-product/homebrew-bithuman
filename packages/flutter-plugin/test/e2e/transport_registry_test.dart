@@ -47,14 +47,15 @@ void main() {
       expect(kTransportRegistry, contains(kDefaultTransport));
     });
 
-    test('exactly one row needs the on-device brain, and it is Apple-only', () {
+    test('exactly one row needs the on-device brain: Apple and Android only', () {
       final brainy =
           kTransportRegistry.where((d) => d.requiresLocalBrain).toList();
       expect(brainy, hasLength(1));
       expect(brainy.single, same(kLocalConverseTransport));
       expect(brainy.single.runsOn('macos'), isTrue);
       expect(brainy.single.runsOn('ios'), isTrue);
-      expect(brainy.single.runsOn('android'), isFalse);
+      expect(brainy.single.runsOn('android'), isTrue);
+      expect(brainy.single.runsOn('windows'), isFalse);
       expect(brainy.single.runsOn('linux'), isFalse);
       // The two cloud rows run everywhere — that is the "one voice interaction
       // model on every target" claim, as data.
@@ -109,13 +110,26 @@ void main() {
       expect(pick(os: 'ios', localMode: true, gguf: '/m.gguf'), 'local');
     });
 
-    test('local mode off Apple falls through to a cloud transport', () {
-      // The brain binds Apple SpeechAnalyzer. Asking for it on Android must
-      // degrade to cloud, never fail.
-      expect(pick(os: 'android', localMode: true, gguf: '/m.gguf'), 'websocket');
+    test('local mode with a brain on disk wins on Android too', () {
+      // Android runs the plugin's own brain (Moonshine → llama.cpp → Supertonic)
+      // behind the same channel, so LOCAL is served there as on Apple.
+      expect(pick(os: 'android', localMode: true, gguf: '/m.gguf'), 'local');
       expect(
           pick(
               os: 'android',
+              localMode: true,
+              gguf: '/m.gguf',
+              override: 'webrtc'),
+          'local');
+    });
+
+    test('local mode where no brain runs falls through to a cloud transport', () {
+      // Asking for the brain where none is built must degrade to cloud, never fail.
+      expect(pick(os: 'linux', localMode: true, gguf: '/m.gguf'), 'websocket');
+      expect(pick(os: 'windows', localMode: true, gguf: '/m.gguf'), 'websocket');
+      expect(
+          pick(
+              os: 'linux',
               localMode: true,
               gguf: '/m.gguf',
               override: 'webrtc'),
