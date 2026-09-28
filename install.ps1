@@ -6,17 +6,21 @@
 # The Windows build is not code-signed. Files this script downloads carry no Mark-of-the-Web, so
 # Windows does not show a SmartScreen prompt for them; the sha256 check is what vouches for the bytes.
 # Docs: https://docs.bithuman.ai/platforms/cli
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-
-$Repo = 'bithuman-product/homebrew-bithuman'
-$Asset = 'bithuman-x86_64-pc-windows-msvc.zip'
-
-function Fail([string]$msg) { Write-Host "install: error: $msg" -ForegroundColor Red; throw "install failed" }
-function Info([string]$msg) { Write-Host "install: $msg" }
-
+# Everything runs inside one script block, so `irm | iex` leaves nothing behind in the
+# caller's session (no preference changes, no helper functions).
 & {
+  $ErrorActionPreference = 'Stop'
+  $ProgressPreference = 'SilentlyContinue'
+  [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+  $Repo = 'bithuman-product/homebrew-bithuman'
+  $Asset = 'bithuman-x86_64-pc-windows-msvc.zip'
+  function Fail([string]$msg) { Write-Host "install: error: $msg" -ForegroundColor Red; throw "install failed" }
+  function Info([string]$msg) { Write-Host "install: $msg" }
+  # A tag that is not plain semver (a pre-release) sorts last instead of throwing.
+  function TagVersion([string]$tag) {
+    try { [version]($tag -replace '^cli-v', '') } catch { [version]'0.0' }
+  }
+
   if (-not [Environment]::Is64BitOperatingSystem) { Fail 'bithuman needs 64-bit Windows (x86_64).' }
   $arch = $env:PROCESSOR_ARCHITECTURE
   if ($env:PROCESSOR_ARCHITEW6432) { $arch = $env:PROCESSOR_ARCHITEW6432 }
@@ -34,7 +38,7 @@ function Info([string]$msg) { Write-Host "install: $msg" }
     $pick = $rels | Where-Object {
       -not $_.draft -and -not $_.prerelease -and $_.tag_name -like 'cli-v*' -and
       ($_.assets | Where-Object { $_.name -eq $Asset })
-    } | Sort-Object { [version]($_.tag_name -replace '^cli-v', '') } -Descending | Select-Object -First 1
+    } | Sort-Object { TagVersion $_.tag_name } -Descending | Select-Object -First 1
     if (-not $pick) { Fail 'no published bithuman release carries a Windows build yet.' }
     $tag = $pick.tag_name
   }
