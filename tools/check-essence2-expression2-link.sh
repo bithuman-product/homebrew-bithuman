@@ -11,7 +11,7 @@
 # UnifiedModelHeader.xcframework, which defines its own. `ld` exits 1 on the
 # overlap.
 #
-# MEASURED 2026-09-21 on echelon, `nm -g --defined-only` per slice, symbols
+# MEASURED 2026-09-21 on the release Mac, `nm -g --defined-only` per slice, symbols
 # OWNED by the module (Swift mangling prefix `_$s18UnifiedModelHeader`),
 # deduplicated — so essence-2's own "conformance of Expression.UnifiedHandle to
 # UnifiedModelHeader.UnifiedAvatarHandle", which merely NAMES the module, is not
@@ -168,7 +168,7 @@ arm () { # label sdk target slice ortslice umh load [essence2only]
   # get pulled — which depends on the app.
   #
   # MEASURED on the published essence2-v1.9.0 + v2.6.3 bytes, ONE source, five
-  # link shapes, 2026-09-21 on echelon:
+  # link shapes, 2026-09-21 on the release Mac:
   #
   #     shape                                   macos-arm64   ios-arm64
   #     lazy (both archives lazy)               rc=0          rc=1 dup=113

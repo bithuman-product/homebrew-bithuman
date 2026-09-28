@@ -2016,7 +2016,7 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
 // called it. A downloaded expression-2 agent arrives as a packed container
 // (`<CODE>.imx`), while `Expression2Engine.modelURL` / `resURL` only ever join a NAME
 // onto `activeAgentDir` -- so a packed FILE resolved every per-identity member to a
-// path that cannot exist. Measured on echelon (macOS 26.6.2) 2026-09-16, with the
+// path that cannot exist. Measured on an iMac M4 (macOS 26.6.2) 2026-09-16, with the
 // shared graphs supplied by hand so the refusal could not be blamed on them:
 //     [embody] decp2 members missing/unloadable -- REFUSING
 //     [embody] warmUp produced no idle frame

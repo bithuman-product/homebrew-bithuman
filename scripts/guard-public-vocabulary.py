@@ -158,6 +158,15 @@ TIER2 = [
     # name; the hyphen / underscore / space between the parts is optional.
     ("V12", "essence" + r"[-_ ]?2[-_ ]?" + "max", "enterprise-only tier, current name"),
     ("V13", "essence" + r"[-_ ]?2[-_ ]?" + "quality", "enterprise-only tier, legacy name"),
+    # V14 / V15 (2026-09-28 audit): the names of our own machines and of the
+    # vendors behind the cloud. A public repo says "the release Mac", "the Linux
+    # release host", "bitHuman cloud" -- never which box or which provider.
+    # Word-bounded; V15's third name is also an English adjective, so its UI
+    # senses ("a modal dialog/sheet/window/view/bottom sheet") are narrowed out.
+    ("V14", r"\b(?:" + "lafa" + "yette|mor" + "aga|eche" + "lon|alpha" + "retta|orin" + r"da)\b",
+     "internal host name"),
+    ("V15", r"\b(?:" + "cere" + "brium|supa" + "base|mo" + r"dal(?![- ](?:dialog|sheet|window|view|bottom|route|barrier)))\b",
+     "internal cloud vendor"),
 ]
 
 TIER1_RE = [(c, re.compile(p, re.I), d) for c, p, d in TIER1]
@@ -505,7 +514,20 @@ def selftest() -> int:
     checks.append(("tier2 enterprise tier, legacy name",
                    "V13" in scan_text("tier essence-2-" + "quality"), "V13"))
 
+    checks.append(("tier2 host name", "V14" in scan_text("built on " + "eche" + "lon today"), "V14"))
+    checks.append(("tier2 host name, capitalised",
+                   "V14" in scan_text("Measured on " + "Lafa" + "yette"), "V14 must be case-blind"))
+    checks.append(("tier2 cloud vendor", "V15" in scan_text("a " + "Supa" + "base manifest"), "V15"))
+    checks.append(("tier2 cloud vendor, third name",
+                   "V15" in scan_text("deployed to " + "Mo" + "dal L40S"), "V15"))
+
     # must NOT fire (the narrowings)
+    checks.append(("no false hit on a UI dialog",
+                   "V15" not in scan_text("show a " + "mo" + "dal dialog, then a " + "mo" + "dal bottom sheet"),
+                   "V15 must not match the UI sense"))
+    checks.append(("no false hit inside a longer word",
+                   "V14" not in scan_text("the " + "eche" + "lons of a fleet"),
+                   "V14 is word-bounded"))
     checks.append(("no false hit on directory", "V8" not in scan_text("a directory of files"),
                    "V8 must not match 'directory'"))
     checks.append(("no false hit on docker cmd", "V10" not in scan_text("run docker " + "compos" + "e up"),

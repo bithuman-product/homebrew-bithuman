@@ -21,7 +21,7 @@ one-liner got:
                     published for cli-v2.5.0.
     -> rc=1
 
-Reproduced on lafayette, rc read directly (not through a pipe), before this
+Reproduced on the Linux release host, rc read directly (not through a pipe), before this
 file was written.
 
 Nothing was broken.  release-cli.yml's `linux-tarball` job had just been
@@ -82,7 +82,7 @@ SELF-TEST
 ─────────
 `--self-test` runs the arms IN-PROCESS against synthetic indexes.  It never
 re-executes this file: a positive control that re-runs itself unmutated is a
-fork bomb, and one of those OOM-stormed lafayette on 2026-09-01.
+fork bomb, and one of those OOM-stormed a build host on 2026-09-01.
 """
 from __future__ import annotations
 

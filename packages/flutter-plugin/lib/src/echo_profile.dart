@@ -110,7 +110,7 @@ class EchoProfile {
   final int falsifierSeconds;
   final int falsifierTurns;
 
-  /// Where the log lives (a PR, a path on echelon, or both).
+  /// Where the log lives (a PR, a path on the test Mac, or both).
   final String source;
 
   /// The row for the device this build runs on.
@@ -162,7 +162,7 @@ class EchoProfile {
     vpioAgc: false,
     residualDbfsMax: -54,
     residualDbfsMedian: -70,
-    measuredOn: 'iMac M4 (echelon), macOS 26.6.2, built-in speakers at 40 %, expression-2 '
+    measuredOn: 'iMac M4, macOS 26.6.2, built-in speakers at 40 %, expression-2 '
         'and essence-2, VP-IO on, AGC OFF',
     measuredUtc: '2026-09-16',
     falsifierSelfInterruptions: 0,

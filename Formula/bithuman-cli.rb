@@ -360,14 +360,14 @@ class BithumanCli < Formula
   # `spctl -a -t install` = accepted, source=Notarized Developer ID, and the
   # binary runs rc=0.
   #
-  # Cut on alpharetta rather than by release-cli.yml's mac lane: the signing
+  # Cut on a release Mac rather than by release-cli.yml's mac lane: the signing
   # identity is in that host's login keychain and homebrew-bithuman holds
   # none of the MACOS_CERT_P12_* / NOTARY_* secrets, so the workflow's own
   # gate correctly REFUSES to publish from CI. Same scripts either way
   # (tap scripts/sign-macos.sh + notarize-macos.sh + verify-macos-release.sh,
   # cli scripts/bundle-macos.sh + check-engine-dedup.sh). The Linux x86_64
   # tarball on the same release was cut the same way for cli-v2.6.4 and again
-  # for cli-v2.6.5 — on lafayette, in the manylinux image, packed by the CLI
+  # for cli-v2.6.5 — on the Linux release host, in the manylinux image, packed by the CLI
   # repo's own scripts/release_pack.sh so both halves carry one commit. This formula
   # stays mac-only, matching 2.4.0/2.4.2.
   #
@@ -402,7 +402,7 @@ class BithumanCli < Formula
   # version below is scanned from the cli-v* tag in the URL.)
   # ★2026-09-25: THE PIN MOVES FORWARD to cli-v2.7.6 (bithuman 3aeeea8c0, all three
   # halves from that ONE commit; engine pin essence1-v3.1.3-e2.43 = bithuman-models
-  # dfe6e24b5). The macOS half was built, signed and notarized on echelon; the two lines
+  # dfe6e24b5). The macOS half was built, signed and notarized on the release Mac; the two lines
   # below are release_pack.sh's FORMULA-PIN.txt for those bytes, pasted, not typed.
   # (2.7.5 was 060d9a7d4 / e2.43 / sha ea9c7e44….)
   url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.8.4/bithuman-aarch64-apple-darwin.tar.gz"
@@ -437,7 +437,7 @@ class BithumanCli < Formula
 
   # ★ffmpeg is a RUNTIME REQUIREMENT, and leaving it undeclared broke BOTH of
   # the two commands this formula's own quick-start teaches. MEASURED
-  # 2026-09-08 on echelon against the published cli-v2.6.4 macOS tarball,
+  # 2026-09-08 on the release Mac against the published cli-v2.6.4 macOS tarball,
   # PATH=/usr/bin:/bin:/usr/sbin:/sbin — a Mac that has Homebrew but has not
   # run `brew install ffmpeg`:
   #
