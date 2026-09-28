@@ -25,7 +25,7 @@ Read facts from the docs, not from memory or from this file. The docs are genera
 | An avatar on a web page | one iframe | https://docs.bithuman.ai/platforms/web | — |
 | Any backend, over HTTPS | the REST API | https://docs.bithuman.ai/platforms/rest | `api/rest-api/` in bithuman-examples |
 
-Examples live in https://github.com/bithuman-product/bithuman-examples. This repository has no examples directory.
+Examples live in https://github.com/bithuman-product/bithuman-examples. This repository's `Examples/` holds only a README that points there.
 
 ## Swift package
 
