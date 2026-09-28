@@ -278,6 +278,12 @@ uname_m=$(uname -m)
 case "$uname_s" in
   Darwin) os="apple-darwin" ;;
   Linux)  os="unknown-linux-gnu" ;;
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    # Git Bash / MSYS2 / Cygwin on Windows: the Windows CLI has its own installer.
+    err "this is Windows ($uname_s); install the Windows CLI from PowerShell instead:"
+    err "  irm https://install.bithuman.ai/windows | iex"
+    exit 1
+    ;;
   *)
     err "unsupported operating system: $uname_s"
     err "supported: Darwin (macOS), Linux"
