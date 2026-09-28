@@ -11,6 +11,11 @@
   reuse (a trimmed history is shifted in the cache, not re-prefilled), emoji/markdown stripping,
   split-turn merging, persona house rules, and a deterministic crisis-line reply for self-harm.
   See README "Android LOCAL mode" for the model files, sizes and licenses.
+* **Android brain:** each Supertonic chunk's leading silence (~0.25-0.45 s, the model's own
+  padding) is cut to a 30 ms pre-roll with a 5 ms fade-in, as on Apple (libconverse
+  `audio_trim.hpp`): end of speech -> first audible word p50 2.87 -> 2.55 s on a Galaxy S25+.
+  `ConverseEngine.Config.trimLeadingSilence = false` (or `debug.bh.brain.keeplead=1` in a
+  debuggable app) keeps it.
 * **Android player:** a reply fed as one burst (LOCAL mode) no longer loses its first-frame mark
   when its end-of-reply arrives before its first frame is shown — `bhttfa first speech frame` is
   logged for every reply again (instrumentation only; presentation is unchanged).

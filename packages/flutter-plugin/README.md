@@ -310,12 +310,17 @@ claims to be human, no romance) are appended to any app prompt.
 
 ### Measured (Galaxy S25+, Expression 2 Wise Pup rendering on the NPU at the same time)
 
-Prompts injected as recorded speech (30 spoken + 6 typed turns, 12 minutes, one session):
+Prompts injected as recorded speech. The first-audible-word rows are six ~20 s sessions (6 spoken
+turns per arm); the rest is one 12-minute session (30 spoken + 6 typed turns). The first reply
+frame is shown when the reply's first sample plays, so it counts the silence Supertonic opens
+every synthesis with; the first audible word adds that lead.
 
 | | p50 | p90 |
 | --- | --- | --- |
-| end of speech → avatar's mouth moves | **2.46 s** | 2.89 s |
-| typed message → mouth | 2.05 s | 2.86 s |
+| end of speech → **first audible word** (leading-silence trim on) | **2.55 s** | 2.74 s |
+| same without the trim (Supertonic's own ~0.3 s lead silence left in) | 2.87 s | 3.65 s |
+| end of speech → first reply frame (12-min session, before the trim) | 2.46 s | 2.89 s |
+| typed message → first reply frame (same session) | 2.05 s | 2.86 s |
 | end of speech → first reply audio handed to the avatar | 1.21 s | 1.44 s |
 | … of which VAD endpoint + Moonshine / LLM first token / Supertonic first sentence | 0.52 / 0.12 / 0.57 s | |
 | reply audio → first mouth frame (the avatar's own onset; 1.15 s with no brain running) | 1.29 s | 1.63 s |

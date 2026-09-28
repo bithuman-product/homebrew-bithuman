@@ -55,8 +55,11 @@ internal class LocalConverseController(
         Thread({
             try {
                 val a = BrainAssets.resolve(ggufPath, supertonicAssets)
+                // `debug.bh.brain.keeplead=1` keeps Supertonic's leading silence — a debuggable host only (A/B).
+                val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                val keepLead = debuggable && AvatarPlayer.devInt("debug.bh.brain.keeplead") == 1
                 val cfg = ConverseEngine.Config(llmPath = a.llm, supertonicDir = a.supertonic, sttDir = a.stt,
-                    voice = voice ?: "M1", systemPrompt = systemPrompt)
+                    voice = voice ?: "M1", systemPrompt = systemPrompt, trimLeadingSilence = !keepLead)
                 val e = ConverseEngine.create(cfg) { kind, state, text -> onEngineEvent(kind, state, text) }
                 if (!running) { e.destroy(); return@Thread }
                 engine = e

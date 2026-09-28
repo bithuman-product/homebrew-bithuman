@@ -86,6 +86,11 @@ internal class ConverseEngine private constructor(
          * what that factory makes of it.
          */
         val replyModel: ((Config) -> ReplyModel)? = null,
+        /**
+         * Cut the ~0.4 s of silence every Supertonic synthesis opens with to a 30 ms pre-roll
+         * ([AudioTrim]), on every chunk. False keeps it (A/B and rollback only).
+         */
+        val trimLeadingSilence: Boolean = true,
     )
 
     fun interface Listener { fun onEvent(kind: Int, state: Int, text: String) }
@@ -414,7 +419,10 @@ internal class ConverseEngine private constructor(
                 is TtsJob.Say -> {
                     val t0 = SystemClock.elapsedRealtime()
                     val audio = tts.generateWithConfig(job.text, gc)
-                    val pcm = tts44to24.process(audio.samples)
+                    val (native, cut) = if (cfg.trimLeadingSilence) AudioTrim.trimLeadingSilence(audio.samples, audio.sampleRate)
+                        else audio.samples to 0
+                    val pcm = tts44to24.process(native)
+                    val leadMs = AudioTrim.leadSamples(pcm) * 1000L / OUTPUT_SAMPLE_RATE
                     val ms = SystemClock.elapsedRealtime() - t0
                     var firstOfTurn = false
                     synchronized(lock) {
@@ -424,7 +432,8 @@ internal class ConverseEngine private constructor(
                         synchronized(outLock) { if (job.gen == turnGen) out.addLast(pcm) }
                         setState(STATE_SPEAKING)
                     }
-                    Log.i(TAG, "[bhbrain] tts gen=${job.gen} synthMs=$ms audioMs=${pcm.size * 1000 / OUTPUT_SAMPLE_RATE} first=$firstOfTurn hostMs=${System.currentTimeMillis()} '${job.text.take(60)}'")
+                    Log.i(TAG, "[bhbrain] tts gen=${job.gen} synthMs=$ms audioMs=${pcm.size * 1000 / OUTPUT_SAMPLE_RATE} " +
+                        "trimMs=${cut * 1000L / maxOf(1, audio.sampleRate)} leadMs=$leadMs first=$firstOfTurn hostMs=${System.currentTimeMillis()} '${job.text.take(60)}'")
                 }
                 is TtsJob.End -> synchronized(lock) {
                     if (job.gen != turnGen) return@synchronized
