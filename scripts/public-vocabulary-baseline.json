@@ -1,12 +1,6 @@
 {
   "_": "Pinned occurrences of internal vocabulary in this PUBLIC repo. Codes are defined by scripts/guard-public-vocabulary.py --legend; they are codes rather than words so that this file needs no self-exclusion from the scan. Every entry carries a measured count and a reason; an entry without a real reason is a defect.",
   "files": {
-    "Package.swift": {
-      "V2": {
-        "n": 1,
-        "why": "one occurrence of V2, and it is a MEASURED ZERO inside the bitHumanKit `strings -a` count block -- the reading that proves the umbrella does not carry it. Deleting the word would delete the evidence. The other four pins (V1 x4, V10, V6) are gone: they lived in the block that said essence-2 was not on this rail, which was rewritten on 2026-09-06 when the Essence2 product landed."
-      }
-    },
     "Sources/BithumanEngineProtocol/Bhci.swift": {
       "V1": {
         "n": 43,
@@ -53,12 +47,6 @@
       "V3": {
         "n": 6,
         "why": "names a native runtime SHAPE in this package's own protocol -- the zero-alloc forms and the essence2 native form of the pull path. Descriptive of the shipped ABI, not of the teeth path it is banned for."
-      }
-    },
-    "install.sh": {
-      "V11": {
-        "n": 1,
-        "why": "a third party's single-board-computer brand, listed among arm64 hosts alongside Graviton and Ampere. A hardware product name that collides with V11's two letters, not our deriver symbol. One occurrence, measured."
       }
     },
     "packages/flutter-plugin/ARCHITECTURE.md": {
