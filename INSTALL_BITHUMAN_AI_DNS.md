@@ -1,5 +1,77 @@
 # Setting up `install.bithuman.ai` (one-time DNS setup)
 
+## ★THE LIVE WORKER (2026-09-28): it PROXIES, and `/windows` serves install.ps1
+
+What runs today is the Cloudflare Worker `bithuman-install` (account-level
+script, routed on `install.bithuman.ai/*`). It does not redirect: it fetches the
+installer from this tap's `main` and serves it with `x-bithuman-upstream` naming
+the file. Every path serves `install.sh`, except `/windows` (and `/windows.ps1`,
+`/install.ps1`), which serves `install.ps1` as text/plain for
+`irm https://install.bithuman.ai/windows | iex`. The deployed source, verbatim:
+
+```js
+// install.bithuman.ai — the bitHuman CLI installers, proxied from the public tap.
+//   curl -fsSL https://install.bithuman.ai | sh          (macOS, Linux)
+//   irm https://install.bithuman.ai/windows | iex        (Windows, PowerShell)
+// Every path other than /windows keeps serving install.sh exactly as before.
+const TAP = "https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/";
+
+const ROUTES = {
+  sh: {
+    upstream: TAP + "install.sh",
+    type: "text/x-shellscript; charset=utf-8",
+    fallback: (u) => "curl -fsSL " + u + " | sh",
+  },
+  ps1: {
+    upstream: TAP + "install.ps1",
+    type: "text/plain; charset=utf-8",
+    fallback: (u) => "irm " + u + " | iex",
+  },
+};
+
+function routeFor(pathname) {
+  const p = pathname.replace(/\/+$/, "").toLowerCase();
+  return p === "/windows" || p === "/windows.ps1" || p === "/install.ps1" ? ROUTES.ps1 : ROUTES.sh;
+}
+
+export default {
+  async fetch(request) {
+    const method = request.method;
+    if (method !== "GET" && method !== "HEAD") {
+      return new Response("method not allowed\n", { status: 405 });
+    }
+    const route = routeFor(new URL(request.url).pathname);
+    const upstream = await fetch(route.upstream, { cf: { cacheTtl: 300 } });
+    if (!upstream.ok) {
+      const msg =
+        "bitHuman installer temporarily unavailable; use:\n  " + route.fallback(route.upstream) + "\n";
+      return new Response(method === "HEAD" ? null : msg, {
+        status: 502,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    // A HEAD response must carry no body.
+    return new Response(method === "HEAD" ? null : upstream.body, {
+      status: 200,
+      headers: {
+        "content-type": route.type,
+        "cache-control": "public, max-age=300",
+        "x-bithuman-upstream": route.upstream,
+      },
+    });
+  },
+};
+```
+
+Deploy with the Workers API (`PUT /accounts/<acc>/workers/scripts/bithuman-install`,
+module `index.js`, compatibility_date `2026-09-01`, no bindings), then verify both
+routes: `curl -sI https://install.bithuman.ai` names `install.sh` and
+`curl -sI https://install.bithuman.ai/windows` names `install.ps1`.
+
+The sections below are the original (2026-09) setup notes, kept for the record.
+
+---
+
 The curl installer for the bithuman CLI lives at:
 
     https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/install.sh
