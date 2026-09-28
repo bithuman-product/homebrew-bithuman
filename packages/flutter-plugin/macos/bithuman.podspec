@@ -153,7 +153,14 @@ Pod::Spec.new do |s|
   s.vendored_frameworks = module_map_xcframeworks + x2_frameworks
   # Each staged engine's native core = a plain static lib (NEVER a 2nd module-map
   # xcframework). Auto-picked from Engines/*/Vendor/*.a (design §2.2's Dir.glob).
-  s.vendored_libraries  = engine_libs.map { |p| p.sub(__dir__ + '/', '') } if essence2_lib
+  # EngineCore (from essence2-v1.15.0 / Expression2 v2.19.0): on macOS the Expression 2 framework
+  # and libessence2.a leave the engine's licensing and metering core to the app's final link, which
+  # takes it once from this plain static lib. Required whenever Expression 2 is linked (always), so
+  # it is vendored unconditionally and kept OUT of Engines/*/Vendor: that glob decides
+  # ESSENCE2_AVAILABLE and the auth-hook probe above, and EngineCore is neither.
+  enginecore_lib = 'Vendor/libengine_core.a'
+  raise "run scripts/bootstrap.sh first: #{enginecore_lib} not staged (Expression 2 needs it on macOS)" unless File.file?(File.join(__dir__, enginecore_lib))
+  s.vendored_libraries  = (essence2_lib ? engine_libs.map { |p| p.sub(__dir__ + '/', '') } : []) + [enginecore_lib]
 
   # CoreAudio/AudioUnit are for libconverse: it bundles miniaudio (Supertonic
   # resampler), whose single-object impl pulls device-IO code that links these.
@@ -164,6 +171,7 @@ Pod::Spec.new do |s|
   # Metal/MetalKit are otherwise already present for libconverse + embody. Linking
   # these system frameworks unconditionally is harmless for the embody-only build
   # (no libessence2 symbols reference them, the linker just dead-strips).
+  # Security + curl are for EngineCore (libengine_core.a, vendored above).
   common_frameworks =
     '-lz -liconv -lc++ ' \
     '-framework Foundation -framework CoreML -framework CoreFoundation ' \
@@ -172,7 +180,8 @@ Pod::Spec.new do |s|
     '-framework CoreAudio -framework AudioUnit ' \
     '-framework Metal -framework MetalKit ' \
     '-framework MetalPerformanceShaders -framework MetalPerformanceShadersGraph ' \
-    '-framework AVFoundation -framework CoreGraphics -framework QuartzCore'
+    '-framework AVFoundation -framework CoreGraphics -framework QuartzCore ' \
+    '-framework Security -lcurl'
 
   # Homebrew dylibs libconverse needs at link + runtime via @rpath:
   #   - llama.cpp: the local LLM brain (ggml/llama).

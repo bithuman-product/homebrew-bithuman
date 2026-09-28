@@ -24,7 +24,8 @@
 //                              Leave it out beside Expression2, which carries its own copy.
 //   - bitHumanKit              legacy (v2.4.0), frozen, for existing apps only. `import bitHumanKit`.
 //
-// Every binary ships ios-arm64, ios-arm64-simulator (arm64 only) and macos-arm64.
+// Every binary ships ios-arm64, ios-arm64-simulator (arm64 only) and macos-arm64, except
+// EngineCore: macos-arm64 only, linked into Mac apps that take Expression2 or Essence 2.
 // Essence 2 runs on a device, not in the Simulator; Expression 2 runs in both.
 // ─────────────────────────────────────────────────────────────────────────────
 //
@@ -42,11 +43,11 @@ let releaseTag = "v2.4.0"
 let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(releaseTag)"
 
 // The Expression 2 archives.
-let expression2Tag = "v2.18.0"
+let expression2Tag = "v2.19.0"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 // The Essence 2 archives. Essence2Kit fetches its runtime files from this release too.
-let essence2Tag = "essence2-v1.14.2"
+let essence2Tag = "essence2-v1.15.0"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 let package = Package(
@@ -62,10 +63,10 @@ let package = Package(
         // The shared engine interface, as source. Not beside Expression2.
         .library(name: "BithumanEngineProtocol", targets: ["BithumanEngineProtocol"]),
         // Expression 2 with a Swift API; the protocol and UnifiedModelHeader ride along.
-        .library(name: "Expression2", targets: ["Expression2Binary", "BithumanEngineProtocolBinary", "UnifiedModelHeaderBinary"]),
+        .library(name: "Expression2", targets: ["Expression2Binary", "BithumanEngineProtocolBinary", "UnifiedModelHeaderBinary", "BithumanEngineCoreLink"]),
         // Essence 2 as a C library. ONNX Runtime, UnifiedModelHeader and the link settings
         // are required parts of it, not options.
-        .library(name: "Essence2", targets: ["libessence2", "onnxruntime", "UnifiedModelHeaderBinary", "Essence2LinkSettings"]),
+        .library(name: "Essence2", targets: ["libessence2", "onnxruntime", "UnifiedModelHeaderBinary", "Essence2LinkSettings", "BithumanEngineCoreLink"]),
         // Essence 2 with a Swift API over the Essence2 product. Its runtime files download
         // once, checked against sha256s pinned in Sources/Essence2Kit.
         .library(name: "Essence2Kit", targets: ["Essence2Kit"]),
@@ -92,23 +93,23 @@ let package = Package(
         .binaryTarget(
             name: "Expression2Binary",
             url: "\(expression2Base)/Expression2.xcframework.zip",
-            checksum: "83c3a87179e432f440bef78a0d576e060609482b2081e9a04243e3ed28c4881a"
+            checksum: "4770b78feb8a86ef293c73698f66332c3a663236679ae59b2dda3cbf1865e4bc"
         ),
         .binaryTarget(
             name: "BithumanEngineProtocolBinary",
             url: "\(expression2Base)/BithumanEngineProtocol.xcframework.zip",
-            checksum: "cd3b31f19897c2de4fb49689139cff93e76eb403f4e3a9d3f7b7842f23a30f35"
+            checksum: "cb1e1663052981fec9f929e298f05cc4c7b6010b1683178f3277aa4dfb9c962a"
         ),
         .binaryTarget(
             name: "UnifiedModelHeaderBinary",
             url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
-            checksum: "e65594ff447fa59aa6cc123eb2c478c85bd4f580cd9fbf455506558bec4843dd"
+            checksum: "2d4ee42f931638a9e0f8f0b1b97fc9ebfea6d9dc4e79f79cc83d9054e4f62157"
         ),
         // The Essence 2 engine. Its module map declares `Essence2` and `CLibEssence2`.
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "ac1f3157d1cc9d47a3e42f51d9ade611288ea59ae63e1b5de3169ee41a75f93a"
+            checksum: "bdaa8fc6c4e741d7977df85c1711258427d896555b3a75dce7d2475f0a8cd2d4"
         ),
         // The Apple libraries libessence2.a calls, passed to the app's final link.
         .target(
@@ -124,7 +125,7 @@ let package = Package(
         // Source only, over the Essence2 C interface.
         .target(
             name: "Essence2Kit",
-            dependencies: ["libessence2", "onnxruntime", "UnifiedModelHeaderBinary", "Essence2LinkSettings"],
+            dependencies: ["libessence2", "onnxruntime", "UnifiedModelHeaderBinary", "Essence2LinkSettings", "BithumanEngineCoreLink"],
             path: "Sources/Essence2Kit"
         ),
         .testTarget(
@@ -137,6 +138,25 @@ let package = Package(
             name: "onnxruntime",
             url: "\(essence2Base)/onnxruntime.xcframework.zip",
             checksum: "7d631c161ae0d9c6f01095bcb5556d0b4f0205dc5111e6d2ddae82cc7050a7ed"
+        ),
+        // engine_core for macOS: the compiled licensing and metering core the Essence2 and
+        // Expression2 binaries call on macOS (their archives leave those symbols to be
+        // resolved here, once per app). macOS only: iOS links nothing from it.
+        .binaryTarget(
+            name: "EngineCore",
+            url: "\(essence2Base)/EngineCore.xcframework.zip",
+            checksum: "c9d5986af2c05c3453c25ade06ca5d649b3dd474f34864f0299f5b4d9a86327c"
+        ),
+        .target(
+            name: "BithumanEngineCoreLink",
+            dependencies: [.target(name: "EngineCore", condition: .when(platforms: [.macOS]))],
+            path: "Sources/BithumanEngineCoreLink",
+            linkerSettings: [
+                .linkedFramework("Security", .when(platforms: [.macOS])),
+                .linkedFramework("CoreFoundation", .when(platforms: [.macOS])),
+                .linkedLibrary("curl", .when(platforms: [.macOS])),
+                .linkedLibrary("c++", .when(platforms: [.macOS])),
+            ]
         ),
     ]
 )

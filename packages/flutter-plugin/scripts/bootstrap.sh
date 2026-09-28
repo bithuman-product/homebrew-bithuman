@@ -101,6 +101,9 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # (Through 2.6.19 a BITHUMAN_MODELS_REF pinned the private repository revision whose engine
 # ADAPTER SOURCE this pod compiled. Since 2.6.20 no engine source is fetched: see below.)
 
+# ★MOVED 2026-09-28 to essence2-v1.15.0 (bithuman-models #1621 @ 225c63782): on macOS the engine's licensing
+# and metering core leaves the archive for EngineCore (ENGINECORE_* below, staged by stage_enginecore). The C
+# interface gains ADDITIVE calls the adapter does not use, so BITHUMAN_MODELS_REF stays.
 # ★MOVED 2026-09-26 to essence2-v1.14.2 (bithuman-models #1542 @ 2a33fd99d): a long session's memory stays flat
 # (the audio-to-motion stage keeps a window, not the whole utterance). The C interface is unchanged.
 # ★MOVED 2026-09-26 to essence2-v1.14.1 (bithuman-models #1516 @ b4a331443): a Release engine cannot be switched
@@ -116,10 +119,20 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
 # `libessence2.xcframework.zip` binaryTarget checksum and the release's own
 # resources sidecar. Passed to the engine SDK bootstrap explicitly below.
-LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.14.2}"
-LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-ac1f3157d1cc9d47a3e42f51d9ade611288ea59ae63e1b5de3169ee41a75f93a}"
-LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.14.2}"
-LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-ec6e959a82d1cca5e745e4b3b6e0b88d08d7d429c6d5a392788027de2b277a8b}"
+LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.15.0}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-bdaa8fc6c4e741d7977df85c1711258427d896555b3a75dce7d2475f0a8cd2d4}"
+LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.15.0}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-d854f4bbd7a4d19a83d270e20861795786a1474632433e101d0d684164489204}"
+
+# ★ENGINECORE (macOS only, from essence2-v1.15.0 / Expression2 v2.19.0). On macOS the Essence 2
+# archive and the Expression 2 framework no longer carry the engine's licensing and metering
+# core: both leave those symbols to the app's final link, which takes them ONCE from
+# EngineCore's plain static lib (libengine_core.a, macos-arm64 only). The iOS slices reference
+# nothing from it. It is linked whenever Expression 2 is (the plugin always links Expression 2),
+# so it is NOT skipped by BITHUMAN_SKIP_ESSENCE2. Must equal Package.swift's `essence2Tag` and
+# its EngineCore binaryTarget checksum (scripts/check-apple-engine-pin.sh A8).
+ENGINECORE_RELEASE="${ENGINECORE_RELEASE:-essence2-v1.15.0}"
+ENGINECORE_SHA256="${ENGINECORE_SHA256:-c9d5986af2c05c3453c25ade06ca5d649b3dd474f34864f0299f5b4d9a86327c}"
 
 # The UnifiedModelHeader module, as a plain static .a per slice.
 #
@@ -154,11 +167,11 @@ LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-ec6e959a82d1cca5e7
 # BithumanEngineProtocol, UnifiedModelHeader), from the same tap release and checked against the same
 # checksums Package.swift pins; the Essence 2 adapter is the plugin's own (shared/Classes). No engine
 # source is fetched, from anywhere. X2_XCF_DIR=<dir holding the three zips> stages a candidate build.
-EXPRESSION2_RELEASE="${EXPRESSION2_RELEASE:-v2.18.0}"
-EXPRESSION2_SHA256="${EXPRESSION2_SHA256:-83c3a87179e432f440bef78a0d576e060609482b2081e9a04243e3ed28c4881a}"
-BEP_SHA256="${BEP_SHA256:-cd3b31f19897c2de4fb49689139cff93e76eb403f4e3a9d3f7b7842f23a30f35}"
-UMH_RELEASE="${UMH_RELEASE:-v2.18.0}"
-UMH_SHA256="${UMH_SHA256:-e65594ff447fa59aa6cc123eb2c478c85bd4f580cd9fbf455506558bec4843dd}"
+EXPRESSION2_RELEASE="${EXPRESSION2_RELEASE:-v2.19.0}"
+EXPRESSION2_SHA256="${EXPRESSION2_SHA256:-4770b78feb8a86ef293c73698f66332c3a663236679ae59b2dda3cbf1865e4bc}"
+BEP_SHA256="${BEP_SHA256:-cb1e1663052981fec9f929e298f05cc4c7b6010b1683178f3277aa4dfb9c962a}"
+UMH_RELEASE="${UMH_RELEASE:-v2.19.0}"
+UMH_SHA256="${UMH_SHA256:-2d4ee42f931638a9e0f8f0b1b97fc9ebfea6d9dc4e79f79cc83d9054e4f62157}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so
@@ -267,6 +280,31 @@ stage_expression2() {
         done
         log "  staged the identity-agnostic embody graphs → {macos,ios}/Assets/embody"
     fi
+}
+
+# EngineCore (macOS only): its plain static lib into macos/Vendor/libengine_core.a, which the
+# macOS podspec vendors explicitly. Deliberately NOT under Engines/*/Vendor: that glob decides
+# whether Essence 2 is present (ESSENCE2_AVAILABLE) and probes engine libs for auth hooks, and
+# EngineCore is neither an avatar engine nor optional. ENGINECORE_XCF_ZIP=<path> stages a
+# candidate build (with X2_XCF_DIR).
+stage_enginecore() {
+    local dl lib; dl="$(mktemp -d)"
+    rm -f "$PLUGIN_ROOT/macos/Vendor/libengine_core.a"
+    if [ -n "${ENGINECORE_XCF_ZIP:-}" ]; then
+        log "Staging EngineCore from ENGINECORE_XCF_ZIP=$ENGINECORE_XCF_ZIP (candidate)"
+        cp "$ENGINECORE_XCF_ZIP" "$dl/EngineCore.xcframework.zip" || die "no $ENGINECORE_XCF_ZIP"
+    else
+        log "Fetching EngineCore $ENGINECORE_RELEASE (${ENGINECORE_SHA256:0:16}…) …"
+        fetch_tap_zip "$ENGINECORE_RELEASE" EngineCore.xcframework.zip "$ENGINECORE_SHA256" "$dl"
+    fi
+    ( cd "$dl" && unzip -q -o EngineCore.xcframework.zip ) || die "could not unzip EngineCore.xcframework.zip"
+    [ -d "$dl/EngineCore.xcframework/macos-arm64" ] || die "EngineCore.xcframework has no macos-arm64 slice"
+    lib="$dl/EngineCore.xcframework/macos-arm64/libengine_core.a"
+    [ -f "$lib" ] || die "EngineCore.xcframework/macos-arm64 has no libengine_core.a"
+    mkdir -p "$PLUGIN_ROOT/macos/Vendor"
+    cp "$lib" "$PLUGIN_ROOT/macos/Vendor/libengine_core.a"
+    rm -rf "$dl"
+    log "  staged EngineCore → macos/Vendor/libengine_core.a (the macOS link of Expression 2 and Essence 2)"
 }
 
 # The Essence 2 engine: its C library (libessence2.a per slice + be_essence2.h) and runtime
@@ -389,6 +427,7 @@ if [ -n "${BITHUMAN_SDK_DIR:-}" ]; then
     # (BITHUMAN_SDK_DIR propagates). expression2 models → ~/embody-ane at runtime;
     # essence2 libessence2 extracted from the SAME sibling SDK vendor surface.
     stage_expression2
+    stage_enginecore
     stage_essence2
 
     log "Done (dev mode). Expression2Runtime will load models from ~/embody-ane/build_A42."
@@ -504,6 +543,7 @@ reduce_to_shared_graphs "$SRC/embody-models"
 # libconverse (EMBODY_VENDOR_SRC → no re-download); essence2 fetches its own
 # sha-pinned libessence2 release inside its SDK bootstrap.
 stage_expression2 "$SRC/embody-models"
+stage_enginecore
 stage_essence2
 
 log "Done. Self-contained — no sibling bithuman-sdk required."
