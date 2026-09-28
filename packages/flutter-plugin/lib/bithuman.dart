@@ -12,8 +12,10 @@ import 'dart:typed_data' show Int16List, Uint8List;
 
 import 'package:flutter/services.dart';
 
+import 'src/credential.dart';
 import 'src/voice_host.dart';
 
+export 'src/credential.dart' show BithumanCredential, BithumanCredentialProvider;
 export 'src/voice_host.dart' show VoiceHost;
 
 const _channel = MethodChannel('ai.bithuman.avatar');
@@ -105,14 +107,26 @@ class BithumanAvatar implements VoiceHost {
   /// Essence2 runs on macOS + iOS arm64, and on Android (`engine: 'essence2'`,
   /// where [imxPath] is the agent CODE and [apiSecret] is required: the members
   /// come through the metered door and every frame is metered).
+  ///
+  /// An app that holds no API secret passes [credential] instead: a
+  /// [BithumanCredential.provider] of short-lived bitHuman session tokens. The token it
+  /// holds when [load] runs opens the avatar, and while any avatar is loaded the plugin
+  /// asks the provider again every [credentialPushInterval] and hands a CHANGED token to
+  /// the engines ([setCredential]). When the service refuses the token in use (it
+  /// expired), the engine's meter moves to that newer token after checking that it
+  /// belongs to the same account, so refreshing the token before it expires keeps a
+  /// long session billing. [apiSecret], when given, wins.
   static Future<BithumanAvatar> load(
     String imxPath, {
     String? apiSecret,
+    BithumanCredential? credential,
     String engine = 'essence',
     String? motionDir,
     int chunk = 16,
   }) async {
     _installNativeCallbacks();
+    final fromProvider = (apiSecret == null || apiSecret.isEmpty) && credential != null;
+    if (fromProvider) apiSecret = await credential.current();
     final id = await _channel.invokeMethod<int>('load', {
       'path': imxPath,
       if (apiSecret != null && apiSecret.isNotEmpty) 'apiSecret': apiSecret,
@@ -123,6 +137,7 @@ class BithumanAvatar implements VoiceHost {
     if (id == null) throw const BithumanAvatarException('load returned null');
     final avatar = BithumanAvatar._(id);
     _instances[id] = avatar;
+    if (fromProvider && credential.rotates) _watchCredential(credential, apiSecret);
     try {
       final size = await _channel
           .invokeMapMethod<String, int>('frameSize', {'textureId': id});
@@ -511,6 +526,57 @@ class BithumanAvatar implements VoiceHost {
     await _channel.invokeMethod('setExpression2AgentDir', {'dir': dir ?? ''});
   }
 
+  /// Hand the engines a NEWER credential for the same account, for example the session
+  /// token your backend just refreshed. Later loads and model downloads use it, and a
+  /// running session's meter moves to it when the service refuses the credential it
+  /// started with (401, or a spent single-session token), but only after the service
+  /// confirms that it belongs to the same account. `null` clears it. Nothing here
+  /// changes what is billed: the service validates every credential and prices every
+  /// second itself.
+  ///
+  /// [load] with a [BithumanCredential.provider] calls this for you.
+  static Future<void> setCredential(String? credential) async {
+    final c = credential?.trim();
+    await _channel.invokeMethod('setCredential', {'credential': (c == null || c.isEmpty) ? null : c});
+  }
+
+  /// How often a provider installed by [load] is asked for its current token while an
+  /// avatar is loaded. The provider's answer should be cheap (return the token you hold);
+  /// a changed answer is pushed with [setCredential].
+  static Duration credentialPushInterval = const Duration(seconds: 30);
+
+  static BithumanCredential? _watched;
+  static String? _pushed;
+  static Timer? _pushTimer;
+
+  static void _watchCredential(BithumanCredential credential, String? pushed) {
+    _watched = credential;
+    _pushed = pushed;
+    _pushTimer?.cancel();
+    _pushTimer = Timer.periodic(credentialPushInterval, (_) => _pushIfChanged());
+  }
+
+  static Future<void> _pushIfChanged() async {
+    final c = _watched;
+    if (c == null) return;
+    final now = await c.current();
+    if (now == null || now == _pushed || !identical(c, _watched)) return;
+    _pushed = now;
+    try {
+      await setCredential(now);
+    } catch (e) {
+      // ignore: avoid_print
+      print('[bithuman] could not hand the engines the refreshed credential: $e');
+    }
+  }
+
+  static void _stopWatchingCredential() {
+    _pushTimer?.cancel();
+    _pushTimer = null;
+    _watched = null;
+    _pushed = null;
+  }
+
   /// Current microphone authorization: `authorized` | `notDetermined` | `denied`.
   /// Drives the main-screen status chip (yellow when not yet `authorized`).
   static Future<String> micPermissionStatus() async =>
@@ -578,6 +644,7 @@ class BithumanAvatar implements VoiceHost {
     if (_disposed) return;
     _disposed = true;
     _instances.remove(textureId);
+    if (_instances.isEmpty) _stopWatchingCredential();
     _readyPoll?.cancel();
     _readyPoll = null;
     if (!_readyCompleter.isCompleted) _readyCompleter.complete();

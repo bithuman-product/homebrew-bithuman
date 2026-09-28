@@ -135,6 +135,15 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
             "load" -> load(call, result)
+            "setCredential" -> {
+                // A NEWER credential for the same account (a refreshed session token). The engines'
+                // one setter each; a running meter moves to it only when the service refuses the
+                // credential it started with, and only after the service says it is the same account.
+                val c = call.argument<String>("credential")?.trim()?.takeIf { it.isNotEmpty() }
+                ai.bithuman.expression2.Expression2Credential.set(c)
+                Essence2Credential.set(c)
+                result.success(null)
+            }
             "frameSize" -> {
                 val s = session(call) ?: return result.error("no_session", "unknown textureId", null)
                 result.success(mapOf("width" to s.avatar.width, "height" to s.avatar.height))

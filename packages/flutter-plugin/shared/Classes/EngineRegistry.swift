@@ -78,6 +78,25 @@ enum EngineRegistry {
   }
 
   #if os(macOS) || os(iOS)
+  /// Hand both engines a NEWER credential (Dart `BithumanAvatar.setCredential`): the
+  /// session token the app just refreshed. The same setters `make` uses; `nil` or blank
+  /// clears. A running session's meter moves to it only when the service refuses the
+  /// credential the session started with, and only once the service confirms that it is
+  /// the same account (the engines' rule). Nothing here selects a price or turns metering
+  /// off.
+  static func setCredential(_ credential: String?) {
+    let t = credential?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let value: String? = t.isEmpty ? nil : t
+    Expression2Credential.set(value)
+    #if ESSENCE2_AVAILABLE
+    if let value {
+      _ = value.withCString { be_essence2_set_api_secret($0) }
+    } else {
+      _ = be_essence2_set_api_secret(nil)
+    }
+    #endif
+  }
+
   /// Create the engine for a slug. The ONLY place a concrete engine type is
   /// named. Returns `any BithumanEngine`; the caller drives it purely through the
   /// protocol + `capabilities.driveModel`. essence2 is gated on

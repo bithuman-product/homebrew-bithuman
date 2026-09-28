@@ -247,6 +247,16 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       micChannels.removeValue(forKey: textureId)
       result(nil)
 
+    case "setCredential":
+      // A NEWER credential for the same account (a refreshed session token). The engines'
+      // setters take it; a running meter moves to it only when the service refuses the
+      // credential it started with, and only after the service says it is the same account.
+      let args = call.arguments as? [String: Any]
+      #if os(macOS) || os(iOS)
+      EngineRegistry.setCredential(args?["credential"] as? String)
+      #endif
+      result(nil)
+
     case "engineVersion":
       result("expression-2 (pure-Swift/CoreML)")
 
