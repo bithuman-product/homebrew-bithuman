@@ -79,6 +79,10 @@ jobs:
             --pattern 'libessence2.xcframework.zip*' --pattern 'libessence2-resources.zip*' --clobber
           gh release download "$ORT_TAG" --repo "$SOURCE_REPO" \
             --pattern 'onnxruntime.xcframework.zip*' --clobber
+          # EngineCore.xcframework (engine_core, macOS only), on source tags that carry it
+          # (bithuman-models #1621 onward). Optional: older source tags have none.
+          gh release download "$SOURCE_TAG" --repo "$SOURCE_REPO" \
+            --pattern 'EngineCore.xcframework.zip*' --clobber 2>/dev/null || true
           ls -la
 
       - name: The bytes are the ones that were proven — sha256 equals the builder's sidecar AND the caller's measurement
@@ -94,6 +98,20 @@ jobs:
               || { echo "::error::$z sha256 $got != the builder's sidecar $want"; exit 1; }
             echo "$z $got"
           done
+          if [ -s EngineCore.xcframework.zip ]; then
+            [ -s EngineCore.xcframework.zip.sha256 ] \
+              || { echo "::error::EngineCore.xcframework.zip has no sha256 sidecar on the source release"; exit 1; }
+            got=$(shasum -a 256 EngineCore.xcframework.zip | cut -d' ' -f1)
+            [ "$got" = "$(cut -d' ' -f1 EngineCore.xcframework.zip.sha256)" ] \
+              || { echo "::error::EngineCore.xcframework.zip sha256 $got != the builder's sidecar"; exit 1; }
+            rm -rf ec && mkdir ec && ditto -x -k EngineCore.xcframework.zip ec
+            ls ec/EngineCore.xcframework | grep -qx 'macos-arm64' \
+              || { echo "::error::EngineCore.xcframework has no macos-arm64 slice"; ls ec/EngineCore.xcframework; exit 1; }
+            if ls ec/EngineCore.xcframework | grep -q '^ios'; then
+              echo "::error::EngineCore.xcframework carries an iOS slice — EngineCore is macOS only"; exit 1
+            fi
+            echo "EngineCore.xcframework.zip $got (macos-arm64 only; release-graded by the source workflow)"
+          fi
           got=$(shasum -a 256 libessence2.xcframework.zip | cut -d' ' -f1)
           [ "$got" = "$EXPECTED_XCF_SHA256" ] \
             || { echo "::error::libessence2.xcframework.zip sha256 $got != $EXPECTED_XCF_SHA256 measured on the devices — these are not the bytes that were proven"; exit 1; }
@@ -195,6 +213,9 @@ jobs:
           cd src
           swift package compute-checksum libessence2.xcframework.zip | tee libessence2.xcframework.zip.checksum
           swift package compute-checksum onnxruntime.xcframework.zip | tee onnxruntime.xcframework.zip.checksum
+          if [ -s EngineCore.xcframework.zip ]; then
+            swift package compute-checksum EngineCore.xcframework.zip | tee EngineCore.xcframework.zip.checksum
+          fi
 
       - name: Create the release with the exact files
         env:
@@ -202,7 +223,12 @@ jobs:
         run: |
           set -euo pipefail
           cd src
+          EC=()
+          if [ -s EngineCore.xcframework.zip ]; then
+            EC=(EngineCore.xcframework.zip EngineCore.xcframework.zip.sha256 EngineCore.xcframework.zip.checksum)
+          fi
           gh release create "$TAP_TAG" \
+            "${EC[@]+"${EC[@]}"}" \
             libessence2.xcframework.zip libessence2.xcframework.zip.sha256 libessence2.xcframework.zip.checksum \
             libessence2-resources.zip libessence2-resources.zip.sha256 \
             onnxruntime.xcframework.zip onnxruntime.xcframework.zip.sha256 onnxruntime.xcframework.zip.checksum \
