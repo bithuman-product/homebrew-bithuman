@@ -35,6 +35,9 @@ import 'src/transport_protocol.dart';
 import 'src/dev_levers.dart';
 
 export 'src/transport_protocol.dart';
+// The on-device brain's shipped defaults (persona prompts, measured model set,
+// required license notices) — see lib/src/local_brain.dart.
+export 'src/local_brain.dart';
 // Re-exported WITHOUT a matching import on purpose: `VoiceHost` already reaches
 // this library through bithuman_realtime.dart (the voice library exports the
 // voice protocol), so importing it here is what the analyzer calls an

@@ -3,8 +3,8 @@
 #
 # The bitHuman macOS engines link heavy C++ deps as DYNAMIC libraries from
 # Homebrew (/opt/homebrew): the podspec's brew_libs links `-lonnxruntime`
-# (a2x w2v frontend) + `-lllama` (the libconverse brain), and llama.cpp
-# runtime-dlopens its `libggml*` Metal backends. As built, the .app loads
+# (a2x w2v frontend + the Supertonic voice). (llama.cpp used to come from
+# Homebrew too; libconverse >= 2.4.0 links it statically.) As built, the .app loads
 # them from /opt/homebrew at runtime, so it only runs on a machine that has
 # Homebrew + those exact libs. This script copies the whole
 # transitive dylib closure into Contents/Frameworks, rewrites every load command
@@ -66,15 +66,15 @@ def resolve(dep, referrer):
         if os.path.exists(cand) and is_hb(os.path.realpath(cand)): return cand
     return index.get(base)        # @rpath/<x> or bare name -> Homebrew by basename
 
-# Force-include runtime-dlopen'd sets a static walk can miss. Only llama.cpp's
-# libggml* Metal backends are dlopen'd today; they are the sole force-seed.
+# Force-include runtime-dlopen'd sets a static walk can miss. None today:
+# llama.cpp (whose Homebrew build dlopen'd its libggml* backends) is now linked
+# statically inside libconverse.a, Metal shaders embedded.
 # (The openvino/ffmpeg/hdf5/webp force-seed was essence-1's LivePortrait
 # runtime — that engine was removed from this pod, and the current engines link
-# only -lonnxruntime + -lllama (see bithuman.podspec brew_libs), so seeding
+# only -lonnxruntime (see bithuman.podspec brew_libs), so seeding
 # openvino pulled its ~200 MB closure into the .app for nothing. Anything
 # actually linked is still bundled by the BFS below from otool -L on the binary.)
 seeds = list(otool_L(BIN))
-seeds += glob.glob('/opt/homebrew/opt/llama.cpp/lib/libggml*.dylib')
 
 # BFS the closure, keyed by the basename used in load commands.
 to_bundle, queue, done = {}, [], set()

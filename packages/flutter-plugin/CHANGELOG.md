@@ -1,3 +1,27 @@
+## Unreleased — the on-device brain, fast enough for a free tier
+
+Needs libconverse **2.4.0**. Until a vendor bundle carries it, stage a local build with
+`BITHUMAN_CONVERSE_XCFRAMEWORK=<path> scripts/bootstrap.sh`. The pod still builds against the
+older brain (the split-sentence merge is then off).
+
+* **Faster replies (LOCAL mode).** The brain hands its speech to the avatar as fast as it is
+  synthesized (up to 3 s ahead, like a cloud reply) and flushes the avatar as soon as the whole
+  reply has been handed over, instead of pacing it at playback speed. The avatar's mouth starts
+  about 2.5 s sooner; lip-sync still follows the audio clock and a barge still cuts instantly.
+* **Faster end of turn.** Apple SpeechAnalyzer runs with `.fastResults`: the user's turn is
+  committed 0.4–0.9 s after they stop talking instead of about 2 s.
+* **Split sentences are one turn.** "Hi Wise Pup! … How are you?" used to become two turns and
+  the second was dropped. A part the user started saying before the reply was audible is now
+  merged into the same turn. Finals with no letters or digits are ignored.
+* **macOS no longer links Homebrew llama.cpp.** libconverse 2.4.0 carries a pinned static
+  llama.cpp; `brew upgrade llama.cpp` could crash the app on load (ABI mismatch). ONNX Runtime
+  still comes from Homebrew on macOS.
+* **Persona and model set.** `LocalBrainPersona.wisePup`, `LocalBrainModels` (Llama 3.2 1B
+  Instruct and a half-size Supertonic voice) and `LocalBrainNotices` (the attributions the model
+  licenses require). See `THIRD_PARTY_NOTICES.md`.
+* The brain strips emoji, markdown and `*actions*` from captions and speech, and answers a turn
+  about suicide or self-harm with a fixed crisis message (988 / local crisis line).
+
 ## 2.6.22 — 2026-09-28 — security fix: restrict internal symbols in the macOS engine core
 
 Tag `flutter-plugin-v2.6.22`.

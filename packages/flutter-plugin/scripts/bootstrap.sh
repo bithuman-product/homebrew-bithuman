@@ -31,6 +31,8 @@
 # the app's Runner "Bundle embody models" phase reads.
 #
 # Two modes:
+#   • BITHUMAN_CONVERSE_XCFRAMEWORK=<path>: stage THAT libconverse.xcframework (a
+#     local build) instead of the one in the vendor bundle; everything else as below.
 #   • SELF-CONTAINED (default): download + sha256-verify the libconverse vendor
 #     bundle from the embody Release, then run each engine SDK's bootstrap.
 #   • DEV override: BITHUMAN_SDK_DIR=/path/to/bithuman-models/models/essence-1
@@ -471,7 +473,17 @@ fi
 # bytes: the cloud realtime path, the avatar, both engines, lipsync, barge-in and
 # the idle loop all work without it; only localAudioStart/Stop/PushText are
 # unavailable, and they refuse by name.
-if [ -d "$SRC/libconverse.xcframework" ]; then
+if [ -n "${BITHUMAN_CONVERSE_XCFRAMEWORK:-}" ]; then
+    # A locally built brain (bithuman-models models/_core/converse/build-xcframework.sh)
+    # — how a new libconverse is tested before it is published in a vendor bundle.
+    [ -f "$BITHUMAN_CONVERSE_XCFRAMEWORK/Info.plist" ] \
+        || die "BITHUMAN_CONVERSE_XCFRAMEWORK=$BITHUMAN_CONVERSE_XCFRAMEWORK is not an xcframework"
+    log "Installing libconverse.xcframework from BITHUMAN_CONVERSE_XCFRAMEWORK (local build)"
+    mkdir -p "$MAC_FW" "$IOS_FW"
+    rm -rf "$MAC_FW/libconverse.xcframework"
+    cp -R "$BITHUMAN_CONVERSE_XCFRAMEWORK" "$MAC_FW/libconverse.xcframework"
+    relink "$MAC_FW/libconverse.xcframework" "$IOS_FW/libconverse.xcframework"
+elif [ -d "$SRC/libconverse.xcframework" ]; then
     log "Installing libconverse.xcframework → macos/Frameworks (ios → symlink)"
     mkdir -p "$MAC_FW" "$IOS_FW"
     rm -rf "$MAC_FW/libconverse.xcframework"

@@ -45,7 +45,13 @@ actor SpeechPipeline {
         let transcriber = SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
-            reportingOptions: [.volatileResults],
+            // .fastResults: the recognizer commits a segment as soon as it is
+            // confident instead of waiting out its default trailing window —
+            // end of speech → final went from ~2.0 s to 0.4–0.9 s (measured
+            // 2026-09-28, iPhone 15). Finals are NOT forced (analyzer.finalize on
+            // our own VAD edge produced ghost "." turns); a segment that still
+            // splits one utterance is merged by LocalConverseController.
+            reportingOptions: [.volatileResults, .fastResults],
             attributeOptions: [.audioTimeRange]
         )
         self.transcriber = transcriber
