@@ -351,15 +351,24 @@ if not verify_bytes:
 elif asset_dir == "-":
     bad("C7", "--verify-bytes needs --assets DIR")
 else:
-    import tarfile
+    import tarfile, zipfile, calendar
     clocks = {}
     unread = []
     for name in required:
-        if not name.endswith(".tar.gz"):
+        if not (name.endswith(".tar.gz") or name.endswith(".zip")):
             continue
         path = os.path.join(asset_dir, name)
         try:
-            with tarfile.open(path, "r:gz") as tf:
+            if name.endswith(".zip"):
+                # ★The Windows half is a .zip (2026-09-28). release_pack.sh
+                # stamps every member's date_time with the build's built_at in
+                # UTC, so read back as UTC it is the same clock a tarball
+                # member's mtime carries.
+                with zipfile.ZipFile(path) as zf:
+                    mt = [calendar.timegm(i.date_time + (0, 0, 0)) for i in zf.infolist()
+                          if not i.is_dir()]
+            else:
+              with tarfile.open(path, "r:gz") as tf:
                 mt = [m.mtime for m in tf.getmembers() if m.mtime]
             if not mt:
                 unread.append(f"{name}: no member carries an mtime")
@@ -453,13 +462,30 @@ if not verify_bytes:
 elif asset_dir == "-":
     bad("C8", "--verify-bytes needs --assets DIR")
 else:
-    import tarfile
+    import tarfile, zipfile
     trees, probs, unread = {}, [], []
     for name in required:
-        if not name.endswith(".tar.gz"):
+        if not (name.endswith(".tar.gz") or name.endswith(".zip")):
             continue
         path = os.path.join(asset_dir, name)
         try:
+          if name.endswith(".zip"):
+            # ★The Windows .zip: the same two questions of the same two members
+            #  (bithuman.exe's stamp, PROVENANCE.json), read out of the zip.
+            with zipfile.ZipFile(path) as zf:
+                sidecar, in_binary = None, []
+                for i in zf.infolist():
+                    if i.is_dir():
+                        continue
+                    data = zf.read(i)
+                    if os.path.basename(i.filename) == "PROVENANCE.json":
+                        try:
+                            sidecar = json.loads(data.decode())
+                        except Exception:
+                            probs.append(f"{name}: PROVENANCE.json is not readable JSON")
+                    else:
+                        in_binary += _scan_stamps(data)
+          else:
             with tarfile.open(path, "r:gz") as tf:
                 sidecar, in_binary = None, []
                 for m in tf.getmembers():
