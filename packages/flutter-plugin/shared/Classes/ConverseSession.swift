@@ -107,6 +107,10 @@ final class ConverseSession: @unchecked Sendable {
             #endif
             if let fallback {
                 NSLog("[Converse] system voice unavailable (%@); using the built-in voice", fallback)
+                if (supertonicAssets ?? "").isEmpty {
+                    NSLog("[Converse] …but no supertonicAssets were given, so the built-in voice cannot load: "
+                          + "check SystemVoices.query().hasHighQuality before choosing the system voice")
+                }
                 voice = "M1"
             }
         }
