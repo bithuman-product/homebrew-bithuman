@@ -77,6 +77,7 @@ final class AppleFoundationLlm: @unchecked Sendable {
 
     private let model = SystemLanguageModel.default
     private let lock = NSLock()
+    private static let debug = ProcessInfo.processInfo.environment["BITHUMAN_CONVERSE_DEBUG"] == "1"
     private var session: LanguageModelSession?
     // What `session` has seen, to decide reuse (see the type doc).
     private var seenSystem: String?
@@ -180,11 +181,15 @@ final class AppleFoundationLlm: @unchecked Sendable {
     private func sessionFor(system: String, history: [Msg]) -> LanguageModelSession {
         lock.lock(); defer { lock.unlock() }
         if let s = session, reusable, !s.isResponding, seenSystem == system {
-            if seenUser == nil && history.isEmpty { return s }            // first turn after warm()
+            if seenUser == nil && history.isEmpty {                       // first turn after warm()
+                if Self.debug { NSLog("[Converse] apple llm session=warm history=0") }
+                return s
+            }
             if let u = seenUser, history.count == seenHistory.count + 2,
                Array(history.prefix(seenHistory.count)) == seenHistory,
                history[seenHistory.count] == Msg(role: "user", content: u),
                history.last?.role == "assistant" {
+                if Self.debug { NSLog("[Converse] apple llm session=reuse history=%d", history.count) }
                 return s                                                  // previous turn + our reply
             }
         }
@@ -199,6 +204,7 @@ final class AppleFoundationLlm: @unchecked Sendable {
             }
         }
         let s = LanguageModelSession(model: model, transcript: Transcript(entries: entries))
+        if Self.debug { NSLog("[Converse] apple llm session=rebuild history=%d", history.count) }
         session = s
         return s
     }

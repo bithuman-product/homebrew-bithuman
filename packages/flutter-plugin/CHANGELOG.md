@@ -36,9 +36,10 @@ older brain (the split-sentence merge is then off).
   (`LocalBrainPersona.wisePupRefusal`) and the refused turn leaves the history, so it cannot make
   the model refuse the turns after it. The 988 crisis reply is still decided before any model
   sees the turn. The first reply is prewarmed at load.
-* **It is not faster.** Apple's model takes about 0.4 s to its first words on an M4 Mac, against
-  about 0.05 s for Llama, so the first audio comes about 0.35 s later (see the PR for the full
-  measurement). Choose it for the download size, not for speed.
+* **It is slower, not faster.** On an M4 Mac, Apple's model takes about 0.4 s to its first words
+  with nothing else running and about 0.7 s while the avatar renders (Llama: 0.05 s). A typed
+  turn reaches the avatar's mouth in a median 2.1 s with Apple's model against 1.2 s with Llama.
+  Choose it for the download size, not for speed.
 * FoundationModels is weak-linked: the plugin still loads on older systems.
 
 ## 2.6.22 — 2026-09-28 — security fix: restrict internal symbols in the macOS engine core
