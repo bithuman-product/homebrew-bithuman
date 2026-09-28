@@ -11,6 +11,9 @@
   reuse (a trimmed history is shifted in the cache, not re-prefilled), emoji/markdown stripping,
   split-turn merging, persona house rules, and a deterministic crisis-line reply for self-harm.
   See README "Android LOCAL mode" for the model files, sizes and licenses.
+* **Android player:** a reply fed as one burst (LOCAL mode) no longer loses its first-frame mark
+  when its end-of-reply arrives before its first frame is shown — `bhttfa first speech frame` is
+  logged for every reply again (instrumentation only; presentation is unchanged).
 * **Build:** the Android half now compiles native code: llama.cpp (pinned commit) and
   sherpa-onnx v1.13.8 (with ONNX Runtime 1.28.2 static, and **without espeak-ng** — a no-op
   stand-in replaces its GPL-3.0 dependency, see `android/src/main/cpp/no-espeak/`). Needs the

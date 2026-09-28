@@ -308,6 +308,23 @@ and a trimmed history is slid down in the cache instead of re-prefilled); emoji,
 gets a fixed crisis-line reply without asking the model, and the persona's house rules (never
 claims to be human, no romance) are appended to any app prompt.
 
+### Measured (Galaxy S25+, Expression 2 Wise Pup rendering on the NPU at the same time)
+
+Prompts injected as recorded speech (30 spoken + 6 typed turns, 12 minutes, one session):
+
+| | p50 | p90 |
+| --- | --- | --- |
+| end of speech → avatar's mouth moves | **2.46 s** | 2.89 s |
+| typed message → mouth | 2.05 s | 2.86 s |
+| end of speech → first reply audio handed to the avatar | 1.21 s | 1.44 s |
+| … of which VAD endpoint + Moonshine / LLM first token / Supertonic first sentence | 0.52 / 0.12 / 0.57 s | |
+| reply audio → first mouth frame (the avatar's own onset; 1.15 s with no brain running) | 1.29 s | 1.63 s |
+
+Avatar health with the brain working vs idle: 19.17 vs 19.26 fps delivered (20 fps content), speech
+coverage 95.4 % vs 96.0 %, worst frame gap 159 vs 145 ms. Over the 12 minutes: thermal status 0
+throughout, battery 35.2 → 37.2 °C (on USB power), no fps or latency drift, app PSS ≈ 3.0 GB
+(peak 3.08 GB, avatar and brain together). Brain load 2.6 s.
+
 ### Files the app provides
 
 Two paths come from Dart (the same two Apple takes); the speech-in models sit beside the LLM:
