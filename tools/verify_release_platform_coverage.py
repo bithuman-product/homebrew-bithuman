@@ -97,10 +97,13 @@ import urllib.request
 REPO = "bithuman-product/homebrew-bithuman"
 API = "https://api.github.com/repos/%s/releases?per_page=100"
 
-# The CLI tarball asset name, the ONLY name install.sh ever asks for:
-#   bithuman-<arch>-<os>.tar.gz  (+ the optional .sha256 sidecar)
-ASSET_RE = re.compile(r"^bithuman-(?P<target>[A-Za-z0-9_]+-[A-Za-z0-9_.-]+)"
-                      r"\.tar\.gz(?P<sidecar>\.sha256)?$")
+# The CLI archive asset name, the ONLY name an installer ever asks for:
+#   bithuman-<arch>-<os>.tar.gz  (+ the optional .sha256 sidecar)  install.sh
+#   bithuman-<arch>-pc-windows-msvc.zip  (+ .sha256)               install.ps1 (2026-09-28)
+# A .zip counts ONLY for a Windows target, so no other product's zip can join
+# the CLI line by accident.
+ASSET_RE = re.compile(r"^bithuman-(?P<target>[A-Za-z0-9_]+-[A-Za-z0-9_.-]+?)"
+                      r"(?:\.tar\.gz|(?<=windows-msvc)\.zip)(?P<sidecar>\.sha256)?$")
 
 # Tag taxonomy in this repo, copied from install.sh's own resolution rules:
 # the CLI publishes under `cli-v*`; the bare `v*` namespace is shared with the
@@ -260,9 +263,10 @@ ARM = "aarch64-unknown-linux-gnu"
 def _rel(tag, tgts, sidecars=True, extra=()):
     assets = []
     for t in tgts:
-        assets.append({"name": "bithuman-%s.tar.gz" % t})
+        ext = ".zip" if t.endswith("windows-msvc") else ".tar.gz"
+        assets.append({"name": "bithuman-%s%s" % (t, ext)})
         if sidecars:
-            assets.append({"name": "bithuman-%s.tar.gz.sha256" % t})
+            assets.append({"name": "bithuman-%s%s.sha256" % (t, ext)})
     assets += [{"name": n} for n in extra]
     return {"tag_name": tag, "draft": False, "assets": assets}
 
@@ -333,6 +337,13 @@ def self_test() -> int:
                        _rel("cli-v2.5.0", [MAC, LIN])], "cli-v2.5.0"))
 
     # OPPOSITE-DIRECTION CONTROLS -- a gate that blocks progress gets deleted.
+    WIN = "x86_64-pc-windows-msvc"
+    arm("★the Windows .zip is a platform: a release that drops it is refused",
+        lambda: check([_rel("cli-v2.9.0", [MAC, LIN, ARM, WIN]),
+                       _rel("cli-v2.9.1", [MAC, LIN, ARM])], "cli-v2.9.1"))
+    green("a release that ADDS Windows (.zip) passes",
+          lambda: check([_rel("cli-v2.8.2", [MAC, LIN, ARM]),
+                         _rel("cli-v2.9.0", [MAC, LIN, ARM, WIN])], "cli-v2.9.0"))
     green("a release that ADDS a platform passes",
           lambda: check([_rel("cli-v2.4.2", [MAC]),
                          _rel("cli-v2.5.0", [MAC, LIN, ARM])], "cli-v2.5.0"))
