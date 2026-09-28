@@ -19,7 +19,7 @@ https://docs.bithuman.ai/cli/agents
   (the full name implies the tap; the installed command is `bithuman`)
 - macOS + Linux (x86_64/aarch64): `curl -fsSL https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/install.sh | sh`
 - No package manager: the per-target tarball from the newest `cli-v*` release,
-  today https://github.com/bithuman-product/homebrew-bithuman/releases/tag/cli-v2.8.2 —
+  today https://github.com/bithuman-product/homebrew-bithuman/releases/tag/cli-v2.8.3 —
   `bithuman-aarch64-apple-darwin.tar.gz`, `bithuman-x86_64-unknown-linux-gnu.tar.gz` or
   `bithuman-aarch64-unknown-linux-gnu.tar.gz`, each with a `.sha256` beside it.
   (Not `/releases/latest`: other packages publish releases in this repository.)
