@@ -2,7 +2,7 @@
 
 > First-party command-line tool for the bitHuman avatar platform, distributed
 > via this Homebrew tap and the universal installer. Run a live, talking avatar
-> in your browser, render avatars to MP4 offline, manage showcase models, and
+> in your browser, render avatars to MP4 files, manage showcase models, and
 > drive the whole platform from an AI agent. Built for both humans and AI
 > agents: every command supports `--json` with a stable, versioned schema and
 > sysexits exit codes, and a built-in MCP server (`bithuman mcp`).
@@ -12,7 +12,7 @@ stdout; failures emit `{"error":{"code","message","command"}}` on stderr and a
 typed exit code (0 ok, 2 usage, 66 not-found, 69 unavailable, 70 internal, 77
 auth). stdout is data only. Authenticate headless with `BITHUMAN_API_SECRET`,
 or `printf %s "$KEY" | bithuman login --with-token`. Full contract:
-https://docs.bithuman.ai/cli/agents
+https://docs.bithuman.ai/platforms/cli/reference
 
 ## Install
 - macOS (Apple Silicon): `brew install bithuman-product/bithuman/bithuman-cli`
@@ -46,7 +46,16 @@ login`). No `pip install` needed for chat.
 - `bithuman list --json`: showcase manifest; `.models[].slug` are downloadable.
 - `bithuman pull <slug>`: download a model; prints the cached `.imx` path.
 - `bithuman info <model.imx> --json`: model metadata.
-- `bithuman render <model.imx> in.wav -o out.mp4`: offline MP4.
+- `bithuman render <model.imx> in.wav -o out.mp4`: render an MP4 file.
 - `bithuman account --json`: identity, plan, credits.
 - `bithuman mcp`: built-in MCP server over stdio (JSON-RPC) for MCP clients —
   cloud tools (TTS, agents, dynamics, embed, webhooks, credits) + local tools.
+
+## Swift package (Apple SDK)
+This repository is also the bitHuman Apple SDK, a Swift package for iPhone, iPad
+and Mac apps: `.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "<version>")`,
+with the version from https://docs.bithuman.ai/versions.json ("swift"). Products:
+`Expression2` (iOS 16 / macOS 13) and `Essence2Kit` (iOS 26 / macOS 26), or `Essence2`
+for the C interface. `bitHumanKit` is legacy. The SDK renders only: pass in 16 kHz
+mono speech, draw the frames. Sessions need an API secret (Creator plan or higher
+from 12 October 2026). Docs: https://docs.bithuman.ai/platforms/ios

@@ -1,11 +1,11 @@
 <!--
 SPDX-License-Identifier: Apache-2.0
-title: bithuman CLI — live, talking avatars from your terminal
+title: bitHuman Apple SDK (Swift Package Manager) and the bithuman CLI
 maintainer: bitHuman Inc.
 homepage: https://www.bithuman.ai
-project_type: cli
-platform: macOS 14+ (Apple Silicon) via Homebrew; Linux x86_64 via install.sh
-keywords: avatar, lip-sync, livekit, voice-agent, cli, mcp, realtime
+project_type: swift-package, cli
+platform: iOS, iPadOS and macOS on Apple silicon (Swift package); macOS (Apple silicon) and Linux x86_64 / arm64 (CLI)
+keywords: avatar, talking-avatar, lip-sync, digital-human, swift, swiftpm, ios, macos, cli, mcp
 -->
 
 <p align="center">
@@ -14,22 +14,43 @@ keywords: avatar, lip-sync, livekit, voice-agent, cli, mcp, realtime
   </a>
 </p>
 
-<h1 align="center">bithuman</h1>
+<h1 align="center">bitHuman: Apple SDK and CLI</h1>
 
 <p align="center">
-  <strong>One command, a live talking avatar in your browser.</strong><br>
+  <strong>The Swift package for iPhone, iPad and Mac apps, and the Homebrew tap for the <code>bithuman</code> CLI.</strong><br>
   Made by <a href="https://www.bithuman.ai">bitHuman</a>.
-</p>
-
-<p align="center">
-  <a href="#install"><img alt="brew install" src="https://img.shields.io/badge/brew-install%20bithuman--cli-orange?style=flat-square"></a>
-  <a href="#install"><img alt="macOS + Linux" src="https://img.shields.io/badge/macOS%20arm64%20%7C%20Linux%20x86__64-blue?style=flat-square"></a>
-  <a href="https://docs.bithuman.ai"><img alt="docs" src="https://img.shields.io/badge/docs-bithuman.ai-lightgrey?style=flat-square"></a>
 </p>
 
 ---
 
-## What it does
+## Apple SDK (Swift Package Manager)
+
+Real-time, lip-synced avatars rendered on iPhone, iPad and Mac: Essence 2 (a photoreal person) and
+Expression 2 (any character). Pass in 16 kHz speech from any voice stack; draw the frames.
+
+```swift
+.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "2.18.0")
+```
+
+The current version of every package is on [docs.bithuman.ai/versions.json](https://docs.bithuman.ai/versions.json).
+
+| Product | Import | What it is | Deployment target |
+|---|---|---|---|
+| `Expression2` | `import Expression2` | the Expression 2 engine with a Swift API | iOS 16 · macOS 13 |
+| `Essence2Kit` | `import Essence2Kit` | the Essence 2 engine with a Swift API; it includes `Essence2` | iOS 26 · macOS 26 |
+| `Essence2` | `import Essence2` | the Essence 2 engine as a C library, for C, C++ and plugins | iOS 26 · macOS 26 |
+
+`bitHumanKit` 2.4.0 is legacy and frozen; new apps use `Expression2` or `Essence2Kit`.
+
+Requires the Creator plan or higher from 12 October 2026. Each session needs an [API secret](https://docs.bithuman.ai/start/api-secret) and bills active session time ([pricing](https://docs.bithuman.ai/pricing)).
+
+Docs: [iOS & iPadOS](https://docs.bithuman.ai/platforms/ios) · [macOS](https://docs.bithuman.ai/platforms/macos) · [Swift reference](https://docs.bithuman.ai/platforms/swift/reference) · Examples: [bithuman-examples/swift](https://github.com/bithuman-product/bithuman-examples/tree/main/swift)
+
+## Homebrew CLI
+
+`bithuman` runs a live, talking avatar in your browser with one command.
+
+### What it does
 
 `bithuman run <avatar>` stands up the whole stack — an embedded LiveKit server,
 the render engine, and a conversation brain — and opens your browser to a live,
@@ -44,7 +65,7 @@ bithuman run nova                 # a showcase avatar, downloaded on first use
 bithuman run ./my-avatar.imx      # your own model, rendered on this machine
 ```
 
-## Install
+### Install
 
 **macOS (Apple Silicon)** — via this tap:
 
@@ -55,7 +76,7 @@ brew install bithuman-cli              # `brew install bithuman` works as a depr
 bithuman doctor                        # host + auth + cache sanity check
 ```
 
-**Linux x86_64** — the formula is macOS-only; use the installer or the tarball:
+**Linux (x86_64, arm64)** — the formula is macOS-only; use the installer or the tarball:
 
 ```sh
 curl -fsSL https://install.bithuman.ai | sh
@@ -70,7 +91,7 @@ curl -fsSL https://install.bithuman.ai | sh
 > is the Python SDK *library*, a different artifact; it puts no `bithuman`
 > command on your PATH.)
 
-## The commands
+### The commands
 
 The surface is deliberately small — one name per task. `bithuman --help` lists
 them, and `bithuman <command> --help` carries a copy-pasteable `EXAMPLES:` block.
@@ -81,7 +102,7 @@ them, and `bithuman <command> --help` carries a copy-pasteable `EXAMPLES:` block
 | `list` (alias `avatars`) | The showcase catalogue, and with `--mine` the agents on your account. |
 | `pull` | Download a model; prints the cached `.imx` path. |
 | `open` (alias `info`) | Model metadata. |
-| `render` | Offline render to MP4 from an `.imx` + an audio file. Needs `ffmpeg` on PATH (or `$BITHUMAN_FFMPEG`). |
+| `render` | Render an MP4 from an avatar and an audio file. Needs `ffmpeg` on PATH (or `$BITHUMAN_FFMPEG`). |
 | `account` | Who the credential belongs to, the plan, the balance, and the spend behind it. |
 | `login` / `logout` | Sign in and out. |
 | `doctor` | Install health. Exit 0 iff ready. |
@@ -94,7 +115,7 @@ cleanly. `bithuman __schema` prints the entire command / flag / exit-code tree
 plus the MCP tool catalogue as one JSON document — that is the authoritative
 description of the surface, generated from the binary itself.
 
-## For agents and LLMs
+### For agents and LLMs
 
 This repo publishes [`llms.txt`](llms.txt), a structured manifest aimed at AI
 coding assistants discovering and invoking bithuman. Agents should start there,
@@ -104,15 +125,16 @@ then call `bithuman __schema` for the machine-readable surface.
 
 Full CLI and SDK documentation: **[docs.bithuman.ai](https://docs.bithuman.ai)**.
 
-- [bithuman CLI reference](https://docs.bithuman.ai/cli/overview)
-- [Authentication](https://docs.bithuman.ai/getting-started/authentication)
-- [Pricing & credits](https://docs.bithuman.ai/getting-started/pricing)
+- [bithuman CLI](https://docs.bithuman.ai/platforms/cli) · [CLI reference](https://docs.bithuman.ai/platforms/cli/reference)
+- [Your API secret](https://docs.bithuman.ai/start/api-secret)
+- [Pricing and credits](https://docs.bithuman.ai/pricing)
 
 ## What this repo is
 
-`bithuman-product/homebrew-bithuman` hosts the **release artefacts** — the
-Homebrew formula, the install script, and the notarised per-target binaries
-attached to each `cli-v*` release.
+`bithuman-product/homebrew-bithuman` hosts the Swift package (`Package.swift` and the
+binary frameworks attached to its releases) and the **CLI release artefacts**: the
+Homebrew formula, the install script, and the notarised per-target binaries attached
+to each `cli-v*` release.
 
 The published CLI binary is a proprietary artifact: it statically links the
 bitHuman engine and vendors model weights, so the formula declares
@@ -122,14 +144,4 @@ bitHuman engine and vendors model weights, so the formula declares
 
 ## About bitHuman
 
-Built and maintained by [**bitHuman**](https://www.bithuman.ai), the team behind
-real-time avatar engines.
-
-- 🌐 [www.bithuman.ai](https://www.bithuman.ai)
-- 📦 [github.com/bithuman-product](https://github.com/bithuman-product)
-
----
-
-<p align="center">
-  Made with ❤️ by <a href="https://www.bithuman.ai"><strong>bitHuman</strong></a>.
-</p>
+Built and maintained by [bitHuman](https://www.bithuman.ai): [www.bithuman.ai](https://www.bithuman.ai) · [github.com/bithuman-product](https://github.com/bithuman-product)
