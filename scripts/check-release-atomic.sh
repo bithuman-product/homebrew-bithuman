@@ -125,6 +125,10 @@ REQUIRED_TARBALLS=(
   "bithuman-aarch64-apple-darwin.tar.gz:10000000"
   "bithuman-x86_64-unknown-linux-gnu.tar.gz:10000000"
   "bithuman-aarch64-unknown-linux-gnu.tar.gz:10000000"
+  # ★WINDOWS, a permanent release platform (owner, 2026-09-28): the cloud-only
+  # CLI as an unsigned .zip (bithuman.exe + PROVENANCE.json). It carries no
+  # engine payload, so its floor is lower; 3 MB still refuses a truncated upload.
+  "bithuman-x86_64-pc-windows-msvc.zip:3000000"
 )
 # The formula pins the macOS half.
 FORMULA_PLATFORM="bithuman-aarch64-apple-darwin.tar.gz"
@@ -605,9 +609,10 @@ if (( SELFTEST )); then
   MAC_SHA="$(printf 'mac-bytes'  | sha256sum | cut -d' ' -f1)"
   LNX_SHA="$(printf 'linux-bytes'| sha256sum | cut -d' ' -f1)"
   ARM_SHA="$(printf 'linux-arm-bytes'| sha256sum | cut -d' ' -f1)"
-  "$PY" - "$FIX/good.json" "$MAC_SHA" "$LNX_SHA" "$ARM_SHA" <<'MK'
+  WIN_SHA="$(printf 'windows-bytes'| sha256sum | cut -d' ' -f1)"
+  "$PY" - "$FIX/good.json" "$MAC_SHA" "$LNX_SHA" "$ARM_SHA" "$WIN_SHA" <<'MK'
 import json, sys
-out, mac, lnx, arm = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+out, mac, lnx, arm, win = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 def a(name, size, created, body=None):
     d = {"name": name, "size": size, "created_at": created, "updated_at": created}
     if body is not None: d["body_text"] = body
@@ -625,6 +630,9 @@ man = {
     a("bithuman-aarch64-unknown-linux-gnu.tar.gz",  160000000, "2026-09-03T11:52:00Z"),
     a("bithuman-aarch64-unknown-linux-gnu.tar.gz.sha256",  108, "2026-09-03T11:52:00Z",
       f"{arm}  bithuman-aarch64-unknown-linux-gnu.tar.gz\n"),
+    a("bithuman-x86_64-pc-windows-msvc.zip",         14000000, "2026-09-03T11:53:00Z"),
+    a("bithuman-x86_64-pc-windows-msvc.zip.sha256",       102, "2026-09-03T11:53:00Z",
+      f"{win}  bithuman-x86_64-pc-windows-msvc.zip\n"),
   ],
 }
 json.dump(man, open(out, "w"), indent=1)
@@ -683,6 +691,10 @@ MUT
   # macOS + Linux x86_64 only, every other check green — must be REFUSED.
   mutate "aarch64 linux tarball absent (the pre-2.7.1 shape)" C1 'A.pop("bithuman-aarch64-unknown-linux-gnu.tar.gz"); A.pop("bithuman-aarch64-unknown-linux-gnu.tar.gz.sha256")'
   mutate "aarch64 linux sidecar absent"    C1 'A.pop("bithuman-aarch64-unknown-linux-gnu.tar.gz.sha256")'
+  # ★AND THE WINDOWS ARM: from the first Windows release on, a release without the
+  # Windows zip (or its sidecar) is a half-release.
+  mutate "windows zip absent"              C1 'A.pop("bithuman-x86_64-pc-windows-msvc.zip"); A.pop("bithuman-x86_64-pc-windows-msvc.zip.sha256")'
+  mutate "windows zip truncated"           C2 'A["bithuman-x86_64-pc-windows-msvc.zip"]["size"] = 4096'
   mutate "aarch64 linux tarball truncated" C2 'A["bithuman-aarch64-unknown-linux-gnu.tar.gz"]["size"] = 4096'
   mutate "mac tarball truncated to 4 KB"   C2 'A["bithuman-aarch64-apple-darwin.tar.gz"]["size"] = 4096'
   mutate "sidecar names the other file"    C3 'a=A["bithuman-x86_64-unknown-linux-gnu.tar.gz.sha256"]; a["body_text"]=a["body_text"].split("  ")[0]+"  bithuman-aarch64-apple-darwin.tar.gz\n"'
@@ -944,7 +956,7 @@ TT
     echo "SELF-TEST: FAIL — $fails control(s)/mutation(s) behaved wrongly"
     exit 1
   fi
-  echo "SELF-TEST: PASS — baseline green, 14 mutations each refused on their own check,"
+  echo "SELF-TEST: PASS — baseline green, 16 mutations each refused on their own check,"
   echo "                  draft-gate truth table 7/7"
   exit 0
 fi
