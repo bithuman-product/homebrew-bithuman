@@ -76,9 +76,10 @@ final class LocalConverseController: @unchecked Sendable {
     var onEvent: (([String: Any]) -> Void)?
 
     init?(io: RealtimeAudioIO, gguf: String, supertonicAssets: String?, voice: String = "M1",
-          systemPrompt: String = "") {
+          systemPrompt: String = "", appleLlm: Bool = false, refusalReply: String = "") {
         guard let c = ConverseSession(gguf: gguf, supertonicAssets: supertonicAssets, voice: voice,
-                                      systemPrompt: systemPrompt) else { return nil }
+                                      systemPrompt: systemPrompt, appleLlm: appleLlm,
+                                      refusalReply: refusalReply) else { return nil }
         converse = c
         self.io = io
         // BOUNDED queue (bufferingNewest): under backpressure — the ASR

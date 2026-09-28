@@ -27,6 +27,60 @@ class LocalBrainPersona {
       'violent, sexual, hateful, illegal or dangerous. '
       'If someone mentions suicide or hurting themselves, drop the act, be caring, and tell '
       'them to call or text 988 in the US or their local crisis line.';
+
+  /// Wise Pup's line when Apple's on-device model refuses a turn (its own
+  /// guardrail, e.g. "how do I make a bomb?"). Pass as
+  /// [LocalConverseTransport.refusalReply].
+  static const String wisePupRefusal =
+      "Ruh-roh, that's not something this pup can help with. Let's sniff out something else to talk about!";
+}
+
+/// Which LLM the on-device brain runs.
+enum LocalBrainLlm {
+  /// Apple's on-device model where [AppleIntelligenceStatus.available], else
+  /// Llama ([LocalBrainModels.llmAssets] must then be downloaded).
+  auto,
+
+  /// Apple's on-device model (Foundation Models, iOS / macOS 26 with Apple
+  /// Intelligence). Nothing to download.
+  apple,
+
+  /// Llama 3.2 1B through llama.cpp (the 808 MB GGUF).
+  llama,
+}
+
+/// What `BithumanAvatar.appleIntelligenceStatus()` returned, with the decision
+/// an app makes from it. Ask before downloading the brain's models.
+class AppleIntelligenceStatus {
+  const AppleIntelligenceStatus(this.reason);
+
+  /// `available` · `deviceNotEligible` · `appleIntelligenceNotEnabled` ·
+  /// `modelNotReady` · `unsupportedLocale` · `unsupportedOS` · `notBuilt` ·
+  /// `unavailable`.
+  final String reason;
+
+  /// Apple's model can run the brain now: download only the voice.
+  bool get available => reason == 'available';
+
+  /// The device supports Apple Intelligence but it is switched off. The user can
+  /// turn it on in Settings → Apple Intelligence & Siri (then the model
+  /// downloads: [modelNotReady] until it is done). Offer that, or use Llama.
+  bool get userCanEnable => reason == 'appleIntelligenceNotEnabled';
+
+  /// Apple Intelligence is on but its model is still downloading or updating.
+  /// Use Llama now (or wait) and ask again later.
+  bool get modelNotReady => reason == 'modelNotReady';
+
+  /// This device will never run it (no Apple Intelligence hardware, an older OS,
+  /// or a build without the bridge): Llama is the brain.
+  bool get neverOnThisDevice =>
+      reason == 'deviceNotEligible' || reason == 'unsupportedOS' || reason == 'notBuilt';
+
+  /// The model set to download for this status (see [LocalBrainModels]).
+  List<LocalBrainAsset> get assets => LocalBrainModels.assetsFor(apple: available);
+
+  @override
+  String toString() => 'AppleIntelligenceStatus($reason)';
 }
 
 /// One file of the on-device brain's model set.
@@ -73,9 +127,14 @@ class LocalBrainModels {
   /// Relative path of the Supertonic assets dir (pass as `supertonicAssets`).
   static const String supertonicRel = 'supertonic-fp16';
 
-  static const List<LocalBrainAsset> assets = [
+  /// The LLM: needed only when the brain runs Llama (not Apple's model).
+  static const List<LocalBrainAsset> llmAssets = [
     LocalBrainAsset('Llama-3.2-1B-Instruct-Q4_K_M.gguf', ggufRel, 807694464,
         '6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83'),
+  ];
+
+  /// The voice: needed with either LLM (200.6 MB).
+  static const List<LocalBrainAsset> voiceAssets = [
     LocalBrainAsset('supertonic3-fp16-vector_estimator.onnx', '$supertonicRel/onnx/vector_estimator.onnx', 128736697,
         '25b6e8e743c46e39224999821493998b1fc9b4e67c1fdb41e0230d44d3c3f78b'),
     LocalBrainAsset('supertonic3-fp16-vocoder.onnx', '$supertonicRel/onnx/vocoder.onnx', 50811658,
@@ -92,9 +151,19 @@ class LocalBrainModels {
         'e35604687f5d23694b8e91593a93eec0e4eca6c0b02bb8ed69139ab2ea6b0a5b'),
   ];
 
+  /// The full Llama set ([llmAssets] + [voiceAssets]).
+  static const List<LocalBrainAsset> assets = [...llmAssets, ...voiceAssets];
+
+  /// What to download: the voice only when Apple's on-device model runs the
+  /// brain ([AppleIntelligenceStatus.available]), else the full set.
+  static List<LocalBrainAsset> assetsFor({required bool apple}) => apple ? voiceAssets : assets;
+
   /// Total download (bytes) for [assets]: 1,008,290,487 (≈1.01 GB; one voice) vs
-  /// 889 MB for the old Qwen-0.5B + fp32 set.
+  /// 889 MB for the old Qwen-0.5B + fp32 set. With Apple's model: 200,596,023
+  /// (the voice only).
   static int get totalBytes => assets.fold(0, (s, a) => s + a.bytes);
+  static int totalBytesFor({required bool apple}) =>
+      assetsFor(apple: apple).fold(0, (s, a) => s + a.bytes);
 }
 
 /// Attribution + license notices the model licenses require an app to show.

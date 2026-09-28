@@ -75,8 +75,12 @@ final class ConverseSession: @unchecked Sendable {
     /// if `turn != session.currentTurnGen` (a barge cancelled that reply).
     var onTTSChunk: ((_ data: Data, _ turn: UInt64) -> Void)?
 
+    /// `appleLlm`: the reply comes from Apple's on-device model (Foundation
+    /// Models) through the brain's host-LLM ABI instead of llama.cpp; `gguf` is
+    /// then unused. The caller checks `AppleLlmStatus.current() == "available"`.
+    /// `refusalReply`: spoken when that model's guardrail refuses a turn.
     init?(gguf: String, supertonicAssets: String?, voice: String = "M1",
-          systemPrompt: String = "") {
+          systemPrompt: String = "", appleLlm: Bool = false, refusalReply: String = "") {
         if let a = supertonicAssets, !a.isEmpty { setenv("BITHUMAN_SUPERTONIC_ASSETS", a, 1) }
         // The first TWO TTS chunks may end at a clause (libconverse reads it per
         // reply; a brain without the knob ignores it). The avatar enters speech on
@@ -105,7 +109,24 @@ final class ConverseSession: @unchecked Sendable {
                     cfg.llm_file = g; cfg.stt_model = w; cfg.tts_voice = v
                     cfg.system_prompt = systemPrompt.isEmpty ? nil : sp
                     var hh: OpaquePointer?
-                    let s = bc_session_create(&cfg, &hh)
+                    var s: bc_status = BC_ERR_INVALID_ARG
+                    if appleLlm {
+                        #if CONVERSE_HOST_LLM
+                        if #available(macOS 26.0, iOS 26.0, *) {
+                            // The brain copies refusal_reply at create time.
+                            s = refusalReply.withCString { rr in
+                                var host = AppleFoundationLlm().hostLlm(refusalReply: refusalReply.isEmpty ? nil : rr)
+                                return bc_session_create_with_llm(&cfg, &host, &hh)
+                            }
+                        } else {
+                            NSLog("[Converse] Apple LLM requested below iOS / macOS 26")
+                        }
+                        #else
+                        NSLog("[Converse] Apple LLM requested but the staged libconverse has no host-LLM ABI (< 2.5.0)")
+                        #endif
+                    } else {
+                        s = bc_session_create(&cfg, &hh)
+                    }
                     h = hh
                     return s
                 }
