@@ -70,7 +70,8 @@ android {
 }
 
 dependencies {
-    // 0.4.9 (2026-09-23): the FIRST on-device session meter — talking time only, idle free;
+    // 0.4.9 (2026-09-23): the FIRST on-device session meter — talking time only, idle free
+    // (the rule then; since 2026-09-26 the service bills active session time, talking or idle);
     // a create without an API secret is refused (Expression2Metering.NO_SESSION).
     // 0.4.10 (2026-09-23): Expression2Credential.set(secret) is the one setter for the meter and
     // the store's metered door; Expression2Metering.apiSecret stays, deprecated (#1223).
@@ -140,7 +141,8 @@ dependencies {
     // release build always includes the default file, so this plugin was not exposed; the
     // pin moves so the plugin carries the current engine. Engine output unchanged: same
     // handset proof as 0.5.12 (lip contour bound, generated mouth share 0/0).
-    // 0.5.14 (2026-09-23): the meter bills talking time only (idle is free); a key the
+    // 0.5.14 (2026-09-23): the meter bills talking time only (idle is free; the rule then —
+    // since 2026-09-26 the service bills active session time, talking or idle); a key the
     // service never vouched for renders 0 frames; an outage after vouching renders 300 s of
     // frames, then pauses until the service answers; BITHUMAN_API_KEY read as an alias.
     // 0.5.15 (2026-09-23): Essence2Credential.set(secret) is the one setter for the door and the

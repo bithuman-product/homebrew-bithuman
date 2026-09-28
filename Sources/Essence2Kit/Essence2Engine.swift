@@ -27,8 +27,9 @@
 // that asks sooner gets nil / 0, which already meant "keep showing the frame you have".
 // `pacing = .unpaced` restores the old behaviour for offline rendering and benchmarks.
 //
-// Billing: a session is billed for its TALKING time only; idle is free. Without an API secret
-// `create` throws `.meteringRefused` (the engine's own sentence). bithuman-models #1224.
+// Billing: a session bills its active session time, talking or idle, priced by the service
+// (https://docs.bithuman.ai/pricing). Without an API secret `create` throws `.meteringRefused`
+// (the engine's own sentence). bithuman-models #1224.
 
 import Foundation
 import CryptoKit
