@@ -212,6 +212,8 @@ A 3rd engine appends one `EngineDescriptor` here (and one line in
 | `micStream` | Echo-cancelled mic capture as 24 kHz PCM16 chunks. Forward straight to OpenAI Realtime. |
 | `interrupt()` | Cancel mid-sentence. Flushes the speaker queue + wipes the avatar's lip-sync buffer. |
 | `dispose()` | Drop the native runtime. Idempotent. |
+| `static loadEvents` | Android: what a running `load` is doing, as `BithumanLoadEvent`s — `fetch` (exact bytes of the identity's download), `fetched`, `prepare`, `prepared`. Filter on `code`. iOS/macOS send none. |
+| `static cancelLoad(code)` | Android: stop a running `load` of `code`; it throws `PlatformException` `load_cancelled`, and the download keeps what it has for next time. |
 
 Plus catalog helpers (anonymous, no auth):
 
