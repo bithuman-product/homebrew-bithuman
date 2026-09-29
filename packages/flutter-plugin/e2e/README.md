@@ -14,7 +14,7 @@ directory, so nothing ran them on any push. The split as it is today:
 
 | tier | where | needs | runs |
 |---|---|---|---|
-| **Tier 1 — headless** | `packages/flutter-plugin/test/` (incl. `test/e2e/`) | nothing: no device, no engine binary, no network past `127.0.0.1` | **every push and PR**, `.github/workflows/flutter-plugin-tests.yml` |
+| **Tier 1 — headless** | `packages/flutter-plugin/test/` (incl. `test/e2e/`) | nothing: no device, no engine binary, no network past `127.0.0.1` | **every PR, locally**: `ci/run-local.sh --only flutter-plugin-tests` (recipe `ci/github-workflows-disabled/flutter-plugin-tests.yml`) |
 | **Tier 2 — app on a simulator** | the product app repo (`integration_test/`) | a macOS host, a booted sim/emulator, a staged engine bundle | by hand: `BITHUMAN_APP_DIR=<app checkout> e2e/run_all.sh` |
 
 Tier 1 is the owner's acceptance test made literal — *"to test voice chat we
