@@ -43,7 +43,12 @@ Use [Bug report](.github/ISSUE_TEMPLATE/bug_report.md) and include `brew config`
 
 ## Local sanity checks before opening a PR
 
+GitHub Actions is off for this repo; the required checks run locally. Run `ci/run-local.sh`
+on your PR head and paste its PASS/FAIL lines and final `LOCAL CI ... sha=...` line into a PR
+comment (see `ci/README.md`). Red = no merge.
+
 ```sh
+ci/run-local.sh
 brew tap bithuman-product/bithuman ./
 brew audit --strict bithuman-product/bithuman/bithuman-cli
 brew install --build-from-source bithuman-product/bithuman/bithuman-cli  # for local formula edits

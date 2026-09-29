@@ -25,6 +25,7 @@ What problem does this solve, or what gap does it fill?
 
 ## How I tested it
 
+- [ ] `ci/run-local.sh` on the PR head — output pasted in a PR comment (GitHub Actions is off)
 - [ ] Built locally (Xcode version: ____)
 - [ ] Ran the example end-to-end on (hardware: ____)
 - [ ] Verified docs render with `mintlify dev`
