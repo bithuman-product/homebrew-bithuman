@@ -1,13 +1,18 @@
 # Releasing
 
-One repo, **one tag prefix per artifact**. Cut a tag, CI does the rest. Don't mix the namespaces.
+One repo, **one tag prefix per artifact**. Don't mix the namespaces.
+
+> **2026-09-29: GitHub Actions is removed (owner directive).** A tag push no longer builds or
+> publishes anything. The workflows named below are kept as recipes under
+> `ci/github-workflows-disabled/`; run their steps by hand on a release host (see
+> `ci/README.md` and `ci/run-local.sh --list`). Pre-merge validation is `ci/run-local.sh`.
 
 | Artifact | Tag | Ships to | Driven by |
 |---|---|---|---|
 | **CLI** (`bithuman`) | `cli-v<x.y.z>` | Homebrew tap + `curl\|bash` | the CLI repo's tracked `scripts/release-macos.sh` + `scripts/release-linux.sh` (one `CLI_SHA` for both halves) and `scripts/release_pack.sh`, run on a signing host; `scripts/check-release-atomic.sh` here before the draft is published; then bump `Formula/bithuman-cli.rb`. `release-coverage.yml` audits every published release |
-| **Python SDK** (`bithuman`) | `pypi-v<x.y.z>` | PyPI | `.github/workflows/release-pypi.yml` |
-| **MCP** (`bithuman-mcp`) | `mcp-v<x.y.z>` | PyPI | `.github/workflows/publish-mcp.yml` |
-| **Flutter plugin** (`bithuman`) | `flutter-v<x.y.z>` | pub.dev | `.github/workflows/publish-pubdev.yml` |
+| **Python SDK** (`bithuman`) | `pypi-v<x.y.z>` | PyPI | `ci/github-workflows-disabled/release-pypi.yml` |
+| **MCP** (`bithuman-mcp`) | `mcp-v<x.y.z>` | PyPI | `ci/github-workflows-disabled/publish-mcp.yml` |
+| **Flutter plugin** (`bithuman`) | `flutter-v<x.y.z>` | pub.dev | `ci/github-workflows-disabled/publish-pubdev.yml` |
 | **Swift SDK** (`bitHumanKit`) | bare `v<x.y.z>` (tag-only, **no** Release object) | SwiftPM | `Package.swift` (resolved by tag) |
 | **Mac app** (Sparkle) | `*-mac` | `appcast.xml` | — |
 
@@ -50,7 +55,7 @@ not a signing one.
 
 ## RETIRED 2026-09-07 — `release-cli.yml` is deleted; the CLI release lane is the CLI repo's tracked scripts
 
-`.github/workflows/release-cli.yml` (1,115 lines, `workflow_dispatch` only) ran
+`ci/github-workflows-disabled/release-cli.yml` (1,115 lines, `workflow_dispatch` only) ran
 7 times and succeeded once (2026-08-02). It cut none of `cli-v2.5.0` … `2.6.4`;
 every one of those was built by hand and, since `cli-v2.6.3`, by the CLI repo's
 tracked `scripts/release-macos.sh` + `scripts/release-linux.sh` (one `CLI_SHA`
@@ -68,7 +73,7 @@ What the deletion had to keep, and where it went:
 * **The platform-coverage floor.** `tools/verify_release_platform_coverage.py`
   ran ONLY in the deleted lane's `verify-release-coverage` job, so a safeguard on
   live customer traffic (a macOS-only release is a Linux outage) was running on
-  nothing. It now runs in `.github/workflows/release-coverage.yml` on every
+  nothing. It now runs in `ci/github-workflows-disabled/release-coverage.yml` on every
   `release: published` event, daily, and on dispatch — grading the release
   AFTER it is published, whichever lane cut it. Measured at the switch:
   self-test OK; `cli-v2.6.4` vs `cli-v2.6.3` GREEN, 2 targets each; and
@@ -110,7 +115,7 @@ pairs than the CLI release before it**. Adding a platform, or adding a missing
 sidecar does, because `install.sh` silently downgrades to "verification skipped"
 rather than failing.
 
-* `.github/workflows/release-coverage.yml` runs it on every published release,
+* `ci/github-workflows-disabled/release-coverage.yml` runs it on every published release,
   daily, and on dispatch (since 2026-09-07; before that it ran only inside the
   deleted `release-cli.yml`, i.e. never on a release that actually shipped).
 * Run it by hand any time: `python3 tools/verify_release_platform_coverage.py --tag cli-vX.Y.Z`
