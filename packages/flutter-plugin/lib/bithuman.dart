@@ -175,6 +175,37 @@ class BithumanAvatar implements VoiceHost {
     }
   }
 
+  /// What a native [load] is doing while it runs, for a wait screen: the exact
+  /// bytes of the identity's download, then the engine being created.
+  ///
+  /// Android sends, for each load (filter on [BithumanLoadEvent.code]):
+  /// [BithumanLoadStage.fetch] (bytes on disk against the identity's exact size,
+  /// about 8 a second; a resumed download starts from what it already has) →
+  /// [BithumanLoadStage.fetched] (every file is on disk; [BithumanLoadEvent.cached]
+  /// when nothing had to be downloaded) → [BithumanLoadStage.prepare] (the engine
+  /// is being created; a first open also compiles it for the device, which can
+  /// take several seconds) → [BithumanLoadStage.prepared] (the engine exists;
+  /// [ready] follows its warm-up). Subscribe before calling [load].
+  ///
+  /// iOS and macOS send nothing: there [load] opens a local path and downloads
+  /// nothing (the download helpers in this package report their own
+  /// `onProgress`), and the engine's warm-up is [ready].
+  ///
+  /// The first listener installs the plugin's handler on the
+  /// `ai.bithuman.avatar/load` channel. An app that never listens sees no change.
+  static Stream<BithumanLoadEvent> get loadEvents => _LoadEvents.stream;
+
+  /// Stop the native [load] of [code] while it runs, for example when the user
+  /// picks another character mid-download. That [load] then throws a
+  /// [PlatformException] with the code `load_cancelled`.
+  ///
+  /// A download stops at its next read and keeps what it has, so the next
+  /// [load] of [code] resumes it. An engine that is being created cannot be
+  /// interrupted, so it is closed as soon as it exists. Returns true when a
+  /// load was cancelled, and false when no load of [code] was running (always
+  /// on iOS and macOS, where [load] downloads nothing).
+  static Future<bool> cancelLoad(String code) => _LoadEvents.cancel(code);
+
   int _frameWidth = 0;
   int _frameHeight = 0;
 
@@ -1249,5 +1280,123 @@ Future<void> _extractAvatarContainer(File archive, Directory dir) async {
         '(Android loads an identity by code; see BithumanAvatar.load)';
   } on PlatformException catch (e) {
     throw '${e.code}: ${e.message ?? ''}';
+  }
+}
+
+// ── load progress (Android) ──────────────────────────────────────────────────
+// The wire, served by android/…/LoadEvents.kt: native → Dart
+// `event {code, stage, done?, total?, cached?, ms}` on `ai.bithuman.avatar/load`,
+// Dart → native `cancel {code}` → bool. The handler is installed by the first
+// listener of [BithumanAvatar.loadEvents], never by [BithumanAvatar.load].
+
+/// A stage of a native [BithumanAvatar.load] in progress.
+enum BithumanLoadStage {
+  /// Downloading the identity: [BithumanLoadEvent.done] of
+  /// [BithumanLoadEvent.total] bytes.
+  fetch,
+
+  /// Every file of the identity is on disk and verified.
+  fetched,
+
+  /// The engine is being created (a first open also compiles it for the device).
+  prepare,
+
+  /// The engine exists; its warm-up follows ([BithumanAvatar.ready]).
+  prepared,
+}
+
+/// One event of [BithumanAvatar.loadEvents].
+class BithumanLoadEvent {
+  const BithumanLoadEvent({
+    required this.code,
+    required this.stage,
+    this.done,
+    this.total,
+    this.cached = false,
+    this.elapsed = Duration.zero,
+  });
+
+  /// The agent code that was passed to [BithumanAvatar.load].
+  final String code;
+
+  final BithumanLoadStage stage;
+
+  /// [BithumanLoadStage.fetch]: bytes of the identity on disk so far, a resumed
+  /// partial download included.
+  final int? done;
+
+  /// [BithumanLoadStage.fetch]: the identity's exact size in bytes.
+  final int? total;
+
+  /// [BithumanLoadStage.fetched]: true when nothing had to be downloaded.
+  final bool cached;
+
+  /// Time since that load began on the native side.
+  final Duration elapsed;
+
+  /// [done] / [total] in [0, 1]; null unless both are known.
+  double? get fraction {
+    final d = done, t = total;
+    if (d == null || t == null || t <= 0) return null;
+    return (d / t).clamp(0.0, 1.0).toDouble();
+  }
+
+  /// Decodes one native `event`. Null when [args] is not one, including a stage
+  /// this version does not know (a newer native side may add stages).
+  static BithumanLoadEvent? fromMap(Object? args) {
+    if (args is! Map) return null;
+    final code = args['code'], name = args['stage'];
+    if (code is! String || code.isEmpty || name is! String) return null;
+    BithumanLoadStage? stage;
+    for (final s in BithumanLoadStage.values) {
+      if (s.name == name) stage = s;
+    }
+    if (stage == null) return null;
+    int? n(Object? v) => v is num ? v.toInt() : null;
+    return BithumanLoadEvent(
+      code: code,
+      stage: stage,
+      done: n(args['done']),
+      total: n(args['total']),
+      cached: args['cached'] == true,
+      elapsed: Duration(milliseconds: n(args['ms']) ?? 0),
+    );
+  }
+
+  @override
+  String toString() => 'BithumanLoadEvent($code ${stage.name}'
+      '${done != null ? ' $done/${total ?? '?'}' : ''}${cached ? ' cached' : ''}'
+      ' +${elapsed.inMilliseconds} ms)';
+}
+
+class _LoadEvents {
+  static const _channel = MethodChannel('ai.bithuman.avatar/load');
+  static bool _installed = false;
+  static final StreamController<BithumanLoadEvent> _controller =
+      StreamController<BithumanLoadEvent>.broadcast(onListen: _install);
+
+  static Stream<BithumanLoadEvent> get stream => _controller.stream;
+
+  // Installed once and kept: every answer tells the native side someone
+  // listens, and with no Dart listener the broadcast stream drops the event.
+  static void _install() {
+    if (_installed) return;
+    _installed = true;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'event') {
+        final e = BithumanLoadEvent.fromMap(call.arguments);
+        if (e != null) _controller.add(e);
+      }
+      return null;
+    });
+  }
+
+  static Future<bool> cancel(String code) async {
+    if (code.isEmpty) return false;
+    try {
+      return await _channel.invokeMethod<bool>('cancel', {'code': code}) ?? false;
+    } on MissingPluginException {
+      return false; // iOS / macOS, or an Android side older than load events
+    }
   }
 }

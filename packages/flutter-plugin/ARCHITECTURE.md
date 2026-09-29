@@ -377,6 +377,13 @@ Two asymmetries fell out of the census and are recorded here rather than fixed:
   says call sites must gate on `Platform.isAndroid` — so this is asymmetry by design,
   written down so the next reader does not have to re-derive it.
 
+**Load progress has its own channel (Android).** `ai.bithuman.avatar/load` is install
+progress, neither render nor voice, and adds no verb to the census above. While a native `load`
+runs, `LoadEvents.kt` sends `event {code, stage, done?, total?, cached?, ms}` (stages `fetch` →
+`fetched` → `prepare` → `prepared`) and answers `cancel {code}`. It sends one event at a time,
+each after Dart's answer, so an app with no handler on it gets nothing queued and no warnings;
+`BithumanAvatar.loadEvents` installs the Dart handler on its first listener, never on `load`.
+
 ### The one edge the voice unit has on render
 
 `RealtimeAudioIO` reaches render through **one `weak var lipsyncSink: LipsyncSink?`**
