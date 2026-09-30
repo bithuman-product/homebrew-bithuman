@@ -2,7 +2,8 @@
 # checks its sha256 against the published .sha256 file, and installs bithuman.exe into
 # %LOCALAPPDATA%\bithuman\bin (or $env:BITHUMAN_INSTALL_DIR), then puts that folder on your PATH.
 #   irm https://install.bithuman.ai/windows | iex
-# Environment: BITHUMAN_VERSION=cli-vX.Y.Z pins a release; BITHUMAN_INSTALL_DIR picks the directory.
+# Environment: BITHUMAN_VERSION=cli-vX.Y.Z pins a release; BITHUMAN_INSTALL_DIR picks the directory;
+# GITHUB_TOKEN (optional) uses your own GitHub API quota instead of this network's shared one.
 # The Windows build is not code-signed. Files this script downloads carry no Mark-of-the-Web, so
 # Windows does not show a SmartScreen prompt for them; the sha256 check is what vouches for the bytes.
 # Docs: https://docs.bithuman.ai/platforms/cli
@@ -16,6 +17,41 @@
   $Asset = 'bithuman-x86_64-pc-windows-msvc.zip'
   function Fail([string]$msg) { Write-Host "install: error: $msg" -ForegroundColor Red; throw "install failed" }
   function Info([string]$msg) { Write-Host "install: $msg" }
+  # GitHub answers a busy network with 429 (or 403 once the anonymous API quota of 60/hour per
+  # address is spent). That means "wait", not "missing": retry up to 3 times within 120 s, honouring
+  # Retry-After, then say plainly that GitHub is rate-limiting (DX audit 2026-09-30).
+  $script:ghWaited = 0
+  function Invoke-GitHub([string]$Uri, [string]$OutFile, [switch]$Rest) {
+    $h = @{ 'User-Agent' = 'bithuman-install-ps1' }
+    if ($Rest) { $h['Accept'] = 'application/vnd.github+json' }
+    if ($env:GITHUB_TOKEN -and $Uri -like 'https://api.github.com/*') { $h['Authorization'] = "Bearer $($env:GITHUB_TOKEN)" }
+    for ($try = 1; ; $try++) {
+      try {
+        if ($Rest) { return Invoke-RestMethod -Headers $h -Uri $Uri }
+        if ($OutFile) { return Invoke-WebRequest -UseBasicParsing -Headers $h -Uri $Uri -OutFile $OutFile }
+        return Invoke-WebRequest -UseBasicParsing -Headers $h -Uri $Uri
+      } catch {
+        $resp = $_.Exception.Response
+        $code = 0; if ($resp) { try { $code = [int]$resp.StatusCode } catch { } }
+        $wait = 0
+        if ($resp) {
+          try { $ra = $resp.Headers['Retry-After']; if ($ra) { $wait = [int]"$ra" } } catch { }
+          if (-not $wait) { try { $wait = [int]$resp.Headers.RetryAfter.Delta.TotalSeconds } catch { } }
+        }
+        $limited = ($code -eq 429) -or ($code -eq 403 -and $wait -gt 0) -or ($code -eq 403 -and $Uri -like 'https://api.github.com/*')
+        if (-not $limited) { throw }
+        if (-not $wait) { $wait = 10 * $try }
+        if ($try -ge 3 -or ($script:ghWaited + $wait) -gt 120) {
+          Fail ("GitHub is rate-limiting downloads from this network (HTTP $code); retry in about ${wait}s. " +
+                "Nothing is wrong with the release. To use your own GitHub quota, set `$env:GITHUB_TOKEN first; " +
+                "pinning a release with `$env:BITHUMAN_VERSION = 'cli-vX.Y.Z' also skips the release lookup.")
+        }
+        Info "GitHub is rate-limiting this network (HTTP $code); retrying in ${wait}s (attempt $($try + 1) of 3)"
+        Start-Sleep -Seconds $wait
+        $script:ghWaited += $wait
+      }
+    }
+  }
   # A tag that is not plain semver (a pre-release) sorts last instead of throwing.
   function TagVersion([string]$tag) {
     try { [version]($tag -replace '^cli-v', '') } catch { [version]'0.0' }
@@ -29,10 +65,10 @@
   # The release: a pinned tag, or the newest published cli-v* release that CARRIES the Windows asset.
   $tag = $env:BITHUMAN_VERSION
   if (-not $tag) {
-    $headers = @{ 'User-Agent' = 'bithuman-install-ps1'; 'Accept' = 'application/vnd.github+json' }
     try {
-      $rels = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$Repo/releases?per_page=100"
+      $rels = Invoke-GitHub -Rest -Uri "https://api.github.com/repos/$Repo/releases?per_page=100"
     } catch {
+      if ("$_" -eq 'install failed') { throw }
       Fail "could not list releases on GitHub ($($_.Exception.Message)). Pin one with `$env:BITHUMAN_VERSION = 'cli-vX.Y.Z'."
     }
     $pick = $rels | Where-Object {
@@ -50,10 +86,13 @@
   try {
     $zip = Join-Path $work $Asset
     try {
-      Invoke-WebRequest -UseBasicParsing -Uri "$base/$Asset" -OutFile $zip
-      $sidecar = Invoke-WebRequest -UseBasicParsing -Uri "$base/$Asset.sha256"
+      Invoke-GitHub -Uri "$base/$Asset" -OutFile $zip | Out-Null
+      $sidecar = Invoke-GitHub -Uri "$base/$Asset.sha256"
     } catch {
-      Fail "the release $tag has no $Asset (or its .sha256): $($_.Exception.Message)"
+      if ("$_" -eq 'install failed') { throw }
+      $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+      if ($code -eq 404) { Fail "the release $tag has no $Asset (or its .sha256) (HTTP 404)." }
+      Fail "could not download $Asset from GitHub ($($_.Exception.Message)); run the installer again in a minute."
     }
     $text = $sidecar.Content
     if ($text -is [byte[]]) { $text = [Text.Encoding]::ASCII.GetString($text) }
