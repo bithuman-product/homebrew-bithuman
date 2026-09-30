@@ -176,6 +176,13 @@ void main() {
       expect(await BithumanAvatar.cancelLoad('A'), isFalse);
     });
 
+    test('a native error reads as false (a cancel is best effort; callers fire and forget it)',
+        () async {
+      _messenger.setMockMethodCallHandler(
+          _load, (call) async => throw PlatformException(code: 'bad_args', message: 'x'));
+      expect(await BithumanAvatar.cancelLoad('A'), isFalse);
+    });
+
     test('an empty code cancels nothing and calls nothing', () async {
       var called = false;
       _messenger.setMockMethodCallHandler(_load, (call) async => called = true);
