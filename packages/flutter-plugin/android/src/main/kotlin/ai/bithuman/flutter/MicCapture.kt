@@ -57,6 +57,8 @@ class MicCapture(
     private val onChunk: (ByteArray, Int) -> Unit,
 ) {
     @Volatile private var live = false
+    /** [stop] was called (platform thread): a start still queued does nothing, one mid-way closes itself. */
+    @Volatile private var stopped = false
     private var record: AudioRecord? = null
     private var aec: AcousticEchoCanceler? = null
     private var thread: Thread? = null
@@ -85,6 +87,9 @@ class MicCapture(
      */
     fun start(): Boolean {
         check(Looper.myLooper() == MODE_THREAD.looper) { "MicCapture.start runs on the bh-audio-mode thread" }
+        // Stopped before it opened (a hang-up, a switch): nothing to open, and no second recorder
+        // beside the next session's.
+        if (stopped) return false
         turn = modeTurn.incrementAndGet()
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         modeBefore = am.mode
@@ -97,9 +102,9 @@ class MicCapture(
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, RATE_IN)
             )
         } catch (t: Throwable) {
-            Log.w(TAG, "the microphone did not open: ${t.message}"); restoreMode(am); return false
+            Log.w(TAG, "the microphone did not open: ${t.message}"); restoreMode(am); turn = 0; return false
         }
-        if (r.state != AudioRecord.STATE_INITIALIZED) { Log.w(TAG, "the microphone did not open"); restoreMode(am); return false }
+        if (r.state != AudioRecord.STATE_INITIALIZED) { Log.w(TAG, "the microphone did not open"); restoreMode(am); turn = 0; return false }
         record = r
         if (AcousticEchoCanceler.isAvailable()) {
             aec = AcousticEchoCanceler.create(r.audioSessionId)?.apply { enabled = true }
@@ -130,6 +135,8 @@ class MicCapture(
             "agc=0 mic=on at=start platform=android " +
             "mode=${am.mode} device=${r.routedDevice?.type} inSr=$RATE_IN")
         thread = Thread({ loop(r) }, "bh-mic").also { it.start() }
+        // Stopped while it opened: close now, on this thread, before any later start runs.
+        if (stopped) { release(am); return false }
         return true
     }
 
@@ -141,17 +148,24 @@ class MicCapture(
      */
     fun stop() {
         live = false
+        stopped = true
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        MODE_THREAD.post { release(am) }
+    }
+
+    /** bh-audio-mode thread: the recorder, the canceller, the listeners, then the mode. Idempotent. */
+    private fun release(am: AudioManager) {
+        live = false
         val r = record; record = null
         val a = aec; aec = null
         thread = null
-        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        MODE_THREAD.post {
-            val t0 = System.nanoTime()
-            runCatching { r?.stop(); r?.release() }
-            runCatching { a?.release() }
-            restoreMode(am, owned = modeTurn.get() == turn)
-            Log.i("bhmic", "CLOSED in ${(System.nanoTime() - t0) / 1_000_000} ms, off the UI thread (mode=${am.mode})")
-        }
+        if (turn == 0) return   // never opened: nothing of the mode is ours
+        val t0 = System.nanoTime()
+        runCatching { r?.stop(); r?.release() }
+        runCatching { a?.release() }
+        restoreMode(am, owned = modeTurn.get() == turn)
+        turn = 0
+        Log.i("bhmic", "CLOSED in ${(System.nanoTime() - t0) / 1_000_000} ms, off the UI thread (mode=${am.mode})")
     }
 
     /**

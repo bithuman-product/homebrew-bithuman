@@ -100,6 +100,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         /** A fresh player is waiting for the held one's threads to return (platform thread). */
         var resuming = false
         var mic: MicCapture? = null
+        /** A mic still opening on the bh-audio-mode thread (not yet adopted into [mic]). */
+        var pendingMic: MicCapture? = null
         /** audioStart → audioStop: the audio focus held and the call watched (AudioInterruptions.kt). */
         var interruptions: AudioInterruptions? = null
         var micSink: EventChannel.EventSink? = null
@@ -483,10 +485,12 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             // Opened on the bh-audio-mode thread, never here: it held the platform thread ~0.9 s at
             // every dial (MicCapture.start). The session adopts it back on the platform thread,
             // unless it was stopped or restarted meanwhile (then the fresh mic is closed at once).
+            s.pendingMic = mic
             MicCapture.onModeThread {
                 val ok = mic.start()
                 main.post {
-                    if (!ok) { Log.w(TAG, "mic not started"); return@post }
+                    if (s.pendingMic === mic) s.pendingMic = null
+                    if (!ok) { Log.w(TAG, "mic not started (stopped before it opened, or it did not open)"); return@post }
                     if (s.stopped.get() || s.micChannel !== ch || detached || s.interruptions?.isInterrupted == true) {
                         mic.stop(); return@post
                     }
@@ -504,6 +508,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
 
     private fun stopMic(s: AvatarSession) {
         s.mic?.stop(); s.mic = null
+        // Still opening: its stop is queued now, before any next start on the same thread.
+        s.pendingMic?.stop(); s.pendingMic = null
         s.interruptions?.stop(); s.interruptions = null
         s.micSink = null
         s.micChannel?.setStreamHandler(null); s.micChannel = null
