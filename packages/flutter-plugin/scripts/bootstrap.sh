@@ -119,10 +119,10 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
 # `libessence2.xcframework.zip` binaryTarget checksum and the release's own
 # resources sidecar. Passed to the engine SDK bootstrap explicitly below.
-LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.15.0}"
-LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-bdaa8fc6c4e741d7977df85c1711258427d896555b3a75dce7d2475f0a8cd2d4}"
-LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.15.0}"
-LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-d854f4bbd7a4d19a83d270e20861795786a1474632433e101d0d684164489204}"
+LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.15.1}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-7fbd6cf8c0aedfae042dcf880a3edbcc369446b83bbeb968f02d1f8cc797694d}"
+LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.15.1}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-017a7f66815af24217a8e29f9c771f8ee4eaa11f6f416a8348432edb56c71200}"
 
 # ★ENGINECORE (macOS only, from essence2-v1.15.0 / Expression2 v2.19.0). On macOS the Essence 2
 # archive and the Expression 2 framework no longer carry the engine's licensing and metering
@@ -167,11 +167,11 @@ ENGINECORE_SHA256="${ENGINECORE_SHA256:-64aa90b319d989d4d92b03435ba625a28bc43d8c
 # BithumanEngineProtocol, UnifiedModelHeader), from the same tap release and checked against the same
 # checksums Package.swift pins; the Essence 2 adapter is the plugin's own (shared/Classes). No engine
 # source is fetched, from anywhere. X2_XCF_DIR=<dir holding the three zips> stages a candidate build.
-EXPRESSION2_RELEASE="${EXPRESSION2_RELEASE:-v2.19.0}"
-EXPRESSION2_SHA256="${EXPRESSION2_SHA256:-4770b78feb8a86ef293c73698f66332c3a663236679ae59b2dda3cbf1865e4bc}"
-BEP_SHA256="${BEP_SHA256:-cb1e1663052981fec9f929e298f05cc4c7b6010b1683178f3277aa4dfb9c962a}"
-UMH_RELEASE="${UMH_RELEASE:-v2.19.0}"
-UMH_SHA256="${UMH_SHA256:-2d4ee42f931638a9e0f8f0b1b97fc9ebfea6d9dc4e79f79cc83d9054e4f62157}"
+EXPRESSION2_RELEASE="${EXPRESSION2_RELEASE:-v2.19.2}"
+EXPRESSION2_SHA256="${EXPRESSION2_SHA256:-4761f552ae348d412578df29d820d1ac8be6fc1adced4d8ddf91a22c9cac08b6}"
+BEP_SHA256="${BEP_SHA256:-4eafd1f5b147ed5b08e2e3423959a71016b7b17ca93ed916a37981e8df25dfdb}"
+UMH_RELEASE="${UMH_RELEASE:-v2.19.2}"
+UMH_SHA256="${UMH_SHA256:-191ef4e25ef3df8e90d500e828348f666546e37c62621ca60c10ff2dff97d7b0}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so
