@@ -59,6 +59,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     PluginRegistry.RequestPermissionsResultListener {
 
     private lateinit var channel: MethodChannel
+    /** Load progress out and `cancel` in, on their own channel (LoadEvents.kt). */
+    private lateinit var loadEvents: LoadEvents
     private lateinit var messenger: BinaryMessenger
     private lateinit var textureRegistry: TextureRegistry
     private lateinit var context: Context
@@ -111,10 +113,12 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         textureRegistry = binding.textureRegistry
         channel = MethodChannel(messenger, "ai.bithuman.avatar")
         channel.setMethodCallHandler(this)
+        loadEvents = LoadEvents(messenger, main)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        loadEvents.close()
         sessions.keys.toList().forEach { destroy(it) }
     }
 
@@ -218,10 +222,16 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         // Texture registration must happen on the platform thread; the fetch and the
         // engine warm-up must not (a first run downloads ~158 MB).
         val entry = textureRegistry.createSurfaceTexture()
-        val t0 = System.nanoTime()
+        val handle = loadEvents.begin(code)
+        val t0 = handle.t0
         Thread({
             try {
-                val avatar: AvatarEngine = if (essence2) loadEssence2(code, secret, t0) else loadExpression2(code, secret, t0)
+                val avatar: AvatarEngine = if (essence2) loadEssence2(code, secret, t0, handle) else loadExpression2(code, secret, t0, handle)
+                // A cancel that came while the engine was being created: close it, start no player.
+                if (!handle.finish()) {
+                    runCatching { avatar.close() }
+                    handle.throwIfCancelled()
+                }
                 entry.surfaceTexture().setDefaultBufferSize(avatar.width, avatar.height)
                 val s = AvatarSession(code, avatar, entry, Surface(entry.surfaceTexture()))
                 val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -233,28 +243,38 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     result.success(entry.id().toInt())
                 }
             } catch (e: Throwable) {
+                // Asked for (BithumanAvatar.cancelLoad): its own error code, and not an error in the log.
+                val cancelled = handle.cancelled
                 // The exception's own words in the line itself: android.util.Log prints NO stack
                 // trace when the cause chain holds an UnknownHostException, so a bare "load failed"
                 // was all a failed fetch ever logged.
-                Log.e(TAG, "load failed: $e${e.cause?.let { " (cause: $it)" } ?: ""}", e)
-                main.post { entry.release(); result.error("load_failed", e.message ?: e.toString(), null) }
+                if (cancelled) Log.i(TAG, "load of $code cancelled +${(System.nanoTime() - t0) / 1_000_000} ms: $e")
+                else Log.e(TAG, "load failed: $e${e.cause?.let { " (cause: $it)" } ?: ""}", e)
+                main.post { entry.release(); result.error(if (cancelled) "load_cancelled" else "load_failed", e.message ?: e.toString(), null) }
+            } finally {
+                loadEvents.end(handle)
             }
         }, "bh-load").start()
     }
 
     /** Fetch by code into the SDK's store and open the engine — expression-2. Off the platform thread. */
-    private fun loadExpression2(code: String, secret: String?, t0: Long): AvatarEngine {
+    private fun loadExpression2(code: String, secret: String?, t0: Long, handle: LoadHandle): AvatarEngine {
         val store = if (secret.isNullOrBlank()) Expression2ModelStore(context)
             else Expression2ModelStore(context, java.io.File(context.filesDir, "expression2"),
                 3L * 1024 * 1024 * 1024, Expression2ModelStore.MeteredDoorResolver(secret))
-        val model = store.fetch(code, false, null) { member, done, total ->
+        val model = store.fetch(code, false, handle.storeCancel) { member, done, total ->
             if (total > 0 && done == total) Log.i(TAG, "fetched $member")
+            loadEvents.fetchProgress(handle, done, total)
         }
+        loadEvents.fetched(handle)
+        handle.throwIfCancelled()
+        loadEvents.stage(handle, LoadHandle.STAGE_PREPARE)
         // From expression2-android 0.4.9 the engine meters the session it serves and refuses
         // to create one without an API secret. 0.4.10's one setter arms the meter (and any
         // store resolver built without a credential), exactly as the essence-2 path does.
         if (!secret.isNullOrBlank()) ai.bithuman.expression2.Expression2Credential.set(secret)
         val avatar = Expression2Avatar.create(context, model)
+        loadEvents.stage(handle, LoadHandle.STAGE_PREPARED)
         // The idle loop the agent plays between turns is the SDK's: the identity's own
         // clip from the same store as the weights, decoded in place, every frame of it.
         // No clip is a logged reason and a still face, never a second download.
@@ -270,17 +290,22 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
      * the SDK's store — the shared audio frontend among them — and the credential also
      * arms the engine's own meter, which refuses every frame without one (0.5.7).
      */
-    private fun loadEssence2(code: String, secret: String?, t0: Long): AvatarEngine {
+    private fun loadEssence2(code: String, secret: String?, t0: Long, handle: LoadHandle): AvatarEngine {
         if (secret.isNullOrBlank()) throw IllegalArgumentException(
             "essence-2 on Android needs the app's credential: members are served through the metered door and every frame is metered")
         Essence2Credential.set(secret)   // 0.5.15: the one setter for the door and the meter
         val store = Essence2ModelStore(context, java.io.File(context.filesDir, "essence2"),
             3L * 1024 * 1024 * 1024, Essence2ModelStore.MeteredDoorResolver(secret))
-        val bundle = store.fetch(code, false, null) { member, done, total ->
+        val bundle = store.fetch(code, false, handle.storeCancel) { member, done, total ->
             if (total > 0 && done == total) Log.i(TAG, "fetched $member")
+            loadEvents.fetchProgress(handle, done, total)
         }
+        loadEvents.fetched(handle)
+        handle.throwIfCancelled()
+        loadEvents.stage(handle, LoadHandle.STAGE_PREPARE)
         val w2v = java.io.File(bundle.dir, Essence2Avatar.W2V_MEMBER)
         val avatar = Essence2Avatar.create(bundle.dir, w2v, 0)
+        loadEvents.stage(handle, LoadHandle.STAGE_PREPARED)
         // Zero-copy delivery by default (2.6.19). `debug.bh.e2.copy=1` keeps the copy path for a
         // same-bytes A/B, and only a DEBUGGABLE host app honours it (see AvatarPlayer.debuggable).
         val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0

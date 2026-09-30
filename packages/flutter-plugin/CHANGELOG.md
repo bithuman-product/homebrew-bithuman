@@ -1,3 +1,24 @@
+## Unreleased — Android: load progress and cancel
+
+* **Android:** `BithumanAvatar.loadEvents` reports what a native `load` is doing while it runs,
+  so a wait screen can show real progress instead of measuring the download folder: `fetch`
+  (bytes on disk against the identity's exact size, about 8 a second; a resumed download starts
+  from what it already has), `fetched` (`cached` when nothing had to be downloaded), `prepare`
+  (the engine is being created; a first open also compiles it for the device) and `prepared`.
+  Each `BithumanLoadEvent` carries the agent `code` and the time since that load began.
+  Subscribe before calling `load`.
+* **Android:** `BithumanAvatar.cancelLoad(code)` stops a running `load` of that code, for example
+  when the user picks another character mid-download. The download stops at its next read and
+  keeps what it has (the next `load` of that code resumes it), an engine that is being created is
+  closed as soon as it exists, and that `load` throws `PlatformException(code: 'load_cancelled')`.
+  It returns whether a load was cancelled.
+* Additive: an app that neither listens nor cancels sees no change. The events use their own
+  channel, `ai.bithuman.avatar/load` (native → Dart `event {code, stage, done, total, cached, ms}`,
+  Dart → native `cancel {code}`), and the native side sends the next event only after Dart has
+  answered the last, so an app without a listener gets no warnings about discarded channel
+  messages. On iOS and macOS `load` opens a local path and downloads nothing (the download helpers
+  report their own `onProgress`), so no events arrive there and `cancelLoad` returns false.
+
 ## 2.6.22 — 2026-09-28 — security fix: restrict internal symbols in the macOS engine core
 
 Tag `flutter-plugin-v2.6.22`.
