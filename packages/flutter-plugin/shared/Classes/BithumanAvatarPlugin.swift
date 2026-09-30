@@ -277,7 +277,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // adapter is compiled for iOS and macOS alike, and a downloaded or pushed agent
       // is the ONLY way a phone can render anything but the bundled default.
       let dir = (call.arguments as? [String: Any])?["dir"] as? String
-      // ★ OFF the platform thread (2.6.24). Expanding a ~200 MB container here blocked the
+      // ★ OFF the platform thread. Expanding a ~200 MB container here blocked the
       // platform thread — which Flutter now merges with the UI thread — for 0.3-0.5 s on
       // an iPhone 15 on EVERY cold start and character switch: the first frame, the
       // placeholder and the countdown all waited behind it. One serial queue, so two
@@ -2070,10 +2070,11 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
 //
 // A DIRECTORY passes through untouched. Only a FILE is expanded. The unpacker does not
 // cache, and a caller wanting a cache must own the staleness question with the container
-// bytes in hand — so this one does (2.6.24): an expansion is REUSED only when its record
+// bytes in hand — so this one does: an expansion is REUSED only when its record
 // (`.bh-expanded`, written last) names this very file — path, size, modification time
 // (ns) and inode, which a re-download or an app update (a new bundle path) all change —
-// and every member it lists is still there at its recorded size (iOS may purge Caches).
+// and every member it lists is still there at its recorded size (a member directory: the
+// bytes of every file under it; iOS may purge Caches).
 // Anything else expands fresh, as before. Before: every cold start and every switch
 // deleted and rewrote ~200 MB of Caches (0.32-0.54 s on an iPhone 15, on the platform
 // thread). An expansion that fails returns the path UNCHANGED and says so, so the engine
@@ -2102,11 +2103,28 @@ fileprivate func bhExpansionIsCurrent(_ dest: URL, stamp: String) -> Bool {
   for line in lines.dropFirst() {
     guard let tab = line.lastIndex(of: "\t"), let want = Int64(line[line.index(after: tab)...]) else { return false }
     let member = dest.appendingPathComponent(String(line[..<tab]))
-    guard let a = try? fm.attributesOfItem(atPath: member.path) else { return false }
-    // A member directory (an .mlpackage) is checked for presence only.
-    if (a[.type] as? FileAttributeType) != .typeDirectory, (a[.size] as? NSNumber)?.int64Value != want { return false }
+    guard fm.fileExists(atPath: member.path), bhMemberSize(member) == want else { return false }
   }
   return true
+}
+
+/// A member's size: a file's bytes, or — a member directory (an .mlpackage) — the bytes of
+/// every file under it, so a partly purged package is not reused.
+fileprivate func bhMemberSize(_ url: URL) -> Int64 {
+  let fm = FileManager.default
+  var isDir: ObjCBool = false
+  guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else { return -1 }
+  if !isDir.boolValue {
+    return ((try? fm.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? -1
+  }
+  var total: Int64 = 0
+  if let e = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]) {
+    for case let f as URL in e {
+      let v = try? f.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+      if v?.isRegularFile == true { total += Int64(v?.fileSize ?? 0) }
+    }
+  }
+  return total
 }
 
 fileprivate func bhResolveExpression2AgentDir(_ path: String?) -> String? {
@@ -2119,9 +2137,14 @@ fileprivate func bhResolveExpression2AgentDir(_ path: String?) -> String? {
     NSLog("[embody] agent path %@ is a FILE but not an IMX container - passed through unchanged", p)
     return p
   }
-  let base = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first
-           ?? NSTemporaryDirectory()
-  let dest = URL(fileURLWithPath: base)
+  var base = URL(fileURLWithPath: NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first
+           ?? NSTemporaryDirectory())
+  #if os(macOS)
+  // An app outside the sandbox shares ~/Library/Caches with every other one: under its own
+  // bundle id, so two apps on this plugin never expand into (or delete) each other's copy.
+  if let bid = Bundle.main.bundleIdentifier { base = base.appendingPathComponent(bid) }
+  #endif
+  let dest = base
     .appendingPathComponent("expression2-unpacked")
     .appendingPathComponent(url.deletingPathExtension().lastPathComponent)
   let t0 = CFAbsoluteTimeGetCurrent()
@@ -2132,6 +2155,9 @@ fileprivate func bhResolveExpression2AgentDir(_ path: String?) -> String? {
     return dest.path
   }
   do {
+    // The record goes FIRST: a delete cut short must not leave a matching record over a
+    // half-deleted tree.
+    try? FileManager.default.removeItem(at: dest.appendingPathComponent(bhExpandedRecord))
     try? FileManager.default.removeItem(at: dest)
     try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
     let names = try Expression2Container.unpack(url, to: dest)
@@ -2142,8 +2168,7 @@ fileprivate func bhResolveExpression2AgentDir(_ path: String?) -> String? {
     if let stamp = stamp {
       var rec = stamp + "\n"
       for n in names {
-        let a = try? FileManager.default.attributesOfItem(atPath: dest.appendingPathComponent(n).path)
-        rec += "\(n)\t\((a?[.size] as? NSNumber)?.int64Value ?? 0)\n"
+        rec += "\(n)\t\(bhMemberSize(dest.appendingPathComponent(n)))\n"
       }
       try? rec.write(to: dest.appendingPathComponent(bhExpandedRecord), atomically: true, encoding: .utf8)
     }
