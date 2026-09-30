@@ -2137,12 +2137,15 @@ fileprivate func bhResolveExpression2AgentDir(_ path: String?) -> String? {
     NSLog("[embody] agent path %@ is a FILE but not an IMX container - passed through unchanged", p)
     return p
   }
-  var base = URL(fileURLWithPath: NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first
+  let caches = URL(fileURLWithPath: NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first
            ?? NSTemporaryDirectory())
-  #if os(macOS)
   // An app outside the sandbox shares ~/Library/Caches with every other one: under its own
   // bundle id, so two apps on this plugin never expand into (or delete) each other's copy.
-  if let bid = Bundle.main.bundleIdentifier { base = base.appendingPathComponent(bid) }
+  // macOS-only: an iOS app's Caches is its own container already
+  #if os(macOS)
+  let base = Bundle.main.bundleIdentifier.map { caches.appendingPathComponent($0) } ?? caches
+  #else
+  let base = caches
   #endif
   let dest = base
     .appendingPathComponent("expression2-unpacked")
