@@ -277,9 +277,20 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // adapter is compiled for iOS and macOS alike, and a downloaded or pushed agent
       // is the ONLY way a phone can render anything but the bundled default.
       let dir = (call.arguments as? [String: Any])?["dir"] as? String
-      Expression2Engine.activeAgentDir = bhResolveExpression2AgentDir(dir)
-      NSLog("[BithumanAvatar] setExpression2AgentDir → %@", Expression2Engine.activeAgentDir ?? "<bundled default>")
-      result(nil)
+      // ★ OFF the platform thread (2.6.24). Expanding a ~200 MB container here blocked the
+      // platform thread — which Flutter now merges with the UI thread — for 0.3-0.5 s on
+      // an iPhone 15 on EVERY cold start and character switch: the first frame, the
+      // placeholder and the countdown all waited behind it. One serial queue, so two
+      // switches never expand into the same directory at once; the engine dir is set on
+      // main before `result`, so the `load` Dart awaits next still sees it.
+      bhExpandQueue.async {
+        let resolved = bhResolveExpression2AgentDir(dir)
+        DispatchQueue.main.async {
+          Expression2Engine.activeAgentDir = resolved
+          NSLog("[BithumanAvatar] setExpression2AgentDir → %@", resolved ?? "<bundled default>")
+          result(nil)
+        }
+      }
 
     // The Dart half of this plugin is public source and carries NO reader for
     // bitHuman's container (owner ruling 2026-09-16: the format stays in private
@@ -2057,11 +2068,47 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
 // (~/Library/Caches/essence2-unpacked/<sha>); expression-2 on Apple did not, and that
 // asymmetry -- not a missing member -- is why the macOS app rendered nothing.
 //
-// A DIRECTORY passes through untouched. Only a FILE is expanded, and it is expanded
-// FRESH: the unpacker states it does not cache, and that a caller wanting a cache must
-// own the staleness question with the container bytes in hand. An expansion that fails
-// returns the path UNCHANGED and says so, so the engine still refuses loudly by name
-// rather than silently rendering a neighbouring identity.
+// A DIRECTORY passes through untouched. Only a FILE is expanded. The unpacker does not
+// cache, and a caller wanting a cache must own the staleness question with the container
+// bytes in hand — so this one does (2.6.24): an expansion is REUSED only when its record
+// (`.bh-expanded`, written last) names this very file — path, size, modification time
+// (ns) and inode, which a re-download or an app update (a new bundle path) all change —
+// and every member it lists is still there at its recorded size (iOS may purge Caches).
+// Anything else expands fresh, as before. Before: every cold start and every switch
+// deleted and rewrote ~200 MB of Caches (0.32-0.54 s on an iPhone 15, on the platform
+// thread). An expansion that fails returns the path UNCHANGED and says so, so the engine
+// still refuses loudly by name rather than silently rendering a neighbouring identity.
+private let bhExpandQueue = DispatchQueue(label: "ai.bithuman.avatar.expand", qos: .userInitiated)
+private let bhExpandedRecord = ".bh-expanded"
+
+/// What identifies the container's bytes without reading them (hashing ~200 MB would
+/// cost what the expansion costs).
+fileprivate func bhContainerStamp(_ url: URL) -> String? {
+  guard let a = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+  let size = (a[.size] as? NSNumber)?.int64Value ?? -1
+  let mtime = ((a[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0) * 1e9
+  let inode = (a[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
+  return "bh-expanded v1 \(url.path) size=\(size) mtime=\(Int64(mtime)) inode=\(inode)"
+}
+
+/// True when `dest` holds a complete expansion of exactly these container bytes.
+fileprivate func bhExpansionIsCurrent(_ dest: URL, stamp: String) -> Bool {
+  guard let rec = try? String(contentsOf: dest.appendingPathComponent(bhExpandedRecord), encoding: .utf8) else {
+    return false
+  }
+  let lines = rec.split(separator: "\n", omittingEmptySubsequences: true)
+  guard lines.count > 1, lines[0] == stamp else { return false }
+  let fm = FileManager.default
+  for line in lines.dropFirst() {
+    guard let tab = line.lastIndex(of: "\t"), let want = Int64(line[line.index(after: tab)...]) else { return false }
+    let member = dest.appendingPathComponent(String(line[..<tab]))
+    guard let a = try? fm.attributesOfItem(atPath: member.path) else { return false }
+    // A member directory (an .mlpackage) is checked for presence only.
+    if (a[.type] as? FileAttributeType) != .typeDirectory, (a[.size] as? NSNumber)?.int64Value != want { return false }
+  }
+  return true
+}
+
 fileprivate func bhResolveExpression2AgentDir(_ path: String?) -> String? {
   guard let p = path, !p.isEmpty else { return nil }
   var isDir: ObjCBool = false
@@ -2077,13 +2124,29 @@ fileprivate func bhResolveExpression2AgentDir(_ path: String?) -> String? {
   let dest = URL(fileURLWithPath: base)
     .appendingPathComponent("expression2-unpacked")
     .appendingPathComponent(url.deletingPathExtension().lastPathComponent)
+  let t0 = CFAbsoluteTimeGetCurrent()
+  let stamp = bhContainerStamp(url)
+  if let stamp = stamp, bhExpansionIsCurrent(dest, stamp: stamp) {
+    NSLog("[embody] container expansion reused %@ -> %@ (%.3fs)",
+          url.lastPathComponent, dest.path, CFAbsoluteTimeGetCurrent() - t0)
+    return dest.path
+  }
   do {
     try? FileManager.default.removeItem(at: dest)
     try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
-    let t0 = CFAbsoluteTimeGetCurrent()
     let names = try Expression2Container.unpack(url, to: dest)
     NSLog("[embody] container expanded %@ -> %@ (%d members, %.2fs)",
           url.lastPathComponent, dest.path, names.count, CFAbsoluteTimeGetCurrent() - t0)
+    // The record goes in LAST, atomically: an expansion cut short leaves none, and the
+    // next open expands fresh.
+    if let stamp = stamp {
+      var rec = stamp + "\n"
+      for n in names {
+        let a = try? FileManager.default.attributesOfItem(atPath: dest.appendingPathComponent(n).path)
+        rec += "\(n)\t\((a?[.size] as? NSNumber)?.int64Value ?? 0)\n"
+      }
+      try? rec.write(to: dest.appendingPathComponent(bhExpandedRecord), atomically: true, encoding: .utf8)
+    }
     return dest.path
   } catch {
     NSLog("[embody] container expand FAILED for %@: %@ - path passed through unchanged; the engine refuses by name", p, "\(error)")
