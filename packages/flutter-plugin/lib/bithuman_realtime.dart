@@ -112,13 +112,17 @@ class BithumanRealtimeSession {
   static const int _guardPeakFloor = 4096; // ≈ -18 dBFS
   static const Duration _guardTail = Duration(milliseconds: 1500);
   int _agentAudioMs = 0;   // agent audio handed to the plugin this session
+  // Mic time spent while the agent was audible — the canceller's convergence clock.
+  // ★The window is counted HERE, not in [_agentAudioMs]: a reply's audio arrives in a
+  // burst (a 12 s reply lands in ~1-2 s), so a window counted in delivered audio closed
+  // at the start of the first long reply, seconds before that audio was even played.
+  int _guardAudibleMs = 0;
   int _guardedChunks = 0;
   int get _echoGuardMs =>
       DevLevers.echoGuardMs >= 0 ? DevLevers.echoGuardMs : echoOnsetGuard.inMilliseconds;
   bool get _echoGuardActive {
     final guardMs = _echoGuardMs;
-    if (guardMs == 0) return false;
-    if (_agentAudioMs == 0 || _agentAudioMs > guardMs + 4000) return false;
+    if (guardMs == 0 || _agentAudioMs == 0 || _guardAudibleMs >= guardMs) return false;
     // The presenter releases audio with the lip frames, ~1 s after the delta
     // arrived, so the agent is audible until a tail past the arrival estimate.
     return _audibleUntil.add(_guardTail).isAfter(DateTime.now());
@@ -743,12 +747,17 @@ class BithumanRealtimeSession {
     }
     _micLevel.add(peak / 32768.0);
     _micDbgN++;
-    if (peak < _guardPeakFloor && _echoGuardActive) {
-      // Echo-onset guard: keep the uplink continuous, but silent.
-      pcm = Uint8List(pcm.length);
-      if (_guardedChunks++ % 10 == 0) {
-        _log('[bhecho] onset guard: chunk silenced peak=$peak agentAudioMs=$_agentAudioMs '
-            'guarded=$_guardedChunks');
+    if (_echoGuardActive) {
+      // Every chunk captured while the agent is audible counts toward the window, loud
+      // or not: the canceller converges on audible time.
+      _guardAudibleMs += (pcm.length ~/ 2) * 1000 ~/ 24000;
+      if (peak < _guardPeakFloor) {
+        // Echo-onset guard: keep the uplink continuous, but silent.
+        pcm = Uint8List(pcm.length);
+        if (_guardedChunks++ % 10 == 0) {
+          _log('[bhecho] onset guard: chunk silenced peak=$peak audibleMs=$_guardAudibleMs '
+              'agentAudioMs=$_agentAudioMs guarded=$_guardedChunks');
+        }
       }
     }
     if (muted) {

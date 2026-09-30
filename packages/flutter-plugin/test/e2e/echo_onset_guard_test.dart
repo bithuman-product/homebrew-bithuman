@@ -104,6 +104,30 @@ void main() {
     await s.stop();
   });
 
+  test('a long first reply that arrives in a burst is still guarded while it plays', () async {
+    // 20 s of agent audio lands in well under a second (the transport hands a reply over as
+    // it arrives). The window is the canceller's clock — audible time — so the first seconds
+    // of PLAYBACK are guarded; a window counted in delivered audio had closed already.
+    final s = BithumanRealtimeSession(apiKey: 'k', avatar: host, model: 'm');
+    final conn = await dial(s);
+    await conn.sendResponse(chunks: 200, chunkMs: 100, done: false);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(await sendAndReadPeaks(conn, [pcmAt(1400), pcmAt(12000)]), [0, 12000]);
+    await s.stop();
+  });
+
+  test('the guard ends after echoOnsetGuard of audible time', () async {
+    final s = BithumanRealtimeSession(
+        apiKey: 'k', avatar: host, model: 'm', echoOnsetGuard: const Duration(milliseconds: 500));
+    final conn = await dial(s);
+    await conn.sendResponse(chunks: 30, chunkMs: 100, done: false); // 3 s of agent audio
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    // Five 100 ms chunks fill the 500 ms window; the sixth goes up as captured.
+    expect(await sendAndReadPeaks(conn, List.generate(6, (_) => pcmAt(1400))),
+        [0, 0, 0, 0, 0, 1400]);
+    await s.stop();
+  });
+
   test('speechReady holds the dial (and so the greeting) until it completes', () async {
     final ready = Completer<void>();
     final s = BithumanRealtimeSession(
