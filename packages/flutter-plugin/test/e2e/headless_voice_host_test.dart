@@ -24,6 +24,7 @@
 import 'dart:async';
 
 import 'package:bithuman/bithuman_realtime.dart';
+import 'package:bithuman/src/echo_profile.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mock_realtime/mock_realtime.dart';
 
@@ -81,9 +82,13 @@ void main() {
     final tSub = session.botTranscriptStream.listen(transcript.write);
 
     // The audio unit came up with the cloud-path contract — vadThreshold 0,
-    // because barge is server-VAD's job on this path, not a local energy VAD.
+    // because barge is server-VAD's job on this path, not a local energy VAD —
+    // and the automatic gain of THIS device's EchoProfile row. The row follows
+    // the host OS (a macOS host resolves `mac`, AGC off; Linux and iOS resolve
+    // `iphone`, AGC on), so the expectation reads the row rather than a literal
+    // that only held on the Linux runner.
     expect(host.calls.where((c) => c.startsWith('audioStart:')).single,
-        'audioStart:vad=0,mic=true,agc=true');
+        'audioStart:vad=0,mic=true,agc=${EchoProfile.current.vpioAgc}');
 
     await conn.sendResponse(
         // One transcript word per audio delta (mock_realtime sendResponse), so
