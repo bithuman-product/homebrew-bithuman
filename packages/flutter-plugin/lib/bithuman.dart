@@ -1397,6 +1397,8 @@ class _LoadEvents {
       return await _channel.invokeMethod<bool>('cancel', {'code': code}) ?? false;
     } on MissingPluginException {
       return false; // iOS / macOS, or an Android side older than load events
+    } on PlatformException {
+      return false; // a cancel is best effort: nothing to stop, nothing to report
     }
   }
 }
