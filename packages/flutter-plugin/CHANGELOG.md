@@ -1,3 +1,62 @@
+## 2.6.25 — 2026-09-30 — the call ends when the phone rings; earbuds keep the call; smoother Android texture; faster first frame
+
+Tag `flutter-plugin-v2.6.25`. Engines unchanged: iOS/macOS Expression 2 `v2.19.2`, Essence 2
+`essence2-v1.15.1`, macOS `enginecore-v1.0.1`; Android `essence2-android` 0.8.1,
+`expression2-android` 0.5.2.
+
+* **A phone call ends the session (iOS, Android).** A call answered from its banner (iOS) or its
+  notification (Android) leaves the app on screen. The audio paused, but the realtime session went
+  on and was billed under the call. The platform's interruption now reaches Dart as
+  `BithumanAvatar.audioInterruptions` (`BithumanAudioInterruption`: `began`/ended, `reason`
+  `call` | `focus` | `system`, `shouldResume`). `BithumanRealtimeSession` forwards it on
+  `interruptionStream` and, by default (`endOnAudioInterruption: true`), stops itself on `began`, so
+  nothing more is billed; `endedByInterruption` says why. iOS reports its audio-session
+  interruptions (a call ringing or answered, Siri, an alarm; `call` when CallKit sees a call).
+  Android now holds transient audio focus for the call, as a call app does. It reports a lost focus
+  (a phone call, another app's call, an assistant; a duck request is not one) and, on Android 12
+  and later, a phone call's audio mode. A call already holding the audio when the session starts is
+  reported at once and the session ends quietly (Android keeps the microphone closed; iOS refuses
+  the audio unit after reporting it).
+* **Bluetooth earbuds and headsets keep the call (Android, iOS).** When the microphone opened,
+  Android forced the loudspeaker whatever was connected, and iOS overrode the route to the speaker
+  as well. Now a connected Bluetooth headset (classic or LE Audio), a wired or USB headset, USB-C
+  headphones or a hearing aid keeps the call. The loudspeaker is chosen only when none is
+  connected. A device that comes or goes during the call re-routes it (`[bhroute]` lines on
+  Android). When a headset does not take the call (its link fails), the call falls back to the
+  loudspeaker.
+* **The microphone opens and closes off the UI thread (Android).** On a Galaxy Z Flip5, opening it
+  (the audio mode, the route, the recorder) held the platform thread ~0.9 s at every dial (104
+  frames skipped), and closing it ~0.5 s at every hang-up (58 frames). Both now run on one serial
+  thread, in order; the microphone joins the call a moment after it opens.
+* **The avatar texture is a SurfaceProducer (Android).** Under Impeller a SurfaceTexture cost
+  ~10 ms of raster per frame through a GLES interop. Galaxy Z Flip5 at 120 Hz, idle: raster p50
+  10.4 → 5.1 ms, frames over budget 321/357 → 2/351.
+* **An Expression 2 container is expanded once, off the platform thread (iOS, macOS).** Every cold
+  start and character switch used to rewrite ~200 MB on the UI thread. The container now expands
+  once and is reused when its record matches (iPhone 15: 0.32–0.54 s → 0.01 s).
+* **Readiness is polled at 40 ms for the first 3 s** (was 500 ms), then 250 ms, then 1 s after
+  ~10 s: the character appears up to ~0.5 s sooner. Launch to live character, cached: Flip5
+  2.98 → 2.60 s, iPhone 15 2.87 → 2.61 s, M4 Mac 2.27 → 1.80 s.
+* **No orphan session when the engine detaches mid-load (Android).** A load that finished after
+  the Flutter engine detached registered a session nobody could stop, and its player ran on. It now
+  closes what it made.
+
+Compatibility:
+* `VoiceHost` has one more member, `audioInterruptions` (a broadcast stream: the session listens on
+  every `start()`). A class of yours that `implements VoiceHost` adds it; one that never
+  interrupts returns an empty broadcast stream.
+* A session now ends on every interruption's `began`, not only a phone call's: Siri or an
+  assistant, an alarm, another app's call or playback taking the audio. Pass
+  `endOnAudioInterruption: false` to keep a session open and decide from `interruptionStream`.
+* On Android the call holds transient audio focus, as a phone call does: music in another app
+  pauses during the call and resumes after it.
+* The transports in `realtime_transport.dart` do not forward interruptions yet; their sessions
+  still end on them, and a transport reports `closed`.
+* iOS links CallKit, for `CXCallObserver` only (to tell a phone call from other interruptions). The
+  plugin places, reports and answers no calls.
+* Bluetooth adds its own output latency. A Bluetooth headset keeps the call now, and lip-sync has
+  not been measured on one yet.
+
 ## 2.6.24 — 2026-09-30 — security: the Apple engines take the metering fix
 
 Tag `flutter-plugin-v2.6.24`. Engines: iOS/macOS Expression 2 `v2.19.2`, Essence 2
