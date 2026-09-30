@@ -12,9 +12,9 @@
 //   {textureId, state: "began", reason: "call" | "focus", shouldResume: false}
 //   {textureId, state: "ended", reason, shouldResume: true}   the focus came back
 //
-// - "call": the mode says a phone call rings, is answered or is screened, or a call (phone or
-//   VoIP, through Telecom) holds the focus so ours was refused.
-// - "focus": another app took the audio (an assistant, another app's call).
+// - "call": the mode says a phone call rings, is answered or is screened.
+// - "focus": another app took the audio (an assistant, another app's call), or the focus was
+//   refused at the start.
 // A focus loss that only asks to duck (a notification's chime) is not an interruption.
 //
 // Telecom takes the focus first and sets the ringtone mode after it, so a lost focus is
@@ -75,11 +75,10 @@ internal class AudioInterruptions(
         }
         val mode = am.mode
         Log.i(TAG, "[bhinterrupt] watching: focus ${if (granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "granted" else "REFUSED ($granted)"} mode=$mode")
-        // A call already holds the audio: it refuses the focus (Telecom's call focus), or the mode says so.
-        if (AudioRules.isCallMode(mode) || granted == AudioManager.AUDIOFOCUS_REQUEST_FAILED) {
-            began(AudioRules.REASON_CALL)
-            return false
-        }
+        // A call already holds the audio (the mode says so), or the focus was refused (a call's focus,
+        // or the platform refusing an app that is not on screen): the session must not go on.
+        if (AudioRules.isCallMode(mode)) { began(AudioRules.REASON_CALL); return false }
+        if (granted == AudioManager.AUDIOFOCUS_REQUEST_FAILED) { began(AudioRules.REASON_FOCUS); return false }
         return true
     }
 

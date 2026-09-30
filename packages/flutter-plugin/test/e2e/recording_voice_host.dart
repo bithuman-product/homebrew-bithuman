@@ -47,6 +47,9 @@ class RecordingVoiceHost implements VoiceHost {
   /// Runs inside [audioStart] (e.g. a call that already holds the audio as the unit starts).
   void Function()? onAudioStart;
 
+  /// [audioStart] throws this after [onAudioStart] (iOS refuses the unit during a call).
+  Object? audioStartError;
+
   /// Push "microphone" PCM at the session, as the platform would.
   void emitMic(Uint8List pcm) => _mic.add(pcm);
 
@@ -73,6 +76,8 @@ class RecordingVoiceHost implements VoiceHost {
       {int vadThreshold = 0, bool enableMic = true, bool vpioAgc = true}) async {
     calls.add('audioStart:vad=$vadThreshold,mic=$enableMic,agc=$vpioAgc');
     onAudioStart?.call();
+    final err = audioStartError;
+    if (err != null) throw err;
   }
 
   @override

@@ -686,7 +686,6 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     try session.setCategory(.playAndRecord, mode: .videoChat, options: options)
     try session.setPreferredSampleRate(48_000)
     try session.setActive(true)
-    if callObserver == nil { callObserver = CXCallObserver() }
     // ★THE PLATFORM ASYMMETRY, MEASURED RATHER THAN ASSUMED. iOS has an AVAudioSession
     // with a real output latency; macOS has no session at all. Audio handed to the player
     // reaches the ear that much later, and nothing in this file has ever read the number —
@@ -1233,6 +1232,18 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     self.vpioAgc = vpioAgc
     if started { return }
     #if os(iOS)
+    // The call observer serves speaker-only sessions too (a phone call is "call" either way).
+    if callObserver == nil { callObserver = CXCallObserver() }
+    // ★A call already holds the audio (it rings or runs): the session cannot have the speaker or
+    // the microphone (activation fails with insufficient priority). Say so as an interruption
+    // first — the realtime session ends quietly on it — then refuse the start.
+    if callObserver?.calls.contains(where: { !$0.hasEnded }) == true {
+      NSLog("[RealtimeAudioIO] a call holds the audio: not starting")
+      interruptionReason = "call"
+      onInterruption?(true, "call", false)
+      throw NSError(domain: "ai.bithuman.audio", code: -2,
+                    userInfo: [NSLocalizedDescriptionKey: "a phone call holds the audio"])
+    }
     if mic { try configureAudioSession() }
     #endif
     try configureGraphIfNeeded(mic: mic)
