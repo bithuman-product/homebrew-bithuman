@@ -1,15 +1,37 @@
-## Unreleased — realtime session: speech-ready wait, echo-onset guard, an honest barge log; macOS hang-up freeze
+## 2.6.23 — 2026-09-30 — dispose is safe at any moment; no Mac freeze at hang-up; echo-onset guard; Android load progress and cancel
 
+Tag `flutter-plugin-v2.6.23`. Engines unchanged: iOS/macOS Expression 2 `v2.19.0`, Essence 2
+`essence2-v1.15.0`, macOS `enginecore-v1.0.1`; Android `essence2-android` 0.8.1,
+`expression2-android` 0.5.2.
+
+* **Dispose is safe at any moment (Android, iOS, macOS).** On Android `dispose` closed the engine
+  while the player's threads were still inside it: the producer could be decoding an idle frame
+  when the decoder was released, and the writer could read the position of an audio track that had
+  just been released. Either threw on a player thread and the app crashed — for example when a
+  character the person had switched away from finished loading and was disposed at once. Now every
+  thread that uses an engine is stopped and joined before the engine is closed, once; the join and
+  the close run off the UI thread, and on Android `dispose()` returns when the engine is closed. A
+  thread that is still inside the engine after 30 s leaves it open (logged) instead of closing it
+  under that thread, and an exception on a player thread is logged (the picture holds its last
+  frame) instead of ending the app. `setIdleHold(false)` never starts a fresh player beside a held
+  one that is still running. Apps no longer need to hold the avatar and wait before `dispose()`.
+  On iOS and macOS `dispose()` returns at once as before, and the engine is released after the
+  render ticks and the Expression 2 warm-up thread are done with it; that release is no longer
+  skipped when the texture object was freed first (the engine's shutdown did not run).
 * **No greeting over a still face.** `BithumanRealtimeSession(speechReady: avatar.ready)` holds the dial
   (and so the connect greeting) until the engine's speech path is live (max 60 s, logged as
   `[bhready]`). Measured 2026-09-28 on an iPhone 15: the greeting's first delta landed 12:22:40.6 and
   the Expression 2 warm-up finished 12:22:46.3 — ~6 s of greeting with no lip-sync. Optional; apps
   that already await `avatar.ready` before `start()` are unchanged.
-* **Echo-onset guard.** For the first `echoOnsetGuard` (default 8 s) of agent audio in a session, mic
+* **Echo-onset guard (iPhone, Android).** For the first `echoOnsetGuard` of agent audio in a session, mic
   chunks captured while the agent is audible and whose peak is below −18 dBFS go up as digital silence
   (the uplink stays continuous). The iPhone 15 loudspeaker run of 2026-09-28 had two false
   `speech_started` barge-ins in the first reply, on canceller-onset residuals of −28 / −23 / −27 dBFS
-  peak; a person talking to the phone is far above the floor and still cuts the agent.
+  peak; a person talking to the phone is far above the floor and still cuts the agent. The window
+  counts audible time (the canceller's clock), so a long reply that arrives in one burst is guarded
+  while it plays. The default is the device's `EchoProfile.onsetGuard`: 8 s on iPhone and Android (a
+  Galaxy Z Flip5 at its lowest call volume had one false `speech_started` ~3 s into the greeting in each
+  of 2 runs without it, none with it), off on macOS, whose measured residual sits far below the floor.
   `Duration.zero` disables it; dev A/B lever `--dart-define=BH_ECHO_GUARD_MS=<ms>` (not in release).
   Logged as `[bhecho]`.
 * **`vadThreshold` is optional and documented as LOCAL-mode only.** The relay/OpenAI session's barge
@@ -23,9 +45,6 @@
   instantiates one and binds the input device synchronously on the platform (= UI) thread, which never
   returned (sampled on an M4 iMac: `AVAudioIOUnit_OSX::EnableInputDevice` →
   `HALC_ShellDevice::CreateIOProcID`). Now guarded on `micActive`, as the iOS branch already was.
-
-## Unreleased — Android: load progress and cancel
-
 * **Android:** `BithumanAvatar.loadEvents` reports what a native `load` is doing while it runs,
   so a wait screen can show real progress instead of measuring the download folder: `fetch`
   (bytes on disk against the identity's exact size, about 8 a second; a resumed download starts
@@ -43,7 +62,13 @@
   Dart → native `cancel {code}`), and the native side sends the next event only after Dart has
   answered the last, so an app without a listener gets no warnings about discarded channel
   messages. On iOS and macOS `load` opens a local path and downloads nothing (the download helpers
-  report their own `onProgress`), so no events arrive there and `cancelLoad` returns false.
+  report their own `onProgress`), so no events arrive there and `cancelLoad` returns false (it also
+  returns false, rather than throwing, when the native side answers with an error).
+* Tests: `EngineUsersTest` (Android, plain JVM: `scripts/test_android_unit.sh <app dir>`) covers
+  dispose mid idle decode, before any thread ran, twice, with a held player winding down, and a thread
+  stuck inside the engine, with a negative control for the old order. The headless voice test now
+  expects the host's own echo-profile gain (it failed on every macOS host), and `flutter analyze`
+  reports no issues.
 
 ## 2.6.22 — 2026-09-28 — security fix: restrict internal symbols in the macOS engine core
 
