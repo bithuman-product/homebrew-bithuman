@@ -16,8 +16,8 @@
 // Presentation: AvatarPlayer — the audited one-unit A/V player from the Android chat
 // example (a frame and its 50 ms of sound are ONE object, admitted whole, presented
 // against the device's own sample counter; idle is the same machinery) — adopted as a
-// file, not re-implemented. The plugin's only contribution is a SurfaceTexture sink for
-// its frames and the channel glue around it.
+// file, not re-implemented. The plugin's only contribution is a texture sink for its
+// frames (a Flutter SurfaceProducer) and the channel glue around it.
 //
 // Audio: the realtime session (Dart, WebSocket) hands the agent's 24 kHz PCM16 in via
 // playSpeakerPCM and takes the microphone's 24 kHz PCM16 out over the mic EventChannel;
@@ -38,7 +38,6 @@ import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.view.Surface
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -77,8 +76,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     private inner class AvatarSession(
         val code: String,
         val avatar: AvatarEngine,
-        val entry: TextureRegistry.SurfaceTextureEntry,
-        val surface: Surface,
+        val entry: TextureRegistry.SurfaceProducer,
     ) {
         val ready = AtomicBoolean(false)
         val stopped = AtomicBoolean(false)
@@ -106,6 +104,11 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
          */
         fun draw(bmp: Bitmap) {
             if (stopped.get()) return
+            // The producer's CURRENT surface, every frame: Flutter replaces it when it lets go
+            // of its buffers (Impeller does that when the app is backgrounded or memory is
+            // trimmed, and makes a new one on return), so a Surface kept from load could be dead.
+            val surface = entry.surface
+            if (!surface.isValid) return
             val canvas = try { if (hwCanvas) surface.lockHardwareCanvas() else surface.lockCanvas(null) } catch (e: Exception) {
                 if (!stopped.get()) Log.w(TAG, "lock${if (hwCanvas) "Hardware" else ""}Canvas: ${e.message}"); return
             }
@@ -233,7 +236,15 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         }
         // Texture registration must happen on the platform thread; the fetch and the
         // engine warm-up must not (a first run downloads ~158 MB).
-        val entry = textureRegistry.createSurfaceTexture()
+        // ★ A SurfaceProducer, not a SurfaceTexture (2.6.24). Under Impeller (Vulkan, the
+        // default on Android 10+) a SurfaceTexture reaches the raster thread through a GLES
+        // interop — Flutter logs "migrate … to the new surface producer API" — and every
+        // avatar frame paid for it there: 10.4 ms p50 of raster per frame on a Galaxy Z Flip5
+        // (idle, 120 Hz: 90% of frames over the 8.3 ms budget), where the placeholder video
+        // beside it (video_player, already a producer) costs 2.5 ms. The producer is an
+        // ImageReader whose buffers Impeller imports as they are. The draw is unchanged: the
+        // same canvas blit (a hardware canvas for zero-copy hardware-buffer frames), into its surface.
+        val entry = textureRegistry.createSurfaceProducer()
         val handle = loadEvents.begin(code)
         val t0 = handle.t0
         Thread({
@@ -244,8 +255,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     runCatching { avatar.close() }
                     handle.throwIfCancelled()
                 }
-                entry.surfaceTexture().setDefaultBufferSize(avatar.width, avatar.height)
-                val s = AvatarSession(code, avatar, entry, Surface(entry.surfaceTexture()))
+                entry.setSize(avatar.width, avatar.height)
+                val s = AvatarSession(code, avatar, entry)
                 val p = newPlayer(s)
                 s.player = p
                 main.post {
@@ -397,7 +408,6 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             } finally {
                 // Dart hears back whatever happened above: its dispose() never hangs.
                 main.post {
-                    runCatching { s.surface.release() }
                     runCatching { s.entry.release() }
                     done?.invoke()
                 }
