@@ -113,6 +113,9 @@ class BithumanAvatar implements VoiceHost {
     int chunk = 16,
   }) async {
     _installNativeCallbacks();
+    // The agent dir set just before (setExpression2AgentDir) is in place first.
+    final pendingDir = _agentDirPending;
+    if (pendingDir != null) await pendingDir;
     final id = await _channel.invokeMethod<int>('load', {
       'path': imxPath,
       if (apiSecret != null && apiSecret.isNotEmpty) 'apiSecret': apiSecret,
@@ -538,9 +541,17 @@ class BithumanAvatar implements VoiceHost {
   /// default (A42). MUST be called BEFORE [load] (engine: expression2 (alias: embody)) — the next
   /// load warms the runtime from this dir; the shared w2v/taehv graphs always
   /// come from the app bundle. Static channel call (no live texture needed).
-  static Future<void> setExpression2AgentDir(String? dir) async {
-    await _channel.invokeMethod('setExpression2AgentDir', {'dir': dir ?? ''});
+  ///
+  /// The native side resolves the dir OFF the platform thread (a packed container is
+  /// expanded there, once), so [load] waits for the last call made here before it
+  /// loads: a caller that does not await this still gets the identity it named.
+  static Future<void> setExpression2AgentDir(String? dir) {
+    final f = _channel.invokeMethod<void>('setExpression2AgentDir', {'dir': dir ?? ''});
+    _agentDirPending = f.catchError((Object _) {}); // load() waits; the caller sees the error
+    return f;
   }
+
+  static Future<void>? _agentDirPending;
 
   /// Current microphone authorization: `authorized` | `notDetermined` | `denied`.
   /// Drives the main-screen status chip (yellow when not yet `authorized`).
