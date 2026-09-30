@@ -145,15 +145,16 @@ class BithumanAvatar implements VoiceHost {
   Timer? _readyPoll;
   int _readyPolls = 0;
 
-  /// 40 ms for the first ~3 s after load, then 250 ms. A fixed 500 ms step added
+  /// 40 ms for the first ~3 s after load, then 250 ms, then 1 s. A fixed 500 ms step added
   /// 0-500 ms to every character's reveal for nothing: on Android `isReady` means
   /// the first frame is on the texture, typically ~0.1 s after `load` returns —
   /// measured 2026-09-30 on a Galaxy Z Flip5, a cached open turned ready 514 ms
   /// after load of which ~400 ms was waiting for the next poll; Apple's warm-up
   /// ends at an arbitrary point too (1.6-2.0 s warm, ~10 s on a first compile).
-  /// A poll is one small method-channel call: ~75 of them over 3 s, then 4/s.
+  /// A poll is one small method-channel call: ~75 of them over 3 s, then 4/s, and
+  /// once a second after ~10 s (a held or never-ready engine is not polled fast forever).
   Duration get _readyPollDelay =>
-      Duration(milliseconds: _readyPolls < 75 ? 40 : 250);
+      Duration(milliseconds: _readyPolls < 75 ? 40 : _readyPolls < 103 ? 250 : 1000);
 
   /// True once the engine's speech path is live. Essence: immediately after
   /// [load]. Essence2: after the deferred actor/director warm-up finishes —
