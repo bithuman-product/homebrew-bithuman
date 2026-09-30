@@ -57,6 +57,12 @@ import java.util.concurrent.LinkedBlockingQueue
 class AvatarPlayer(
     private val avatar: AvatarEngine,
     /**
+     * The player's threads (feeder, producer, writer), from the [EngineUsers] of [avatar]:
+     * whoever closes the engine first stops them and waits until each has returned, so no
+     * thread of this player is inside the engine when it closes (see EngineUsers.kt).
+     */
+    private val workers: Workers,
+    /**
      * ★ Whether the HOST APP is a debuggable build (`ApplicationInfo.FLAG_DEBUGGABLE`).
      * Every dev lever below is gated on this, so a release APK on a customer's phone
      * cannot be steered by a system property. On 2026-09-15 a measurement script set
@@ -109,7 +115,8 @@ class AvatarPlayer(
     private val inbox = LinkedBlockingQueue<Any>()
     private val toWrite = ArrayBlockingQueue<AvUnit>(LEAD)     // producer -> writer
     private val toPresent = ArrayBlockingQueue<AvUnit>(PRESENT_QUEUE)  // writer -> presenter
-    @Volatile private var running = true
+    /** False from [stop] on: every loop below returns at its next test of it. */
+    private val running: Boolean get() = workers.running
     @Volatile private var epoch = 0
 
     /** The identity's idle clip, the SDK's own cursor over it. Null if the model has none. */
@@ -280,12 +287,28 @@ class AvatarPlayer(
         Log.i("bhav", "track: sampleRate=$got (asked $RATE) bufferFrames=$bufFrames " +
             "= ${"%.0f".format(bufFrames * 1000.0 / maxOf(got, 1))} ms")
         track.play()
-        Thread(::feed, "bh-feed").start()
-        Thread(::produce, "bh-produce").start()
-        Thread(::write, "bh-write").start()
+        started = true
+        workers.spawn("bh-feed", ::feed)
+        workers.spawn("bh-produce", ::produce)
+        // The writer releases the track when it returns ([write]). Stopped before it could
+        // start (the engine is already being closed): no writer, so release it here.
+        if (workers.spawn("bh-write", ::write) == null) releaseTrack()
         // The presenter is the display's own clock: one callback per vsync on the main
         // looper, which is also where the bitmap is drawn. No thread, no polling loop.
         Handler(Looper.getMainLooper()).post { Choreographer.getInstance().postFrameCallback(vsync) }
+    }
+
+    private val trackReleased = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** [start] ran (platform thread, as [stop]). */
+    private var started = false
+    /** The writer returned while the player was still running (an exception): [stop] releases the track. */
+    @Volatile private var writerGone = false
+
+    /** Once: the device track goes back to the platform. Only when no thread can write to it any more. */
+    private fun releaseTrack() {
+        if (!trackReleased.compareAndSet(false, true)) return
+        runCatching { track.stop() }
+        runCatching { track.release() }
     }
 
     /** One chunk of the agent's voice: PCM16 mono little-endian @ 24 kHz. */
@@ -335,13 +358,24 @@ class AvatarPlayer(
     /** The agent finished a sentence — let the engine render the padded tail. */
     fun endOfReply() { inbox.offer(Tail) }
 
+    /**
+     * Stops the player: silent at once, its threads return at their next check. Does NOT wait
+     * for them and does not release the track under the writer — ★until 2.6.23 it released
+     * the track here, and a writer between two writes then read the released track's
+     * `playbackHeadPosition`, which THROWS (IllegalStateException on bh-write, the app died).
+     * The writer releases the track when it returns; whoever closes the engine waits for all
+     * three threads first ([EngineUsers.close]).
+     */
     fun stop() {
-        running = false
+        workers.stop()
         inbox.offer(Reset)
         toWrite.clear()
         toPresent.clear()
-        runCatching { track.stop() }
-        runCatching { track.release() }
+        // Silent now: pause + flush drops what the device holds, and frees a blocking write
+        // in the writer (the same two calls a barge-in makes on a live writer).
+        runCatching { track.pause() }
+        runCatching { track.flush() }
+        if (!started || writerGone) releaseTrack()   // no writer left to release it
     }
 
     private var rateT0 = 0L
@@ -793,6 +827,19 @@ class AvatarPlayer(
     @Volatile private var nGrow = 0
 
     private fun write() {
+        // The writer is the one thread that writes to the track, so it is the one that lets it
+        // go when it returns after [stop]. Returning while the player still runs (an exception,
+        // logged by Workers) it leaves the track alone — the presenter reads its position on the
+        // UI thread until [stop] — and [stop] releases it.
+        try { writeLoop() } finally {
+            writerGone = true
+            // Volatile write, then read; stop() writes `running`, then reads [writerGone]: at
+            // least one side sees the other and releases (releaseTrack runs once).
+            if (!running) releaseTrack()
+        }
+    }
+
+    private fun writeLoop() {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
         while (running) {
             var u = toWrite.poll()

@@ -53,6 +53,8 @@ import io.flutter.view.TextureRegistry
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "BithumanAvatar"
+/** How long a fresh player (setIdleHold(false)) waits for the held player's threads to return. */
+private const val RESUME_WAIT_MS = 2_000L
 private const val MIC_PERMISSION_REQUEST = 0xB17
 
 class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
@@ -80,7 +82,16 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     ) {
         val ready = AtomicBoolean(false)
         val stopped = AtomicBoolean(false)
+        /**
+         * Every thread that runs on [avatar] (each player's feeder, producer and writer), and the
+         * one way to close it: stop them, wait until each has returned, then close (EngineUsers.kt).
+         */
+        val users = EngineUsers(avatar) { Log.w(TAG, it) }
         var player: AvatarPlayer? = null
+        /** setIdleHold's last word (platform thread): true = the app is off screen, no player. */
+        var held = false
+        /** A fresh player is waiting for the held one's threads to return (platform thread). */
+        var resuming = false
         var mic: MicCapture? = null
         var micSink: EventChannel.EventSink? = null
         var micChannel: EventChannel? = null
@@ -177,15 +188,11 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             "setIdleHold" -> {
                 val s = session(call) ?: return result.error("no_session", "unknown textureId", null)
                 val hold = call.argument<Boolean>("hold") ?: false
+                s.held = hold
                 if (hold) {
+                    if (s.player != null) Log.i(TAG, "held: player stopped (app off screen)")
                     s.player?.stop(); s.player = null
-                    Log.i(TAG, "held: player stopped (app off screen)")
-                } else if (s.player == null && !s.stopped.get()) {
-                    val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-                    val p = AvatarPlayer(s.avatar, debuggable = debuggable, capturable = false) { bmp -> s.draw(bmp) }
-                    s.player = p; p.start()
-                    Log.i(TAG, "released: fresh player started")
-                }
+                } else resume(s)
                 result.success(null)
             }
 
@@ -200,7 +207,12 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             "unpackModelContainer" -> result.error("unsupported",
                 "Android loads an identity by code (BithumanAvatar.load); a container file is not expanded on this platform", null)
 
-            "dispose" -> { call.argument<Number>("textureId")?.let { destroy(it.toLong()) }; result.success(null) }
+            "dispose" -> {
+                // Answered once the engine is closed (its threads first, then the engine, off the
+                // platform thread): the app may load the next engine the moment this returns.
+                val id = call.argument<Number>("textureId")?.toLong()
+                if (id == null) result.success(null) else destroy(id) { result.success(null) }
+            }
             else -> result.notImplemented()
         }
     }
@@ -234,8 +246,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 }
                 entry.surfaceTexture().setDefaultBufferSize(avatar.width, avatar.height)
                 val s = AvatarSession(code, avatar, entry, Surface(entry.surfaceTexture()))
-                val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-                val p = AvatarPlayer(avatar, debuggable = debuggable, capturable = false) { bmp -> s.draw(bmp) }
+                val p = newPlayer(s)
                 s.player = p
                 main.post {
                     sessions[entry.id()] = s
@@ -317,14 +328,81 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         return e
     }
 
-    private fun destroy(id: Long) {
-        val s = sessions.remove(id) ?: return
+    /** A player on [s]'s engine; its threads are registered with [AvatarSession.users]. */
+    private fun newPlayer(s: AvatarSession): AvatarPlayer {
+        val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        val workers = s.users.newWorkers { name, e -> Log.e(TAG, "$name stopped on an exception: $e", e) }
+        return AvatarPlayer(s.avatar, workers, debuggable = debuggable, capturable = false) { bmp -> s.draw(bmp) }
+    }
+
+    /**
+     * setIdleHold(false): a fresh player on the same engine — ★but only once the held player's
+     * threads have returned, so two producers never pull from one engine (until 2.6.23 the new
+     * player started at once, beside an old producer that could still be decoding an idle frame).
+     * The wait is off the platform thread; the player starts on it.
+     */
+    private fun resume(s: AvatarSession) {
+        if (s.player != null || s.resuming || s.stopped.get()) return
+        // The usual case: the app was off screen for a while and the held player's threads are
+        // long gone — start now, so audio sent right after this call has a player to land in.
+        if (s.users.awaitStopped(0)) return startPlayer(s)
+        s.resuming = true
+        Thread({
+            val t0 = System.nanoTime()
+            var quiet = false
+            while (!quiet && !s.stopped.get() && (System.nanoTime() - t0) / 1_000_000 < EngineUsers.GIVE_UP_MS) {
+                quiet = s.users.awaitStopped(RESUME_WAIT_MS)
+                if (!quiet) Log.w(TAG, "released: a held player's thread is still running; the fresh player waits")
+            }
+            main.post {
+                s.resuming = false
+                if (s.stopped.get() || s.held || s.player != null || s.users.isClosing) return@post
+                // Never a second producer beside one that did not return: the picture stays on its
+                // last frame (logged) rather than two players pulling from one engine.
+                if (!quiet) { Log.e(TAG, "released: the held player never returned; no fresh player"); return@post }
+                startPlayer(s)
+            }
+        }, "bh-resume").start()
+    }
+
+    /** Platform thread. */
+    private fun startPlayer(s: AvatarSession) {
+        val p = newPlayer(s)
+        s.player = p; p.start()
+        Log.i(TAG, "released: fresh player started")
+    }
+
+    /**
+     * dispose: safe at ANY moment — mid idle decode, mid feed, straight after load, while a held
+     * player winds down, twice. The platform thread only detaches (map, mic, player flag); a
+     * background thread then waits until every player thread has returned and closes the engine
+     * (EngineUsers.close), and [done] runs on the platform thread once it is closed.
+     * ★Until 2.6.23 the engine was closed right here, under a producer that could be decoding an
+     * idle frame: IllegalStateException on bh-produce, and the app died (bitHuman Live, 09-29).
+     */
+    private fun destroy(id: Long, done: (() -> Unit)? = null) {
+        val s = sessions.remove(id) ?: run { done?.invoke(); return }
         s.stopped.set(true)
         stopMic(s)
-        runCatching { s.player?.stop() }
-        runCatching { s.avatar.close() }
-        runCatching { s.surface.release() }
-        runCatching { s.entry.release() }
+        s.player?.let { runCatching { it.stop() } }
+        s.player = null
+        Thread({
+            val t0 = System.nanoTime()
+            try {
+                val closed = s.users.close()
+                Log.i(TAG, "disposed ${s.code}: its threads returned, then the engine " +
+                    "${if (closed) "closed" else "was LEFT OPEN"} (${(System.nanoTime() - t0) / 1_000_000} ms in all, off the UI thread)")
+            } catch (e: Throwable) {
+                Log.e(TAG, "dispose of ${s.code}: $e", e)
+            } finally {
+                // Dart hears back whatever happened above: its dispose() never hangs.
+                main.post {
+                    runCatching { s.surface.release() }
+                    runCatching { s.entry.release() }
+                    done?.invoke()
+                }
+            }
+        }, "bh-dispose").start()
     }
 
     // ---------------------------------------------------------------- microphone
