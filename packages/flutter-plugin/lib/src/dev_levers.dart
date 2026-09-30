@@ -41,6 +41,11 @@ class DevLevers {
   static const String micFile =
       enabled ? String.fromEnvironment('BH_MIC_FILE') : '';
 
+  /// Echo-onset guard A/B (`BithumanRealtimeSession.echoOnsetGuard`): milliseconds of
+  /// agent audio the guard covers; 0 turns it off. -1 (unset) = the session's own value.
+  static const int echoGuardMs =
+      enabled ? int.fromEnvironment('BH_ECHO_GUARD_MS', defaultValue: -1) : -1;
+
   /// Dial a mock realtime server instead of OpenAI (integration tests).
   static const String wsUrl =
       enabled ? String.fromEnvironment('BITHUMAN_REALTIME_WS_URL') : '';
