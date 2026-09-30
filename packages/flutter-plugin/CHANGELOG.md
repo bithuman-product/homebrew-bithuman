@@ -1,3 +1,15 @@
+## 2.6.24 — 2026-09-30 — security: the Apple engines take the metering fix
+
+Tag `flutter-plugin-v2.6.24`. Engines: iOS/macOS Expression 2 `v2.19.2`, Essence 2
+`essence2-v1.15.1`, macOS `enginecore-v1.0.1` (unchanged); Android `essence2-android` 0.8.1,
+`expression2-android` 0.5.2 (unchanged).
+
+* **Security (iOS, macOS).** The on-device meter in a release build ignores its tuning settings,
+  so usage is always billed as the service defines it. Update to this version.
+* **A lost credential check no longer refuses the session (iOS, macOS).** When the startup check
+  gets no answer, a 5xx or a 429, the engine asks once more after 250 ms. A 2xx or a rejection is
+  never repeated.
+
 ## 2.6.23 — 2026-09-30 — dispose is safe at any moment; no Mac freeze at hang-up; echo-onset guard; Android load progress and cancel
 
 Tag `flutter-plugin-v2.6.23`. Engines unchanged: iOS/macOS Expression 2 `v2.19.0`, Essence 2

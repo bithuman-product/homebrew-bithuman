@@ -29,7 +29,7 @@ Real-time, lip-synced avatars rendered on iPhone, iPad and Mac: Essence 2 (a pho
 Expression 2 (any character). Pass in 16 kHz speech from any voice stack; draw the frames.
 
 ```swift
-.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "2.19.1")
+.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "2.19.2")
 ```
 
 The current version of every package is on [docs.bithuman.ai/versions.json](https://docs.bithuman.ai/versions.json).
