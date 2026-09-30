@@ -238,13 +238,15 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
                             details: nil))
         return
       }
+      // The audio unit first: once it is stopped nothing of it feeds or queries the engine,
+      // then the texture lets the engine go (AvatarTexture.shutdown — safe at any moment).
+      audioIOs[textureId]?.stop()
+      audioIOs.removeValue(forKey: textureId)
+      micChannels.removeValue(forKey: textureId)
       if let tex = textures.removeValue(forKey: textureId) {
         tex.shutdown()
         registrarTextures?.unregisterTexture(textureId)
       }
-      audioIOs[textureId]?.stop()
-      audioIOs.removeValue(forKey: textureId)
-      micChannels.removeValue(forKey: textureId)
       result(nil)
 
     case "engineVersion":
@@ -1104,10 +1106,31 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
       webrtcLipsyncRenderer = nil
     }
     #endif
-    timer?.cancel()
-    timer = nil
-    renderQueue.async { [weak self] in self?.releaseNativeResources() }
+    // ★DISPOSE IS SAFE AT ANY MOMENT (2.6.23). The engine is used from two places: the
+    // ticks on renderQueue (feed, pull, and the idle decoder's next frame) and, for
+    // Expression 2, the warm-up thread (CoreML compile + the idle clip's decoder, seconds
+    // long). The engine is let go only after both are done with it:
+    //   1. on renderQueue, so a tick that is running has returned; both clocks are cancelled
+    //      there (startTimer also runs there, so a timer can no longer start after a dispose);
+    //   2. then once the warm-up thread has returned (warmGroup), then release.
+    // ★`self` is held STRONGLY until the release has run. The block used to capture it weakly;
+    // with the texture unregistered and removed from the map nothing else may hold it, and a
+    // freed texture skipped releaseNativeResources entirely — the engine's shutdown (Essence 2's
+    // be_essence2_destroy, the session meter's last beat) never ran.
+    renderQueue.async {
+      self.timer?.cancel()
+      self.timer = nil
+      #if os(macOS) || os(iOS)
+      self.embodyDisplayTimer?.cancel()
+      self.embodyDisplayTimer = nil
+      #endif
+      self.warmGroup.notify(queue: self.renderQueue) { self.releaseNativeResources() }
+    }
   }
+
+  /// Entered while the warm-up thread (setupBufferedDisplayClock) is inside the engine;
+  /// shutdown() releases the engine only after it has left.
+  private let warmGroup = DispatchGroup()
 
   private let renderQueue = DispatchQueue(label: "ai.bithuman.avatar.render",
                                           qos: .userInteractive)
@@ -1410,9 +1433,15 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     embodyDisplayTimer = disp
     NSLog("[embody] load %dx%d — warming 4 CoreML graphs in background", frameW, frameH)
     let warmSpeech = loadWarmSpeech()
-    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+    warmGroup.enter()
+    DispatchQueue.global(qos: .userInitiated).async { [weak self, warmGroup] in
       rt.warmUp(warmSpeech: warmSpeech)
-      guard let self = self, let idle = rt.idle else {
+      let idleFrame = rt.idle
+      // Out of the engine: a dispose that came during the warm-up releases it now (shutdown()).
+      // Nothing below touches the engine except the dev levers.
+      warmGroup.leave()
+      guard let self = self, !self.isShutdown else { return }   // disposed while warming
+      guard let idle = idleFrame else {
         NSLog("[embody] warmUp produced no idle frame"); return
       }
       self.renderQueue.async {
@@ -2001,8 +2030,11 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
   private func releaseNativeResources() {
     #if os(macOS) || os(iOS)
     embodyDisplayTimer?.cancel(); embodyDisplayTimer = nil
-    avatar?.shutdown()   // no-op for embody; stopJoin for essence2 (drains MLX/ANE → no exit-race crash)
+    let t0 = CACurrentMediaTime()
+    avatar?.shutdown()   // Expression 2: the meter's last beat; Essence 2: be_essence2_destroy + quiesce
     avatar = nil   // pure-Swift; ARC frees models/procQ
+    NSLog("[BithumanAvatar] engine released (%.0f ms) — no tick or warm-up thread was inside it",
+          (CACurrentMediaTime() - t0) * 1000)
     #endif
     pixelBufferLock.lock()
     latestPixelBuffer = nil

@@ -35,6 +35,7 @@ MANUAL=(
   "dev-levers-release-arm   [macOS host] python3 ci/wf-step.py ci/github-workflows-disabled/plugin-platform-guards.yml dev-levers-release-arm   (./scripts/prove_dev_levers_release.sh + control)"
   "voice-render-edge        [macOS host] python3 ci/wf-step.py ci/github-workflows-disabled/plugin-platform-guards.yml voice-render-edge   (check_voice_render_edge.sh, prove_lipsync_sink_headless.sh + controls)"
   "swift-package            [macOS 26 + Xcode] swift build --disable-keychain && swift test --disable-keychain   (swift-package.yml)"
+  "flutter-plugin-android-unit [Android SDK + a Flutter app that depends on the plugin] packages/flutter-plugin/scripts/test_android_unit.sh <app dir>   (JVM unit tests: EngineUsersTest)"
   "latest-badge --heal      [WRITES the live /releases/latest flag] python3 tools/verify_latest_badge.py --heal   (latest-badge.yml; run only after a release)"
   "preflight                [secret BITHUMAN_MODELS_SSH_KEY] probe the models deploy key: see preflight.yml"
   "release-pypi             [RELEASE; macOS+Linux x86_64+aarch64 hosts, docker, secrets BITHUMAN_MODELS_SSH_KEY PYPI_API_TOKEN] recipe: ci/github-workflows-disabled/release-pypi.yml; RELEASE.md"
