@@ -1,3 +1,29 @@
+## Unreleased — realtime session: speech-ready wait, echo-onset guard, an honest barge log; macOS hang-up freeze
+
+* **No greeting over a still face.** `BithumanRealtimeSession(speechReady: avatar.ready)` holds the dial
+  (and so the connect greeting) until the engine's speech path is live (max 60 s, logged as
+  `[bhready]`). Measured 2026-09-28 on an iPhone 15: the greeting's first delta landed 12:22:40.6 and
+  the Expression 2 warm-up finished 12:22:46.3 — ~6 s of greeting with no lip-sync. Optional; apps
+  that already await `avatar.ready` before `start()` are unchanged.
+* **Echo-onset guard.** For the first `echoOnsetGuard` (default 8 s) of agent audio in a session, mic
+  chunks captured while the agent is audible and whose peak is below −18 dBFS go up as digital silence
+  (the uplink stays continuous). The iPhone 15 loudspeaker run of 2026-09-28 had two false
+  `speech_started` barge-ins in the first reply, on canceller-onset residuals of −28 / −23 / −27 dBFS
+  peak; a person talking to the phone is far above the floor and still cuts the agent.
+  `Duration.zero` disables it; dev A/B lever `--dart-define=BH_ECHO_GUARD_MS=<ms>` (not in release).
+  Logged as `[bhecho]`.
+* **`vadThreshold` is optional and documented as LOCAL-mode only.** The relay/OpenAI session's barge
+  is server VAD; the constructor's required `vadThreshold` never reached anything, and the native line
+  `[bhduplex] GATE off (vad_threshold=0) — this session cannot be interrupted by the microphone` read
+  as "barge-in is broken" to an app passing `vadThreshold: 1500`. The native line now says the local
+  gate is off and the barge is the transport's, and the session logs
+  `[bhduplex] transport barge=server_vad threshold=… interrupt_response=1`.
+* **macOS: hang-up / character switch no longer freezes a speaker-only session.** `RealtimeAudioIO.stop()`
+  removed the mic tap unconditionally; on an engine that never had an input, `engine.inputNode`
+  instantiates one and binds the input device synchronously on the platform (= UI) thread, which never
+  returned (sampled on an M4 iMac: `AVAudioIOUnit_OSX::EnableInputDevice` →
+  `HALC_ShellDevice::CreateIOProcID`). Now guarded on `micActive`, as the iOS branch already was.
+
 ## 2.6.22 — 2026-09-28 — security fix: restrict internal symbols in the macOS engine core
 
 Tag `flutter-plugin-v2.6.22`.

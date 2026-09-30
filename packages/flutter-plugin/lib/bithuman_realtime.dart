@@ -53,7 +53,9 @@ class BithumanRealtimeSession {
     this.model = 'gpt-realtime',
     this.systemPrompt = '',
     this.voice = 'alloy',
-    required this.vadThreshold,
+    this.vadThreshold = 0,
+    this.speechReady,
+    this.echoOnsetGuard = const Duration(seconds: 8),
   }) {
     _liveSystemPrompt = systemPrompt;
   }
@@ -80,7 +82,47 @@ class BithumanRealtimeSession {
   final String model;
   final String systemPrompt;
   final String voice;
+
+  /// ★LOCAL-MODE KNOB ONLY — IGNORED BY THIS SESSION. The relay/OpenAI session's
+  /// barge is the SERVER's VAD (`server_vad`, `interrupt_response: true`, threshold
+  /// from [EchoProfile]); the native energy gate stays off here by ruling (see the
+  /// comment in [start]). Until 2.6.21 this was a REQUIRED parameter that did
+  /// nothing, so an app passing `vadThreshold: 1500` read the native line
+  /// `[bhduplex] GATE off (vad_threshold=0)` and concluded the session could not be
+  /// interrupted — it could, by the server. Kept (optional) for source compatibility;
+  /// [start] now logs what the barge actually is.
   final int vadThreshold;
+
+  /// Completes when the avatar can move its mouth (pass `avatar.ready`). When set,
+  /// [start] waits for it (max 60 s) BEFORE dialling, so the connect greeting is
+  /// never spoken over the idle loop while the engine is still warming. Measured
+  /// 2026-09-28 on an iPhone 15: first greeting delta 12:22:40.6, engine warm-up
+  /// done 12:22:46.3 — ~6 s of greeting with no lip-sync.
+  final Future<void>? speechReady;
+
+  /// ★ECHO-ONSET GUARD. For the first [echoOnsetGuard] of agent audio in a session
+  /// (the echo canceller has not converged yet — it has never heard the far end),
+  /// mic chunks captured WHILE THE AGENT IS AUDIBLE whose peak is below
+  /// [_guardPeakFloor] (-18 dBFS) are sent as digital silence. A person talking to
+  /// the phone is far above that floor, so a real barge still goes through; the
+  /// canceller's onset residual (measured 2026-09-28, iPhone 15 loudspeaker: -28 /
+  /// -23 / -27 dBFS peaks, two false `speech_started` in the first reply) does not.
+  /// `Duration.zero` disables it.
+  final Duration echoOnsetGuard;
+  static const int _guardPeakFloor = 4096; // ≈ -18 dBFS
+  static const Duration _guardTail = Duration(milliseconds: 1500);
+  int _agentAudioMs = 0;   // agent audio handed to the plugin this session
+  int _guardedChunks = 0;
+  int get _echoGuardMs =>
+      DevLevers.echoGuardMs >= 0 ? DevLevers.echoGuardMs : echoOnsetGuard.inMilliseconds;
+  bool get _echoGuardActive {
+    final guardMs = _echoGuardMs;
+    if (guardMs == 0) return false;
+    if (_agentAudioMs == 0 || _agentAudioMs > guardMs + 4000) return false;
+    // The presenter releases audio with the lip frames, ~1 s after the delta
+    // arrived, so the agent is audible until a tail past the arrival estimate.
+    return _audibleUntil.add(_guardTail).isAfter(DateTime.now());
+  }
 
   /// TEST HOOK (e2e harness): when non-null, the session dials this WebSocket
   /// URL instead of the production OpenAI endpoint — lets the hermetic mock
@@ -410,8 +452,19 @@ class BithumanRealtimeSession {
       //
       // So: server_vad stays the cloud barge. The vad_threshold knob drives LOCAL mode
       // only, where there is no server VAD and the duplex gate is the only trigger.
+      if (speechReady != null) {
+        final t0 = DateTime.now();
+        await speechReady!.timeout(const Duration(seconds: 60), onTimeout: () {});
+        _log('[bhready] avatar speech path ready after '
+            '${DateTime.now().difference(t0).inMilliseconds} ms — dialling now');
+        if (!_open) return;
+      }
       await avatar.audioStart(
           vadThreshold: 0, enableMic: enableMic, vpioAgc: EchoProfile.current.vpioAgc);
+      _log('[bhduplex] transport barge=server_vad threshold=${EchoProfile.current.serverVadThreshold} '
+          'interrupt_response=1 (the native local gate is off on this path by design; '
+          'vadThreshold=$vadThreshold applies to LOCAL mode only) '
+          'echoOnsetGuardMs=$_echoGuardMs');
       if (enableMic) {
         _micSub = avatar.micStream.listen(_sendMicBytes);
       }
@@ -690,6 +743,14 @@ class BithumanRealtimeSession {
     }
     _micLevel.add(peak / 32768.0);
     _micDbgN++;
+    if (peak < _guardPeakFloor && _echoGuardActive) {
+      // Echo-onset guard: keep the uplink continuous, but silent.
+      pcm = Uint8List(pcm.length);
+      if (_guardedChunks++ % 10 == 0) {
+        _log('[bhecho] onset guard: chunk silenced peak=$peak agentAudioMs=$_agentAudioMs '
+            'guarded=$_guardedChunks');
+      }
+    }
     if (muted) {
       if (_micDbgN % 10 == 0) print('[mic-dbg] MUTED, not sending (peak=$peak)');
       return;
@@ -858,6 +919,7 @@ class BithumanRealtimeSession {
             microseconds: ((pcm24kBytes.length ~/ 2) * 1000000 / 24000).round());
         final now = DateTime.now();
         _audibleUntil = (_audibleUntil.isAfter(now) ? _audibleUntil : now).add(chunkDur);
+        _agentAudioMs += chunkDur.inMilliseconds;
         // No wait: hand the chunk to the plugin as it arrives. The engine bounds
         // the backlog; the presenter is clocked by the engine's frames.
         // Single call drives BOTH the speaker (VP-IO player node) AND

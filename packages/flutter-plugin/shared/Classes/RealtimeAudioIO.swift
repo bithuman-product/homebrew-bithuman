@@ -1161,8 +1161,9 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   /// defect: the fix is a line that says which one you have.
   private func logDuplexAttestation() {
     guard voicePeakThreshold > 0 else {
-      NSLog("[bhduplex] GATE off (vad_threshold=0) — this session cannot be interrupted "
-            + "by the microphone; its barge, if any, comes from the transport")
+      NSLog("[bhduplex] local GATE off (vad_threshold=0) — this native energy gate does "
+            + "not cut the agent; the microphone barge for this session is the transport's "
+            + "(the realtime session logs its own `[bhduplex] transport barge=` line)")
       return
     }
     NSLog("[bhduplex] GATE on thr=%d holdEchoGuard=%.2f holdSustainMs=%.0f guardMs=%.0f "
@@ -1263,7 +1264,14 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       defer { setGraphMutating(false) }
       // player.stop / removeTap / engine.stop can raise on a route flip mid-teardown; absorb (shutting down).
       _ = bh_tryRun { self.player.stop() }
-      _ = bh_tryRun { self.engine.inputNode.removeTap(onBus: 0) }   // unconditional / idempotent
+      // ★ONLY WHEN THE MIC WAS ON (2026-09-28). `engine.inputNode` is not a getter on
+      // macOS: on an engine that never had an input it INSTANTIATES one and binds the
+      // input device, synchronously, on this (the Flutter platform = UI) thread. In a
+      // speaker-only session (`enableMic: false`) that bind never returned — sampled on
+      // an M4 iMac: main thread parked in AVAudioIOUnit_OSX::EnableInputDevice ->
+      // HALC_ShellDevice::CreateIOProcID — so every hang-up / character switch froze
+      // the app. The iOS branch already guards on `micActive`.
+      if micActive { _ = bh_tryRun { self.engine.inputNode.removeTap(onBus: 0) } }
       micActive = false
       _ = bh_tryRun { self.engine.stop() }
       micConverter = nil
