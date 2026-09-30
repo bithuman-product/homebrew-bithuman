@@ -1234,17 +1234,26 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     #if os(iOS)
     // The call observer serves speaker-only sessions too (a phone call is "call" either way).
     if callObserver == nil { callObserver = CXCallObserver() }
-    // ★A call already holds the audio (it rings or runs): the session cannot have the speaker or
-    // the microphone (activation fails with insufficient priority). Say so as an interruption
-    // first — the realtime session ends quietly on it — then refuse the start.
-    if callObserver?.calls.contains(where: { !$0.hasEnded }) == true {
-      NSLog("[RealtimeAudioIO] a call holds the audio: not starting")
-      interruptionReason = "call"
-      onInterruption?(true, "call", false)
-      throw NSError(domain: "ai.bithuman.audio", code: -2,
-                    userInfo: [NSLocalizedDescriptionKey: "a phone call holds the audio"])
+    // ★A call already holding the audio (it rings or runs) refuses the session's activation
+    // (insufficient priority). That refusal decides, never the call list alone (a stale entry must
+    // not block every session); the list gives the label. The refusal is reported as the
+    // interruption it is — the realtime session ends quietly on it — and the start is refused.
+    let inCall = callObserver?.calls.contains(where: { !$0.hasEnded }) ?? false
+    do {
+      if mic {
+        try configureAudioSession()
+      } else if inCall {
+        try AVAudioSession.sharedInstance().setActive(true)   // a speaker-only session: probe it
+      }
+    } catch {
+      let refused = (error as NSError).code == AVAudioSession.ErrorCode.insufficientPriority.rawValue
+      if inCall || refused {
+        NSLog("[RealtimeAudioIO] the audio is held elsewhere (%@): not starting", inCall ? "call" : "priority")
+        interruptionReason = inCall ? "call" : "system"
+        onInterruption?(true, interruptionReason, false)
+      }
+      throw error
     }
-    if mic { try configureAudioSession() }
     #endif
     try configureGraphIfNeeded(mic: mic)
 

@@ -63,6 +63,8 @@ class MicCapture(
     private var aec: AcousticEchoCanceler? = null
     private var thread: Thread? = null
     private var modeBefore = AudioManager.MODE_NORMAL
+    /** This session's turn on the shared audio mode ([modeTurn] when it started). */
+    private var turn = 0
     /** API < 31: this session started the Bluetooth SCO link, so it stops it. */
     private var scoStarted = false
     /** API < 31: the SCO link was started and failed (or dropped): the call goes to the speaker. */
@@ -80,6 +82,7 @@ class MicCapture(
         // A previous session's stop may still be handing the mode back (off the UI thread): it
         // finishes first, so the two mode changes apply in order.
         awaitModeThread()
+        turn = modeTurn.incrementAndGet()
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         modeBefore = am.mode
         am.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -104,6 +107,7 @@ class MicCapture(
         deviceCallback = object : AudioDeviceCallback() {
             override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
                 added.forEach { refusedIds.remove(it.id) }   // a headset connected again gets another chance
+                if (added.any { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }) scoFailed = false
                 if (live) route(am, "device added")
             }
             override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) { if (live) route(am, "device removed") }
@@ -142,12 +146,17 @@ class MicCapture(
             val t0 = System.nanoTime()
             runCatching { r?.stop(); r?.release() }
             runCatching { a?.release() }
-            restoreMode(am)
+            restoreMode(am, owned = modeTurn.get() == turn)
             Log.i("bhmic", "CLOSED in ${(System.nanoTime() - t0) / 1_000_000} ms, off the UI thread (mode=${am.mode})")
         }
     }
 
-    private fun restoreMode(am: AudioManager) {
+    /**
+     * Let go of the mode and the route. [owned] false: a newer session has started since (its start
+     * gave up waiting for this one), so the mode, the communication device and the SCO link are its
+     * own now and are left alone; only this session's listeners go.
+     */
+    private fun restoreMode(am: AudioManager, owned: Boolean = true) {
         deviceCallback?.let { cb -> runCatching { am.unregisterAudioDeviceCallback(cb) } }
         deviceCallback = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -156,6 +165,7 @@ class MicCapture(
         commListener = null
         scoReceiver?.let { r -> runCatching { context.unregisterReceiver(r) } }
         scoReceiver = null
+        if (!owned) { Log.w(TAG, "a newer session owns the audio mode: this one leaves it alone"); return }
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 am.clearCommunicationDevice()
@@ -189,6 +199,8 @@ class MicCapture(
             val ok = am.setCommunicationDevice(dev)
             Log.i("bhroute", "[bhroute] at=$why selected=${dev.type}${if (ok) "" else " REFUSED"} was=${current?.type} " +
                 "available=${available.map { it.type }} personal=${AudioRules.isPersonal(dev.type)}")
+            // A headset the platform refused outright: route once more without it (the speaker last).
+            if (!ok && AudioRules.isPersonal(dev.type)) { refusedIds.add(dev.id); route(am, "$why, ${dev.type} refused") }
         } else {
             val outs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type }
             val r = AudioRules.legacyRoute(outs, scoFailed)
@@ -287,6 +299,8 @@ class MicCapture(
         private const val TAG = "BithumanAvatar"
         /** The recorder's release and every audio-mode hand-back, in order, off the UI thread. */
         private val MODE_THREAD: Handler by lazy { Handler(HandlerThread("bh-audio-mode").apply { start() }.looper) }
+        /** Bumped by every start(): a late stop of an older session does not touch the newer one's mode. */
+        private val modeTurn = java.util.concurrent.atomic.AtomicInteger()
 
         /** Wait (at most 2 s) until what is queued on [MODE_THREAD] has run. */
         private fun awaitModeThread() {
