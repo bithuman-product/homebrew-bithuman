@@ -16,8 +16,6 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.util.Log
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 /**
  * Microphone -> 24 kHz PCM16 chunks, continuous for the life of the session, on the
@@ -78,10 +76,15 @@ class MicCapture(
     private var commListener: Any? = null
 
     /** Blocks nothing; the capture runs on its own thread until [stop]. Returns false if the mic did not open. */
+    /**
+     * Opens the microphone. ★ON THE bh-audio-mode THREAD ONLY ([onModeThread]), never the UI thread
+     * (2.6.25): the audio mode, the route, the recorder and the device callbacks held the platform
+     * thread ~0.9 s at every dial on a Galaxy Z Flip5 (Choreographer: 104 frames skipped; the
+     * AudioManager port cache was busy re-reading the ports the mode change had moved). A previous
+     * session's stop queued on the same thread runs first, so mode changes stay in order.
+     */
     fun start(): Boolean {
-        // A previous session's stop may still be handing the mode back (off the UI thread): it
-        // finishes first, so the two mode changes apply in order.
-        awaitModeThread()
+        check(Looper.myLooper() == MODE_THREAD.looper) { "MicCapture.start runs on the bh-audio-mode thread" }
         turn = modeTurn.incrementAndGet()
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         modeBefore = am.mode
@@ -111,7 +114,7 @@ class MicCapture(
                 if (live) route(am, "device added")
             }
             override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) { if (live) route(am, "device removed") }
-        }.also { cb -> runCatching { am.registerAudioDeviceCallback(cb, Handler(Looper.getMainLooper())) } }
+        }.also { cb -> runCatching { am.registerAudioDeviceCallback(cb, MODE_THREAD) } }
         watchFallback(am)
         Log.i("bhmic", "OPEN source=VOICE_COMMUNICATION mode=${am.mode} device=${r.routedDevice?.type} " +
             "aec=${aec?.enabled} rateIn=$RATE_IN chunkMs=100 hostMs=${System.currentTimeMillis()}")
@@ -133,8 +136,8 @@ class MicCapture(
     /**
      * ★Off the UI thread (2.6.25): stopping the recorder and handing the audio mode back takes
      * ~0.5 s on a Galaxy Z Flip5 (the platform re-routes out of communication mode), and the app
-     * froze for it at every hang-up (58 frames skipped at 120 Hz). One serial thread runs it, and
-     * [start] waits for it, so mode changes stay in order.
+     * froze for it at every hang-up (58 frames skipped at 120 Hz). It runs on the bh-audio-mode
+     * thread, where [start] runs too, so mode changes stay in order.
      */
     fun stop() {
         live = false
@@ -153,7 +156,7 @@ class MicCapture(
 
     /**
      * Let go of the mode and the route. [owned] false: a newer session has started since (its start
-     * gave up waiting for this one), so the mode, the communication device and the SCO link are its
+     * was queued before this stop), so the mode, the communication device and the SCO link are its
      * own now and are left alone; only this session's listeners go.
      */
     private fun restoreMode(am: AudioManager, owned: Boolean = true) {
@@ -240,7 +243,7 @@ class MicCapture(
                     route(am, "fell back")
                 }
             }
-            if (runCatching { am.addOnCommunicationDeviceChangedListener(context.mainExecutor, l) }.isSuccess) commListener = l
+            if (runCatching { am.addOnCommunicationDeviceChangedListener({ MODE_THREAD.post(it) }, l) }.isSuccess) commListener = l
         } else {
             val r = object : BroadcastReceiver() {
                 override fun onReceive(c: Context, i: Intent) {
@@ -255,8 +258,8 @@ class MicCapture(
             }
             val f = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
             if (runCatching {
-                    if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED)
-                    else context.registerReceiver(r, f)
+                    if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(r, f, null, MODE_THREAD, Context.RECEIVER_NOT_EXPORTED)
+                    else context.registerReceiver(r, f, null, MODE_THREAD)
                 }.isSuccess) scoReceiver = r
         }
     }
@@ -302,12 +305,8 @@ class MicCapture(
         /** Bumped by every start(): a late stop of an older session does not touch the newer one's mode. */
         private val modeTurn = java.util.concurrent.atomic.AtomicInteger()
 
-        /** Wait (at most 2 s) until what is queued on [MODE_THREAD] has run. */
-        private fun awaitModeThread() {
-            val done = CountDownLatch(1)
-            MODE_THREAD.post { done.countDown() }
-            if (!done.await(2_000, TimeUnit.MILLISECONDS)) Log.w(TAG, "the previous session's audio mode was not handed back within 2 s")
-        }
+        /** Run [block] on the bh-audio-mode thread, after every stop queued before it. */
+        fun onModeThread(block: () -> Unit) { MODE_THREAD.post(block) }
         /** The device rate captured; decimated by two on the way out. */
         const val RATE_IN = 48_000
     }

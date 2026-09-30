@@ -480,7 +480,19 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 val chunk = buf.copyOf(n)
                 main.post { if (!s.stopped.get()) sink.success(chunk) }
             }
-            if (mic.start()) s.mic = mic else Log.w(TAG, "mic not started")
+            // Opened on the bh-audio-mode thread, never here: it held the platform thread ~0.9 s at
+            // every dial (MicCapture.start). The session adopts it back on the platform thread,
+            // unless it was stopped or restarted meanwhile (then the fresh mic is closed at once).
+            MicCapture.onModeThread {
+                val ok = mic.start()
+                main.post {
+                    if (!ok) { Log.w(TAG, "mic not started"); return@post }
+                    if (s.stopped.get() || s.micChannel !== ch || detached || s.interruptions?.isInterrupted == true) {
+                        mic.stop(); return@post
+                    }
+                    s.mic = mic
+                }
+            }
         }
         // Reply now so the session opens; the mic joins the moment the permission is answered.
         result.success(null)
