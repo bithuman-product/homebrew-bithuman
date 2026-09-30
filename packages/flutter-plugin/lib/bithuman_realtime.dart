@@ -761,6 +761,8 @@ class BithumanRealtimeSession {
       }
     }
     if (muted) {
+      // The uplink's one-line-a-second device log, read by the tools: print on purpose.
+      // ignore: avoid_print
       if (_micDbgN % 10 == 0) print('[mic-dbg] MUTED, not sending (peak=$peak)');
       return;
     }
@@ -772,6 +774,7 @@ class BithumanRealtimeSession {
     // One line a second in production (the packet count proves the uplink is
     // continuous: +10/s); every packet during a proof run.
     if (_devMicFile.isNotEmpty || _micDbgN % 10 == 0) {
+      // ignore: avoid_print
       print('[mic-dbg] sent #$_micDbgN to OpenAI, peak=$peak bytes=${pcm.length} hostMs=$hostMs');
     }
     if (injectedOnset) {

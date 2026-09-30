@@ -117,7 +117,7 @@ class BithumanAvatar implements VoiceHost {
       'path': imxPath,
       if (apiSecret != null && apiSecret.isNotEmpty) 'apiSecret': apiSecret,
       'engine': engine,
-      if (motionDir != null) 'motionDir': motionDir,
+      'motionDir': ?motionDir,
       'chunk': chunk,
     });
     if (id == null) throw const BithumanAvatarException('load returned null');
@@ -430,8 +430,8 @@ class BithumanAvatar implements VoiceHost {
     await _channel.invokeMethod('localAudioStart', {
       'textureId': textureId,
       'ggufPath': ggufPath,
-      if (supertonicAssets != null) 'supertonicAssets': supertonicAssets,
-      if (voice != null) 'voice': voice,
+      'supertonicAssets': ?supertonicAssets,
+      'voice': ?voice,
       'vadThreshold': vadThreshold,
       'systemPrompt': systemPrompt,
     });
