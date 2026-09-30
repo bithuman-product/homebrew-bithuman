@@ -2,7 +2,8 @@
 # bithuman CLI installer: downloads the newest CLI release for this machine, checks its sha256, and
 # installs it into ~/.local/bin (or $BITHUMAN_INSTALL_DIR).
 #   curl -fsSL https://install.bithuman.ai | sh
-# Environment: BITHUMAN_VERSION=cli-vX.Y.Z pins a release; BITHUMAN_INSTALL_DIR picks the directory.
+# Environment: BITHUMAN_VERSION=cli-vX.Y.Z pins a release; BITHUMAN_INSTALL_DIR picks the directory;
+# GITHUB_TOKEN (optional) spends your own GitHub API quota instead of this network's shared one.
 # Docs: https://docs.bithuman.ai/sdk/cli
 
 set -eu
@@ -32,8 +33,132 @@ need_cmd tar
 need_cmd uname
 need_cmd mktemp
 
+# ── GitHub fetches: retry a rate limit honestly ─────────────────────────────
+# Everything this script downloads comes from GitHub: api.github.com (60
+# anonymous requests per hour per SOURCE ADDRESS, shared by everyone behind a
+# NAT) and the release assets. A 429, or a 403 that says the quota is spent, is
+# "wait and retry", never "not published". Before 2026-09-30 a 429 on the
+# tarball printed "The tarball … may not be published", which sent people to
+# look for a release that was there all along (DX audit, retry-after: 300).
+#
+# gh_fetch <url> <outfile> [progress] -> 0 on 2xx; else 1, with the last HTTP
+# code in $_gh_state/code and, when GitHub is rate-limiting, the wait it asked
+# for in $_gh_state/ratelimited. State lives in files because callers run this
+# inside $( ), where a variable would not survive.
+GH_MAX_TRIES="${BITHUMAN_INSTALL_MAX_TRIES:-3}"
+GH_MAX_WAIT="${BITHUMAN_INSTALL_MAX_WAIT:-120}"   # total seconds this run will sleep
+_gh_state=$(mktemp -d 2>/dev/null || mktemp -d -t 'bithuman-gh')
+printf '0\n' > "$_gh_state/waited"
+trap 'rm -rf "$_gh_state"' EXIT INT TERM HUP
+
+_gh_hdr_value() { # <header-name> <header-file> -> the last value (redirects write several blocks)
+  grep -i "^$1:" "$2" 2>/dev/null | tail -1 | sed -e 's/^[^:]*:[[:space:]]*//' | tr -d '\r' | sed -e 's/[[:space:]]*$//'
+}
+
+_gh_curl() { # <url> <outfile> <hdrfile> <progress?>  -> prints the HTTP code
+  _auth=""
+  case "$1" in
+    https://api.github.com/*|https://github.com/*) [ -n "${GITHUB_TOKEN:-}" ] && _auth=1 ;;
+  esac
+  if [ -n "$4" ]; then
+    if [ -n "$_auth" ]; then
+      curl -SL --progress-bar -H "Authorization: Bearer $GITHUB_TOKEN" -D "$3" -o "$2" -w '%{http_code}' "$1" || true
+    else
+      curl -SL --progress-bar -D "$3" -o "$2" -w '%{http_code}' "$1" || true
+    fi
+  else
+    if [ -n "$_auth" ]; then
+      curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -D "$3" -o "$2" -w '%{http_code}' "$1" 2>/dev/null || true
+    else
+      curl -sSL -D "$3" -o "$2" -w '%{http_code}' "$1" 2>/dev/null || true
+    fi
+  fi
+}
+
+gh_fetch() {
+  _url=$1; _out=$2; _prog=${3:-}
+  _hdr="$_gh_state/hdr.$$"
+  _try=1
+  rm -f "$_gh_state/ratelimited"
+  while :; do
+    : > "$_hdr"
+    _code=$(_gh_curl "$_url" "$_out" "$_hdr" "$_prog")
+    case "$_code" in [0-9][0-9][0-9]) ;; *) _code=000 ;; esac
+    printf '%s\n' "$_code" > "$_gh_state/code"
+    case "$_code" in 2??) rm -f "$_hdr"; return 0 ;; esac
+
+    _wait=""
+    _limited=""
+    _ra=$(_gh_hdr_value retry-after "$_hdr")
+    _rem=$(_gh_hdr_value x-ratelimit-remaining "$_hdr")
+    _reset=$(_gh_hdr_value x-ratelimit-reset "$_hdr")
+    if [ "$_code" = 429 ] || { [ "$_code" = 403 ] && { [ -n "$_ra" ] || [ "$_rem" = 0 ]; }; }; then
+      _limited=1
+      case "$_ra" in
+        ''|*[!0-9]*) ;;
+        *) _wait=$_ra ;;
+      esac
+      if [ -z "$_wait" ]; then
+        case "$_reset" in
+          ''|*[!0-9]*) ;;
+          *) _now=$(date +%s 2>/dev/null || echo 0)
+             [ "$_now" -gt 0 ] && _wait=$((_reset - _now)) ;;
+        esac
+      fi
+      [ -z "$_wait" ] && _wait=$((_try * 10))
+      [ "$_wait" -lt 1 ] && _wait=1
+    else
+      case "$_code" in
+        000|5??) _wait=$((_try * 3)) ;;         # network hiccup or a GitHub 5xx: brief retry
+        *) rm -f "$_hdr"; return 1 ;;           # 404 and friends: a real answer, no retry
+      esac
+    fi
+
+    _waited=$(cat "$_gh_state/waited" 2>/dev/null || echo 0)
+    if [ "$_try" -ge "$GH_MAX_TRIES" ] || [ $((_waited + _wait)) -gt "$GH_MAX_WAIT" ]; then
+      [ -n "$_limited" ] && printf '%s %s\n' "$_code" "$_wait" > "$_gh_state/ratelimited"
+      rm -f "$_hdr"
+      return 1
+    fi
+    if [ -n "$_limited" ]; then
+      printf 'install: GitHub is rate-limiting this network (HTTP %s); retrying in %ss (attempt %s of %s)\n' \
+        "$_code" "$_wait" "$((_try + 1))" "$GH_MAX_TRIES" >&2
+    else
+      printf 'install: GitHub did not answer (HTTP %s); retrying in %ss (attempt %s of %s)\n' \
+        "$_code" "$_wait" "$((_try + 1))" "$GH_MAX_TRIES" >&2
+    fi
+    sleep "$_wait"
+    printf '%s\n' "$((_waited + _wait))" > "$_gh_state/waited"
+    _try=$((_try + 1))
+  done
+}
+
+gh_get() { # <url> -> the body on stdout (empty on failure); status as for gh_fetch
+  _body="$_gh_state/body.$$"
+  if gh_fetch "$1" "$_body"; then
+    cat "$_body"; rm -f "$_body"; return 0
+  fi
+  rm -f "$_body"; return 1
+}
+
+# Print the rate-limit refusal and exit, when the last fetch ended on one.
+exit_if_rate_limited() {
+  [ -f "$_gh_state/ratelimited" ] || return 0
+  read -r _rl_code _rl_wait < "$_gh_state/ratelimited"
+  err "GitHub is rate-limiting downloads from this network (HTTP $_rl_code); retry in about ${_rl_wait}s."
+  err ""
+  err "  Nothing is wrong with the release. GitHub allows 60 anonymous API requests per hour"
+  err "  per network address, shared by every machine behind it (offices, CI, VPNs)."
+  err "  To use your own quota instead, pass a GitHub token on the \`sh\` side of the pipe:"
+  err ""
+  err "      curl -fsSL https://install.bithuman.ai | GITHUB_TOKEN=<your token> sh"
+  err ""
+  err "  Pinning a release on the \`sh\` side (BITHUMAN_VERSION=cli-vX.Y.Z) also skips most API calls."
+  exit 1
+}
+
 assets_for_tag() {
-  curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/$1" 2>/dev/null \
+  gh_get "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/$1" \
     | grep '"name"' \
     | sed -e 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' \
     | grep '^bithuman-.*\.tar\.gz$' || true
@@ -51,7 +176,7 @@ target_availability() {
 }
 
 release_state() {
-  _meta=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/$1" 2>/dev/null || true)
+  _meta=$(gh_get "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/$1" || true)
   [ -z "$_meta" ] && { printf 'UNKNOWN\n'; return 0; }
   _draft=$(printf '%s\n' "$_meta" | grep -m1 '"draft"' \
     | sed -e 's/.*"draft"[[:space:]]*:[[:space:]]*\([a-z]*\).*/\1/')
@@ -307,12 +432,13 @@ version="${BITHUMAN_VERSION:-}"
 if [ -z "$version" ]; then
   info "querying latest release..."
   api_url="https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100"
-  tags=$(curl -fsSL "$api_url" \
+  tags=$(gh_get "$api_url" \
     | grep '"tag_name"' \
     | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
   version=$(printf '%s\n' "$tags" | pick_latest_real_release 'cli-v')
   [ -z "$version" ] && version=$(printf '%s\n' "$tags" | pick_latest_real_release 'v')
   if [ -z "$version" ]; then
+    exit_if_rate_limited
     err "could not determine latest CLI release from $api_url"
     err ""
     err "  Every cli-v* candidate was a draft, a pre-release, or unreadable."
@@ -353,7 +479,9 @@ info "install dir: $install_dir"
 tarball_name="bithuman-${target}.tar.gz"
 tarball_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${tarball_name}"
 
-case "$(target_availability "$version" "$tarball_name")" in
+_avail=$(target_availability "$version" "$tarball_name")
+[ "$_avail" = SKIP ] && exit_if_rate_limited
+case "$_avail" in
   OK)   ;;
   SKIP) info "could not read $version's asset list (offline or rate-limited) — availability check SKIPPED, not passed" ;;
   *)
@@ -393,19 +521,32 @@ case "$(target_availability "$version" "$tarball_name")" in
 esac
 
 tmpdir=$(mktemp -d 2>/dev/null || mktemp -d -t 'bithuman-install')
-trap 'rm -rf "$tmpdir"' EXIT INT TERM HUP
+trap 'rm -rf "$tmpdir" "$_gh_state"' EXIT INT TERM HUP
 
 info "downloading $tarball_url"
-if ! curl -fSL --progress-bar "$tarball_url" -o "$tmpdir/$tarball_name"; then
-  err "download failed."
-  err "The tarball for $target may not be published for $version."
-  err "See available assets at: https://github.com/${GITHUB_REPO}/releases/tag/${version}"
+if ! gh_fetch "$tarball_url" "$tmpdir/$tarball_name" progress; then
+  exit_if_rate_limited
+  _dl_code=$(cat "$_gh_state/code" 2>/dev/null || echo 000)
+  case "$_dl_code" in
+    404)
+      err "download failed (HTTP 404): $version has no $tarball_name."
+      err "See the assets it does carry: https://github.com/${GITHUB_REPO}/releases/tag/${version}"
+      ;;
+    000)
+      err "download failed: could not reach github.com (network, proxy or DNS)."
+      err "Check the connection and run the installer again."
+      ;;
+    *)
+      err "download failed (HTTP $_dl_code) for $tarball_url"
+      err "GitHub may be having trouble; run the installer again in a minute."
+      ;;
+  esac
   exit 1
 fi
 
 sha_url="${tarball_url}.sha256"
 sha_file="$tmpdir/${tarball_name}.sha256"
-if curl -fsSL "$sha_url" -o "$sha_file" 2>/dev/null; then
+if gh_fetch "$sha_url" "$sha_file"; then
   info "verifying sha256..."
   expected=$(awk '{print $1}' "$sha_file")
   if command -v shasum >/dev/null 2>&1; then
@@ -425,6 +566,7 @@ if curl -fsSL "$sha_url" -o "$sha_file" 2>/dev/null; then
   fi
   info "sha256 ok"
 else
+  exit_if_rate_limited
   info "no sha256 sidecar published; skipping integrity check"
 fi
 
@@ -523,7 +665,10 @@ if ! "$install_dir/bithuman" --version >/dev/null 2>&1; then
   exit 1
 fi
 
-ver_line=$("$install_dir/bithuman" --version 2>/dev/null | head -1)
+# `--version` prints several lines (libessence, bithuman, build, engine); name the
+# CLI itself, not the engine library that happens to come first.
+ver_line=$("$install_dir/bithuman" --version 2>/dev/null | grep '^bithuman ' | head -1 | tr -s ' ' || true)
+[ -z "$ver_line" ] && ver_line=$("$install_dir/bithuman" --version 2>/dev/null | head -1)
 
 if ! command -v ffmpeg >/dev/null 2>&1; then
   ffmpeg_hint="sudo apt install -y ffmpeg"
