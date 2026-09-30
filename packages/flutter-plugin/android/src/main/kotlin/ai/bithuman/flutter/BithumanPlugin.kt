@@ -69,6 +69,12 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     private var activityBinding: ActivityPluginBinding? = null
     private val main = Handler(Looper.getMainLooper())
     private val sessions = HashMap<Long, AvatarSession>()
+    /**
+     * The Flutter engine let go of this plugin (platform thread). A load that finishes after that
+     * closes what it made instead of registering it: until 2.6.25 such a session was added to
+     * [sessions] after the detach had emptied it, and its player ran with nobody to stop it.
+     */
+    private var detached = false
     /** Callers waiting on a RECORD_AUDIO answer: Dart results and deferred mic starts. */
     private val permissionWaiters = ArrayList<(Boolean) -> Unit>()
 
@@ -121,6 +127,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     // ---------------------------------------------------------------- lifecycle
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        detached = false
         context = binding.applicationContext
         messenger = binding.binaryMessenger
         textureRegistry = binding.textureRegistry
@@ -130,6 +137,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        detached = true
         channel.setMethodCallHandler(null)
         loadEvents.close()
         sessions.keys.toList().forEach { destroy(it) }
@@ -259,6 +267,15 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 val p = newPlayer(s)
                 s.player = p
                 main.post {
+                    if (detached) {
+                        // The engine detached while this load ran: nobody can show or stop this
+                        // session. Close it (threads, engine, texture) instead of registering it.
+                        Log.i(TAG, "load of $code finished after the engine detached: closing it")
+                        s.stopped.set(true)
+                        closeSession(s, null)
+                        runCatching { result.error("detached", "the Flutter engine detached during load", null) }
+                        return@post
+                    }
                     sessions[entry.id()] = s
                     p.start()
                     result.success(entry.id().toInt())
@@ -394,6 +411,15 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val s = sessions.remove(id) ?: run { done?.invoke(); return }
         s.stopped.set(true)
         stopMic(s)
+        closeSession(s, done)
+    }
+
+    /**
+     * Stop [s]'s player, then (off the platform thread) wait for its threads, close the engine and
+     * release the texture; [done] runs on the platform thread at the end. [s] is already out of
+     * [sessions] (or was never in it: a load that finished after the engine detached).
+     */
+    private fun closeSession(s: AvatarSession, done: (() -> Unit)?) {
         s.player?.let { runCatching { it.stop() } }
         s.player = null
         Thread({
@@ -440,7 +466,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         // Reply now so the session opens; the mic joins the moment the permission is answered.
         result.success(null)
         if (micGranted()) startCapture() else requestMic { granted ->
-            if (granted && !s.stopped.get() && s.micChannel === ch) startCapture()
+            if (granted && !s.stopped.get() && s.micChannel === ch && !detached) startCapture()
             else Log.w(TAG, "microphone permission denied — speaker-only session")
         }
     }
