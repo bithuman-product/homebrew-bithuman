@@ -7,13 +7,12 @@
 //     is stopped, the relay socket closes, status `closed`, endedByInterruption says why;
 //   * endOnAudioInterruption: false → forwarded only, the session stays open;
 //   * `ended` never stops a session;
-//   * a call that already holds the audio as the unit starts → no dial at all;
+//   * a call that already holds the audio as the unit starts → no dial at all (and on iOS, where
+//     the unit then refuses to start, no error either);
 //   * BithumanAvatar routes the native push `audioInterruption` to the avatar it names.
 //
 // The session arms run against the hermetic mock relay with a VoiceHost that has no render;
 // the channel arm mocks `ai.bithuman.avatar`. Apache-2.0; (c) bitHuman.
-
-import 'dart:async';
 
 import 'package:bithuman/bithuman.dart';
 import 'package:bithuman/bithuman_realtime.dart';
@@ -117,6 +116,27 @@ void main() {
       expect(statuses, isNot(contains(RealtimeStatus.open)));
       expect(s.endedByInterruption?.isCall, isTrue);
     });
+  });
+
+  test('iOS refuses the unit during a call after reporting it: the start ends quietly', () async {
+    final server = await MockRealtimeServer.start();
+    final host = RecordingVoiceHost()
+      ..audioStartError = PlatformException(code: 'AUDIO_START_FAILED', message: 'a phone call holds the audio');
+    host.onAudioStart = () => host.emitInterruption(_call);
+    BithumanRealtimeSession.debugEndpointOverride = server.url;
+    addTearDown(() async {
+      BithumanRealtimeSession.debugEndpointOverride = null;
+      await host.close();
+      await server.close();
+    });
+    final s = BithumanRealtimeSession(apiKey: 'test-secret', avatar: host);
+    final statuses = <RealtimeStatus>[];
+    s.statusStream.listen(statuses.add);
+    await s.start(); // must not throw
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(statuses, isNot(contains(RealtimeStatus.error)));
+    expect(server.connections, isEmpty);
+    expect(s.endedByInterruption?.isCall, isTrue);
   });
 
   group('channel', () {

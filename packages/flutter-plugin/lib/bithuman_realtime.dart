@@ -540,6 +540,9 @@ class BithumanRealtimeSession {
       await _connectAndConfigure();
       if (_terminalError == null && _open) _status.add(RealtimeStatus.open);
     } catch (e) {
+      // A call that already held the audio refused the audio unit (iOS) after reporting itself:
+      // the session has ended on that interruption, which is not an error.
+      if (_endedBy != null && gen == _startGen) return;
       _status.add(RealtimeStatus.error);
       rethrow;
     }
