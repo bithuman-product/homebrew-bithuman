@@ -10,7 +10,7 @@
 // stays; but it proves the voice layer only through the render class, and it
 // needs the Flutter binding's mock messenger to exist at all.
 //
-// This one implements the fourteen members of [VoiceHost] and nothing else. It
+// This one implements the fifteen members of [VoiceHost] and nothing else. It
 // imports no bithuman render library, touches no channel, and would compile in a
 // pure-Dart (non-Flutter) test. If the voice module ever reaches for a render
 // member again, THIS FILE STOPS COMPILING — which is a stronger statement than
@@ -21,7 +21,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:bithuman/realtime_transport.dart' show VoiceHost;
+import 'package:bithuman/realtime_transport.dart' show VoiceHost, BithumanAudioInterruption;
 
 class RecordingVoiceHost implements VoiceHost {
   /// Every call, in order, as `name` or `name:arg` — the assertion surface.
@@ -39,6 +39,13 @@ class RecordingVoiceHost implements VoiceHost {
 
   final _mic = StreamController<Uint8List>.broadcast();
   final _converse = StreamController<Map<dynamic, dynamic>>.broadcast();
+  final _interruptions = StreamController<BithumanAudioInterruption>.broadcast();
+
+  /// Push an audio interruption at the session, as the platform would (a phone call).
+  void emitInterruption(BithumanAudioInterruption e) => _interruptions.add(e);
+
+  /// Runs inside [audioStart] (e.g. a call that already holds the audio as the unit starts).
+  void Function()? onAudioStart;
 
   /// Push "microphone" PCM at the session, as the platform would.
   void emitMic(Uint8List pcm) => _mic.add(pcm);
@@ -52,6 +59,7 @@ class RecordingVoiceHost implements VoiceHost {
   Future<void> close() async {
     await _mic.close();
     await _converse.close();
+    await _interruptions.close();
   }
 
   @override
@@ -64,6 +72,7 @@ class RecordingVoiceHost implements VoiceHost {
   Future<void> audioStart(
       {int vadThreshold = 0, bool enableMic = true, bool vpioAgc = true}) async {
     calls.add('audioStart:vad=$vadThreshold,mic=$enableMic,agc=$vpioAgc');
+    onAudioStart?.call();
   }
 
   @override
@@ -122,5 +131,11 @@ class RecordingVoiceHost implements VoiceHost {
   Stream<Map<dynamic, dynamic>> get converseEvents {
     calls.add('converseEvents');
     return _converse.stream;
+  }
+
+  @override
+  Stream<BithumanAudioInterruption> get audioInterruptions {
+    calls.add('audioInterruptions');
+    return _interruptions.stream;
   }
 }

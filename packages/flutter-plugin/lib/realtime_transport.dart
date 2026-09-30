@@ -40,7 +40,7 @@ export 'src/transport_protocol.dart';
 // voice protocol), so importing it here is what the analyzer calls an
 // unnecessary_import. The export stays because a consumer of THIS library must
 // be able to name the type its four constructors take.
-export 'src/voice_host.dart' show VoiceHost;
+export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption;
 
 /// Lifecycle states that any underlying transport can be in. Maps the
 /// concrete `RealtimeStatus` (WebSocket) and `WebRTCStatus` (WebRTC)

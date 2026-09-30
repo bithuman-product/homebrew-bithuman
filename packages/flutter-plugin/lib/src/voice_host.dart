@@ -34,7 +34,11 @@
 // a REAL `BithumanRealtimeSession` run end to end against a recorded host.
 // `test/e2e/headless_voice_host_test.dart` is exactly that and it RUNS in CI; a
 // headless lipsync recorder, an Android-shaped bridge or a second app's audio
-// stack conform by writing these fourteen.
+// stack conform by writing these fifteen.
+//
+// ★2.6.25 ADDED ONE: [VoiceHost.audioInterruptions]. The platform taking the
+// session's sound away (a phone call answered from its banner leaves the app on
+// screen) is a voice fact the session must act on: the call was billed under it.
 //
 // The engine side of the same line is `src/engine_protocol.dart`; the native
 // side is `Protocol/LipsyncSink.swift` and `Protocol/BithumanEngine.swift`.
@@ -131,4 +135,62 @@ abstract class VoiceHost {
   /// `{"kind":"state","state":int}` (0 idle / 1 listening / 2 thinking /
   /// 3 speaking) or `{"kind":"bot"|"user","text":String}`.
   Stream<Map<dynamic, dynamic>> get converseEvents;
+
+  // ── the platform taking the sound away ─────────────────────────────────────
+
+  /// The platform took this host's sound away, or gave it back — see
+  /// [BithumanAudioInterruption]. Only between [audioStart] and [audioStop].
+  /// A host on a platform without interruptions (macOS) never emits.
+  Stream<BithumanAudioInterruption> get audioInterruptions;
+}
+
+/// The platform took a voice session's sound away ([began]), or gave it back.
+///
+/// - **iOS:** an audio-session interruption: a phone call ringing or answered
+///   (also from its banner, with the app still on screen), Siri, an alarm.
+/// - **Android:** the session's audio focus lost for a while or for good: a
+///   phone call rings or is answered, another app's call, an assistant. A
+///   notification that only asks the session to duck is not one.
+/// - **macOS:** never.
+///
+/// While the sound is taken the microphone hears nothing the session can use
+/// and the speaker is not the session's, but a realtime session stays open
+/// (and billed) until it is stopped. `BithumanRealtimeSession` therefore ends
+/// itself on [began] by default (`endOnAudioInterruption`).
+class BithumanAudioInterruption {
+  const BithumanAudioInterruption({
+    required this.began,
+    required this.reason,
+    this.shouldResume = false,
+  });
+
+  /// True: the sound was taken. False: it came back.
+  final bool began;
+
+  /// `call`: a phone or VoIP call rings or runs. `focus` (Android): another
+  /// app took the audio. `system` (iOS): any other interruption.
+  final String reason;
+
+  /// On an end ([began] false): the platform says the app may resume.
+  final bool shouldResume;
+
+  /// A phone or VoIP call took the sound.
+  bool get isCall => reason == 'call';
+
+  /// The native push `{state: began|ended, reason, shouldResume}`; null when
+  /// it is not one.
+  static BithumanAudioInterruption? fromMap(Map<dynamic, dynamic>? m) {
+    final state = m?['state'];
+    if (state != 'began' && state != 'ended') return null;
+    return BithumanAudioInterruption(
+      began: state == 'began',
+      reason: (m?['reason'] as String?) ?? 'system',
+      shouldResume: m?['shouldResume'] == true,
+    );
+  }
+
+  @override
+  String toString() =>
+      'BithumanAudioInterruption(${began ? 'began' : 'ended'}, $reason'
+      '${began ? '' : ', shouldResume: $shouldResume'})';
 }

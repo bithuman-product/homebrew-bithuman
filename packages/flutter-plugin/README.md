@@ -211,6 +211,7 @@ A 3rd engine appends one `EngineDescriptor` here (and one line in
 | `playSpeakerPCM(Uint8List pcm24kPcm16le)` | Play 24 kHz PCM16 through the speaker AND drive lip-sync from the same chunk. |
 | `micStream` | Echo-cancelled mic capture as 24 kHz PCM16 chunks. Forward straight to OpenAI Realtime. |
 | `interrupt()` | Cancel mid-sentence. Flushes the speaker queue + wipes the avatar's lip-sync buffer. |
+| `audioInterruptions` | The platform took the session's sound away (`began`: a phone call ringing or answered, also from its banner or notification; Siri or an assistant; another app's call) or gave it back, as `BithumanAudioInterruption`s with a `reason` (`call`, `focus`, `system`). iOS and Android; macOS never. |
 | `dispose()` | Drop the native runtime. Idempotent. |
 | `static loadEvents` | Android: what a running `load` is doing, as `BithumanLoadEvent`s — `fetch` (exact bytes of the identity's download), `fetched`, `prepare`, `prepared`. Filter on `code`. iOS/macOS send none. |
 | `static cancelLoad(code)` | Android: stop a running `load` of `code`; it throws `PlatformException` `load_cancelled`, and the download keeps what it has for next time. |
@@ -227,7 +228,7 @@ Plus catalog helpers (anonymous, no auth):
 
 | Member | Purpose |
 | --- | --- |
-| `BithumanRealtimeSession({apiKey, avatar, model, systemPrompt, voice, vadThreshold})` | Construct. `model` defaults to `gpt-realtime` (OpenAI Realtime GA). |
+| `BithumanRealtimeSession({apiKey, avatar, model, systemPrompt, voice, vadThreshold, speechReady, echoOnsetGuard, endOnAudioInterruption})` | Construct. `model` defaults to `gpt-realtime` (OpenAI Realtime GA). |
 | `start()` | Open WS, start VP-IO, begin forwarding mic. |
 | `stop()` | Close WS, tear down audio. Single-use; build a new session for the next conversation. |
 | `commitInputAudio()` | End-of-turn marker for non-VAD push-to-talk flows. |
@@ -238,6 +239,7 @@ Plus catalog helpers (anonymous, no auth):
 | `userTranscriptStream` | The user's transcribed speech (when OpenAI returns it). |
 | `micLevelStream` | Mic peak in [0, 1] per ~85 ms chunk. |
 | `botLevelStream` | Bot-audio peak in [0, 1] per chunk. |
+| `interruptionStream` | The avatar's `audioInterruptions` while the session runs. With `endOnAudioInterruption` (default true) a `began` is followed by the session stopping itself (`closed`), so nothing more is billed; `endedByInterruption` then says why. |
 
 The session auto-reconnects WS drops with 1/2/4/8/16/30 s backoff (cap 30 s, 8 attempts) before surfacing `RealtimeStatus.error`.
 

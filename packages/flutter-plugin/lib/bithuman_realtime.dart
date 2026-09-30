@@ -39,7 +39,7 @@ import 'src/voice_host.dart';
 import 'src/dev_levers.dart';
 import 'src/echo_profile.dart';
 
-export 'src/voice_host.dart' show VoiceHost;
+export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption;
 
 /// One Realtime session over a single WebSocket.
 ///
@@ -56,6 +56,7 @@ class BithumanRealtimeSession {
     this.vadThreshold = 0,
     this.speechReady,
     this.echoOnsetGuard,
+    this.endOnAudioInterruption = true,
   }) {
     _liveSystemPrompt = systemPrompt;
   }
@@ -112,6 +113,17 @@ class BithumanRealtimeSession {
   /// off on macOS, whose measured residual sits far below the floor. `Duration.zero`
   /// disables it.
   final Duration? echoOnsetGuard;
+
+  /// ★WHEN THE PLATFORM TAKES THE SOUND AWAY, THE SESSION ENDS (2.6.25). A phone call
+  /// ringing or answered — also from its banner, with the app still on screen (iOS), or
+  /// from its notification (Android) — Siri, an assistant or another app's call takes
+  /// the microphone and the speaker ([VoiceHost.audioInterruptions]). Until 2.6.25 the
+  /// session stayed open under the phone call, and the relay billed it. With this true
+  /// (the default) the session stops itself on the interruption's `began`, right after
+  /// emitting it on [interruptionStream]; [endedByInterruption] then says why. False: the
+  /// event is only forwarded, and the app decides.
+  final bool endOnAudioInterruption;
+
   static const int _guardPeakFloor = 4096; // ≈ -18 dBFS
   static const Duration _guardTail = Duration(milliseconds: 1500);
   int _agentAudioMs = 0;   // agent audio handed to the plugin this session
@@ -157,6 +169,7 @@ class BithumanRealtimeSession {
   WebSocketChannel? _ws;
   StreamSubscription? _wsSub;
   StreamSubscription<Uint8List>? _micSub;
+  StreamSubscription<BithumanAudioInterruption>? _interruptionSub;
   bool _open = false;
 
   // Reconnect-with-backoff state. Active only while `_open == true` —
@@ -406,6 +419,29 @@ class BithumanRealtimeSession {
   final _botLevel = StreamController<double>.broadcast();
   Stream<double> get botLevelStream => _botLevel.stream;
 
+  /// The platform took the session's sound away, or gave it back (see
+  /// [VoiceHost.audioInterruptions]), while the session was running. With
+  /// [endOnAudioInterruption] (the default) a `began` is followed at once by the
+  /// session stopping itself ([RealtimeStatus.closed]).
+  final _interruptions = StreamController<BithumanAudioInterruption>.broadcast();
+  Stream<BithumanAudioInterruption> get interruptionStream => _interruptions.stream;
+
+  /// The interruption that ended this session ([endOnAudioInterruption]); null when
+  /// it ended any other way.
+  BithumanAudioInterruption? get endedByInterruption => _endedBy;
+  BithumanAudioInterruption? _endedBy;
+
+  void _onAudioInterruption(BithumanAudioInterruption e) {
+    _log('[bhinterrupt] ${e.began ? 'BEGAN' : 'ENDED'} reason=${e.reason}'
+        '${e.began ? '' : ' shouldResume=${e.shouldResume}'} open=$_open'
+        '${e.began && endOnAudioInterruption && _open ? ' — ending the session (nothing more is billed)' : ''}');
+    if (!_interruptions.isClosed) _interruptions.add(e);
+    if (e.began && endOnAudioInterruption && _open) {
+      _endedBy = e;
+      unawaited(stop());
+    }
+  }
+
   /// Open the WebSocket, start the VP-IO audio engine, and begin
   /// forwarding echo-cancelled mic chunks to OpenAI.
   /// [enableMic] false = TEXT-only session: speaker-only audio (no VP-IO mic, no
@@ -419,7 +455,13 @@ class BithumanRealtimeSession {
     _agentAudioMs = 0;
     _guardAudibleMs = 0;
     _guardedChunks = 0;
+    _endedBy = null;
     _status.add(RealtimeStatus.connecting);
+    // Before audioStart: a call already holding the audio is reported the moment the unit starts.
+    // (No await here: nothing may yield between `_open` and the dial's own checks.)
+    final oldSub = _interruptionSub;
+    if (oldSub != null) unawaited(oldSub.cancel());
+    _interruptionSub = avatar.audioInterruptions.listen(_onAudioInterruption);
     try {
       // Bring up the native audio engine FIRST so VP-IO is already
       // running by the time the WS opens — the very first mic packet
@@ -477,6 +519,8 @@ class BithumanRealtimeSession {
       }
       await avatar.audioStart(
           vadThreshold: 0, enableMic: enableMic, vpioAgc: EchoProfile.current.vpioAgc);
+      // An interruption reported by audioStart itself (a call already rings) stopped the session.
+      if (!_open || gen != _startGen) return;
       _log('[bhduplex] transport barge=server_vad threshold=${EchoProfile.current.serverVadThreshold} '
           'interrupt_response=1 (the native local gate is off on this path by design; '
           'vadThreshold=$vadThreshold applies to LOCAL mode only) '
@@ -867,6 +911,8 @@ class BithumanRealtimeSession {
     try { await avatar.interrupt(reason: 'stop'); } catch (_) {}
     await _micSub?.cancel();
     _micSub = null;
+    await _interruptionSub?.cancel();
+    _interruptionSub = null;
     await _wsSub?.cancel();
     await _ws?.sink.close();
     _ws = null;
