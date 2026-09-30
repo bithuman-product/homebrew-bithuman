@@ -55,7 +55,7 @@ class BithumanRealtimeSession {
     this.voice = 'alloy',
     this.vadThreshold = 0,
     this.speechReady,
-    this.echoOnsetGuard = const Duration(seconds: 8),
+    this.echoOnsetGuard,
   }) {
     _liveSystemPrompt = systemPrompt;
   }
@@ -107,8 +107,10 @@ class BithumanRealtimeSession {
   /// the phone is far above that floor, so a real barge still goes through; the
   /// canceller's onset residual (measured 2026-09-28, iPhone 15 loudspeaker: -28 /
   /// -23 / -27 dBFS peaks, two false `speech_started` in the first reply) does not.
-  /// `Duration.zero` disables it.
-  final Duration echoOnsetGuard;
+  /// Null (the default) takes the device's row, `EchoProfile.onsetGuard`: 8 s on
+  /// iPhone, off on Android and macOS, whose measured residuals sit far below the
+  /// floor. `Duration.zero` disables it.
+  final Duration? echoOnsetGuard;
   static const int _guardPeakFloor = 4096; // ≈ -18 dBFS
   static const Duration _guardTail = Duration(milliseconds: 1500);
   int _agentAudioMs = 0;   // agent audio handed to the plugin this session
@@ -118,8 +120,12 @@ class BithumanRealtimeSession {
   // at the start of the first long reply, seconds before that audio was even played.
   int _guardAudibleMs = 0;
   int _guardedChunks = 0;
-  int get _echoGuardMs =>
-      DevLevers.echoGuardMs >= 0 ? DevLevers.echoGuardMs : echoOnsetGuard.inMilliseconds;
+  int get _echoGuardMs => DevLevers.echoGuardMs >= 0
+      ? DevLevers.echoGuardMs
+      : (echoOnsetGuard ?? EchoProfile.current.onsetGuard).inMilliseconds;
+  // Bumped by every start(): a start() still waiting on [speechReady] when the session
+  // was stopped and started again must not dial a second time.
+  int _startGen = 0;
   bool get _echoGuardActive {
     final guardMs = _echoGuardMs;
     if (guardMs == 0 || _agentAudioMs == 0 || _guardAudibleMs >= guardMs) return false;
@@ -407,6 +413,11 @@ class BithumanRealtimeSession {
   Future<void> start({bool enableMic = true}) async {
     if (_open) return;
     _open = true;
+    final gen = ++_startGen;
+    // A new audio unit: its echo canceller converges from scratch, so the guard re-arms.
+    _agentAudioMs = 0;
+    _guardAudibleMs = 0;
+    _guardedChunks = 0;
     _status.add(RealtimeStatus.connecting);
     try {
       // Bring up the native audio engine FIRST so VP-IO is already
@@ -461,7 +472,7 @@ class BithumanRealtimeSession {
         await speechReady!.timeout(const Duration(seconds: 60), onTimeout: () {});
         _log('[bhready] avatar speech path ready after '
             '${DateTime.now().difference(t0).inMilliseconds} ms — dialling now');
-        if (!_open) return;
+        if (!_open || gen != _startGen) return;
       }
       await avatar.audioStart(
           vadThreshold: 0, enableMic: enableMic, vpioAgc: EchoProfile.current.vpioAgc);
