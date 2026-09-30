@@ -1,6 +1,9 @@
 package ai.bithuman.flutter
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
@@ -10,8 +13,11 @@ import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.util.Log
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Microphone -> 24 kHz PCM16 chunks, continuous for the life of the session, on the
@@ -59,10 +65,21 @@ class MicCapture(
     private var modeBefore = AudioManager.MODE_NORMAL
     /** API < 31: this session started the Bluetooth SCO link, so it stops it. */
     private var scoStarted = false
+    /** API < 31: the SCO link was started and failed (or dropped): the call goes to the speaker. */
+    @Volatile private var scoFailed = false
+    private var scoReceiver: BroadcastReceiver? = null
     private var deviceCallback: AudioDeviceCallback? = null
+    /** API 31+: the device this session selected, and the ones that fell back to the earpiece. */
+    private var selected: AudioDeviceInfo? = null
+    private val refusedIds = HashSet<Int>()
+    /** An AudioManager.OnCommunicationDeviceChangedListener on API 31+ (typed Any for API 29/30). */
+    private var commListener: Any? = null
 
     /** Blocks nothing; the capture runs on its own thread until [stop]. Returns false if the mic did not open. */
     fun start(): Boolean {
+        // A previous session's stop may still be handing the mode back (off the UI thread): it
+        // finishes first, so the two mode changes apply in order.
+        awaitModeThread()
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         modeBefore = am.mode
         am.mode = AudioManager.MODE_IN_COMMUNICATION
@@ -85,9 +102,13 @@ class MicCapture(
         live = true
         // Earbuds put in or taken out mid-call re-route it (the callback also lists what is there now).
         deviceCallback = object : AudioDeviceCallback() {
-            override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { if (live) route(am, "device added") }
+            override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) {
+                added.forEach { refusedIds.remove(it.id) }   // a headset connected again gets another chance
+                if (live) route(am, "device added")
+            }
             override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) { if (live) route(am, "device removed") }
         }.also { cb -> runCatching { am.registerAudioDeviceCallback(cb, Handler(Looper.getMainLooper())) } }
+        watchFallback(am)
         Log.i("bhmic", "OPEN source=VOICE_COMMUNICATION mode=${am.mode} device=${r.routedDevice?.type} " +
             "aec=${aec?.enabled} rateIn=$RATE_IN chunkMs=100 hostMs=${System.currentTimeMillis()}")
         // The SAME attestation Apple's RealtimeAudioIO emits, in the same vocabulary, so
@@ -105,17 +126,36 @@ class MicCapture(
         return true
     }
 
+    /**
+     * ★Off the UI thread (2.6.25): stopping the recorder and handing the audio mode back takes
+     * ~0.5 s on a Galaxy Z Flip5 (the platform re-routes out of communication mode), and the app
+     * froze for it at every hang-up (58 frames skipped at 120 Hz). One serial thread runs it, and
+     * [start] waits for it, so mode changes stay in order.
+     */
     fun stop() {
         live = false
-        runCatching { record?.stop(); record?.release() }; record = null
-        runCatching { aec?.release() }; aec = null
+        val r = record; record = null
+        val a = aec; aec = null
         thread = null
-        restoreMode(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        MODE_THREAD.post {
+            val t0 = System.nanoTime()
+            runCatching { r?.stop(); r?.release() }
+            runCatching { a?.release() }
+            restoreMode(am)
+            Log.i("bhmic", "CLOSED in ${(System.nanoTime() - t0) / 1_000_000} ms, off the UI thread (mode=${am.mode})")
+        }
     }
 
     private fun restoreMode(am: AudioManager) {
         deviceCallback?.let { cb -> runCatching { am.unregisterAudioDeviceCallback(cb) } }
         deviceCallback = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (commListener as? AudioManager.OnCommunicationDeviceChangedListener)?.let { runCatching { am.removeOnCommunicationDeviceChangedListener(it) } }
+        }
+        commListener = null
+        scoReceiver?.let { r -> runCatching { context.unregisterReceiver(r) } }
+        scoReceiver = null
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 am.clearCommunicationDevice()
@@ -139,18 +179,19 @@ class MicCapture(
      */
     private fun route(am: AudioManager, why: String) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val available = am.availableCommunicationDevices
+            val available = am.availableCommunicationDevices.filter { it.id !in refusedIds }
             val current = am.communicationDevice
             val want = AudioRules.pickCommunicationDevice(available.map { it.type }, current?.type)
             val dev = if (current != null && current.type == want) current else available.firstOrNull { it.type == want }
             if (dev == null) { Log.w("bhroute", "[bhroute] at=$why nothing to select (available=${available.map { it.type }})"); return }
+            selected = dev
             if (current?.id == dev.id) return
             val ok = am.setCommunicationDevice(dev)
             Log.i("bhroute", "[bhroute] at=$why selected=${dev.type}${if (ok) "" else " REFUSED"} was=${current?.type} " +
                 "available=${available.map { it.type }} personal=${AudioRules.isPersonal(dev.type)}")
         } else {
             val outs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type }
-            val r = AudioRules.legacyRoute(outs)
+            val r = AudioRules.legacyRoute(outs, scoFailed)
             @Suppress("DEPRECATION")
             when (r) {
                 AudioRules.LegacyRoute.BLUETOOTH_SCO -> {
@@ -167,6 +208,44 @@ class MicCapture(
                 }
             }
             Log.i("bhroute", "[bhroute] at=$why legacy=$r outputs=$outs")
+        }
+    }
+
+    /**
+     * A headset that does not take the call (busy, refused, its link failed) must not leave it on
+     * the earpiece. API 31+: the communication device falling back to the earpiece after a personal
+     * device was selected re-routes without that device. API < 31: a failed or dropped SCO link
+     * sends the call to the speaker.
+     */
+    private fun watchFallback(am: AudioManager) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val l = AudioManager.OnCommunicationDeviceChangedListener { now ->
+                val sel = selected
+                if (!live || sel == null || now?.id == sel.id) return@OnCommunicationDeviceChangedListener
+                if (AudioRules.fellBack(now?.type, AudioRules.isPersonal(sel.type))) {
+                    refusedIds.add(sel.id)
+                    Log.w("bhroute", "[bhroute] ${sel.type} did not take the call (now ${now?.type}): re-routing without it")
+                    route(am, "fell back")
+                }
+            }
+            if (runCatching { am.addOnCommunicationDeviceChangedListener(context.mainExecutor, l) }.isSuccess) commListener = l
+        } else {
+            val r = object : BroadcastReceiver() {
+                override fun onReceive(c: Context, i: Intent) {
+                    if (isInitialStickyBroadcast || !live || !scoStarted) return
+                    val st = i.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, AudioManager.SCO_AUDIO_STATE_ERROR)
+                    if (st == AudioManager.SCO_AUDIO_STATE_ERROR || st == AudioManager.SCO_AUDIO_STATE_DISCONNECTED) {
+                        scoFailed = true
+                        Log.w("bhroute", "[bhroute] the Bluetooth SCO link failed or dropped ($st): the speaker")
+                        route(am, "sco failed")
+                    }
+                }
+            }
+            val f = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
+            if (runCatching {
+                    if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED)
+                    else context.registerReceiver(r, f)
+                }.isSuccess) scoReceiver = r
         }
     }
 
@@ -206,6 +285,15 @@ class MicCapture(
 
     companion object {
         private const val TAG = "BithumanAvatar"
+        /** The recorder's release and every audio-mode hand-back, in order, off the UI thread. */
+        private val MODE_THREAD: Handler by lazy { Handler(HandlerThread("bh-audio-mode").apply { start() }.looper) }
+
+        /** Wait (at most 2 s) until what is queued on [MODE_THREAD] has run. */
+        private fun awaitModeThread() {
+            val done = CountDownLatch(1)
+            MODE_THREAD.post { done.countDown() }
+            if (!done.await(2_000, TimeUnit.MILLISECONDS)) Log.w(TAG, "the previous session's audio mode was not handed back within 2 s")
+        }
         /** The device rate captured; decimated by two on the way out. */
         const val RATE_IN = 48_000
     }

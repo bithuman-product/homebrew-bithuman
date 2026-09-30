@@ -11,6 +11,7 @@ import android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
 import android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
 import android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
 import android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+import android.media.AudioDeviceInfo.TYPE_USB_DEVICE
 import android.media.AudioDeviceInfo.TYPE_USB_HEADSET
 import android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET
 import android.media.AudioManager
@@ -42,6 +43,11 @@ class AudioRulesTest {
         assertEquals(TYPE_USB_HEADSET, AudioRules.pickCommunicationDevice(listOf(TYPE_BUILTIN_SPEAKER, TYPE_USB_HEADSET), null))
     }
 
+    /** USB-C headphones (a DAC with no microphone) list as a USB device, not a USB headset. */
+    @Test fun usbCHeadphones_keepTheCall() {
+        assertEquals(TYPE_USB_DEVICE, AudioRules.pickCommunicationDevice(listOf(TYPE_BUILTIN_SPEAKER, TYPE_USB_DEVICE), null))
+    }
+
     /** Two personal devices: the one the system already routes to stands (the person's choice). */
     @Test fun thePersonsCurrentHeadsetStands() {
         assertEquals(TYPE_WIRED_HEADSET,
@@ -67,6 +73,23 @@ class AudioRulesTest {
         assertEquals(AudioRules.LegacyRoute.HEADSET, AudioRules.legacyRoute(listOf(TYPE_BUILTIN_SPEAKER, TYPE_WIRED_HEADSET)))
         // A2DP alone (music-only headphones) cannot carry a call: the loudspeaker, as before.
         assertEquals(AudioRules.LegacyRoute.SPEAKER, AudioRules.legacyRoute(listOf(TYPE_BUILTIN_SPEAKER, TYPE_BLUETOOTH_A2DP)))
+    }
+
+    /** A headset that did not take the call: the platform fell back to the earpiece (or nothing). */
+    @Test fun aHeadsetThatRefusedTheCall_isSeen() {
+        assertTrue(AudioRules.fellBack(TYPE_BUILTIN_EARPIECE, selectedPersonal = true))
+        assertTrue(AudioRules.fellBack(null, selectedPersonal = true))
+        assertFalse(AudioRules.fellBack(TYPE_BUILTIN_SPEAKER, selectedPersonal = true))
+        // The speaker was selected: the earpiece is not a fallback of a headset.
+        assertFalse(AudioRules.fellBack(TYPE_BUILTIN_EARPIECE, selectedPersonal = false))
+    }
+
+    /** Before API 31: a failed SCO link sends the call to the speaker, never the earpiece. */
+    @Test fun beforeApi31_aFailedScoLink_theSpeaker() {
+        assertEquals(AudioRules.LegacyRoute.SPEAKER,
+            AudioRules.legacyRoute(listOf(TYPE_BUILTIN_SPEAKER, TYPE_BLUETOOTH_A2DP, TYPE_BLUETOOTH_SCO), scoFailed = true))
+        assertEquals(AudioRules.LegacyRoute.HEADSET,
+            AudioRules.legacyRoute(listOf(TYPE_BUILTIN_SPEAKER, TYPE_BLUETOOTH_SCO, TYPE_WIRED_HEADSET), scoFailed = true))
     }
 
     // ── interruptions ──────────────────────────────────────────────────────────────────

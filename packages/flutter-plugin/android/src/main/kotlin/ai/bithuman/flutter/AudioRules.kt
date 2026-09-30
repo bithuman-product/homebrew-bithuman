@@ -24,6 +24,7 @@ internal object AudioRules {
         AudioDeviceInfo.TYPE_BLUETOOTH_SCO,     // a classic Bluetooth headset or earbuds (HFP)
         AudioDeviceInfo.TYPE_HEARING_AID,
         AudioDeviceInfo.TYPE_USB_HEADSET,
+        AudioDeviceInfo.TYPE_USB_DEVICE,        // USB-C headphones (a DAC without a microphone)
         AudioDeviceInfo.TYPE_WIRED_HEADSET,
         AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
         AudioDeviceInfo.TYPE_BLE_SPEAKER,       // an LE Audio speaker the person connected
@@ -49,11 +50,24 @@ internal object AudioRules {
      */
     enum class LegacyRoute { BLUETOOTH_SCO, HEADSET, SPEAKER }
 
-    fun legacyRoute(outputs: List<Int>): LegacyRoute = when {
-        AudioDeviceInfo.TYPE_BLUETOOTH_SCO in outputs -> LegacyRoute.BLUETOOTH_SCO
-        outputs.any { isPersonal(it) } -> LegacyRoute.HEADSET
-        else -> LegacyRoute.SPEAKER
+    fun legacyRoute(outputs: List<Int>, scoFailed: Boolean = false): LegacyRoute {
+        // A headset whose SCO link failed is not a way to hear the call: without it, the
+        // communication mode would put the call on the earpiece.
+        val usable = if (scoFailed) outputs.filter { it != AudioDeviceInfo.TYPE_BLUETOOTH_SCO } else outputs
+        return when {
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO in usable -> LegacyRoute.BLUETOOTH_SCO
+            usable.any { isPersonal(it) } -> LegacyRoute.HEADSET
+            else -> LegacyRoute.SPEAKER
+        }
     }
+
+    /**
+     * The communication device changed to [nowType] after the session selected a personal device
+     * ([selectedPersonal]): the platform fell back to the earpiece (or to nothing), so the headset
+     * did not take the call (busy, refused, its link failed). The session then re-routes without it.
+     */
+    fun fellBack(nowType: Int?, selectedPersonal: Boolean): Boolean =
+        selectedPersonal && (nowType == null || nowType == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE)
 
     /**
      * The audio mode says a call owns the audio: a phone call ringing, answered or being screened.
