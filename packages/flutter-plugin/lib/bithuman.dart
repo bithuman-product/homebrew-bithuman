@@ -133,8 +133,9 @@ class BithumanAvatar implements VoiceHost {
     }
     // Seed readiness before returning (a warm engine reports ready on this
     // first probe, so [isReady] is accurate the moment load resolves); if
-    // the engine is still warming, keep polling every 500 ms — a simple,
-    // robust one-shot transition that needs no extra EventChannel plumbing.
+    // the engine is still warming, keep polling — a simple, robust one-shot
+    // transition that needs no extra EventChannel plumbing. Fast at first
+    // (see [_readyPollDelay]): readiness usually lands within ~2 s of load.
     await avatar._checkReady();
     return avatar;
   }
@@ -142,6 +143,17 @@ class BithumanAvatar implements VoiceHost {
   bool _ready = false;
   final Completer<void> _readyCompleter = Completer<void>();
   Timer? _readyPoll;
+  int _readyPolls = 0;
+
+  /// 40 ms for the first ~3 s after load, then 250 ms. A fixed 500 ms step added
+  /// 0-500 ms to every character's reveal for nothing: on Android `isReady` means
+  /// the first frame is on the texture, typically ~0.1 s after `load` returns —
+  /// measured 2026-09-30 on a Galaxy Z Flip5, a cached open turned ready 514 ms
+  /// after load of which ~400 ms was waiting for the next poll; Apple's warm-up
+  /// ends at an arbitrary point too (1.6-2.0 s warm, ~10 s on a first compile).
+  /// A poll is one small method-channel call: ~75 of them over 3 s, then 4/s.
+  Duration get _readyPollDelay =>
+      Duration(milliseconds: _readyPolls < 75 ? 40 : 250);
 
   /// True once the engine's speech path is live. Essence: immediately after
   /// [load]. Essence2: after the deferred actor/director warm-up finishes —
@@ -171,7 +183,8 @@ class BithumanAvatar implements VoiceHost {
       _ready = true;
       if (!_readyCompleter.isCompleted) _readyCompleter.complete();
     } else {
-      _readyPoll = Timer(const Duration(milliseconds: 500), _checkReady);
+      _readyPoll = Timer(_readyPollDelay, _checkReady);
+      _readyPolls++;
     }
   }
 
