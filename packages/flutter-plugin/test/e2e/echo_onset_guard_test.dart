@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:bithuman/bithuman_realtime.dart';
+import 'package:bithuman/src/echo_profile.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mock_realtime/mock_realtime.dart';
 
@@ -79,7 +80,8 @@ void main() {
 
   test('while the agent is first audible, echo-level mic chunks go up as silence, '
       'a voice-level chunk goes up intact', () async {
-    final s = BithumanRealtimeSession(apiKey: 'k', avatar: host, model: 'm');
+    final s = BithumanRealtimeSession(
+        apiKey: 'k', avatar: host, model: 'm', echoOnsetGuard: const Duration(seconds: 8));
     final conn = await dial(s);
     await conn.sendResponse(chunks: 10, chunkMs: 100, done: false); // 1 s of agent audio
     await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -108,7 +110,8 @@ void main() {
     // 20 s of agent audio lands in well under a second (the transport hands a reply over as
     // it arrives). The window is the canceller's clock — audible time — so the first seconds
     // of PLAYBACK are guarded; a window counted in delivered audio had closed already.
-    final s = BithumanRealtimeSession(apiKey: 'k', avatar: host, model: 'm');
+    final s = BithumanRealtimeSession(
+        apiKey: 'k', avatar: host, model: 'm', echoOnsetGuard: const Duration(seconds: 8));
     final conn = await dial(s);
     await conn.sendResponse(chunks: 200, chunkMs: 100, done: false);
     await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -125,6 +128,42 @@ void main() {
     // Five 100 ms chunks fill the 500 ms window; the sixth goes up as captured.
     expect(await sendAndReadPeaks(conn, List.generate(6, (_) => pcmAt(1400))),
         [0, 0, 0, 0, 0, 1400]);
+    await s.stop();
+  });
+
+  test('by default the guard is the device row: on for iPhone only', () async {
+    // EchoProfile.onsetGuard: 8 s where the onset residual was measured to trip server_vad
+    // (iPhone), off where it sits far below the floor (Android, macOS). The test host
+    // resolves a row by its OS, so the expectation reads the row.
+    expect(EchoProfile.iphone.onsetGuard, const Duration(seconds: 8));
+    expect(EchoProfile.android.onsetGuard, Duration.zero);
+    expect(EchoProfile.mac.onsetGuard, Duration.zero);
+    final s = BithumanRealtimeSession(apiKey: 'k', avatar: host, model: 'm');
+    final conn = await dial(s);
+    await conn.sendResponse(chunks: 10, chunkMs: 100, done: false);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    final guarded = EchoProfile.current.onsetGuard > Duration.zero;
+    expect(await sendAndReadPeaks(conn, [pcmAt(1400)]), [guarded ? 0 : 1400]);
+    await s.stop();
+  });
+
+  test('a start() still waiting for speechReady does not dial after a stop and restart',
+      () async {
+    final ready = Completer<void>();
+    final s = BithumanRealtimeSession(
+        apiKey: 'k', avatar: host, model: 'm', speechReady: ready.future);
+    final first = s.start();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    await s.stop();
+    final second = s.start();
+    ready.complete();
+    final conn = await server.nextConnection();
+    conn.sendSessionCreated();
+    await conn.nextEventOfType('session.update');
+    await conn.nextEventOfType('response.create');
+    await Future.wait([first, second]);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(host.count('audioStart'), 1, reason: 'one dial, from the live start()');
     await s.stop();
   });
 

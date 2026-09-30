@@ -32,6 +32,7 @@ class EchoProfile {
     required this.falsifierSeconds,
     required this.falsifierTurns,
     required this.source,
+    this.onsetGuard = Duration.zero,
   })  : assert(serverVadThreshold > 0.0 && serverVadThreshold < 1.0,
             'server_vad threshold is a fraction'),
         assert(residualDbfsMax < 0 && residualDbfsMax > -91,
@@ -45,6 +46,17 @@ class EchoProfile {
             'the falsifier is at least 3 x 60 s of the agent talking, nobody in the room');
 
   final EchoDeviceClass device;
+
+  /// The realtime session's echo-onset guard on this device: for this much AUDIBLE agent
+  /// time at the start of a session, mic chunks under −18 dBFS are sent as silence while
+  /// the agent is audible (`BithumanRealtimeSession.echoOnsetGuard`, which overrides it).
+  /// On only where the echo canceller's ONSET was measured to trip server_vad: the iPhone
+  /// 15 loudspeaker run of 2026-09-28 (two false `speech_started` in the first reply, on
+  /// −28 / −23 / −27 dBFS residual peaks). Off where the measured residual sits far below
+  /// the floor (Android: exact digital zero during pure echo; macOS: ≤ −54 dBFS worst
+  /// second, with AGC off) — there the guard would only risk swallowing a quiet voice that
+  /// talks over the greeting.
+  final Duration onsetGuard;
 
   /// OpenAI `turn_detection.server_vad.threshold` (0..1) sent by BOTH transports.
   ///
@@ -124,6 +136,7 @@ class EchoProfile {
     device: EchoDeviceClass.iphone,
     serverVadThreshold: 0.5,
     vpioAgc: true,
+    onsetGuard: Duration(seconds: 8),
     residualDbfsMax: -31,
     residualDbfsMedian: -71,
     measuredOn: 'iPhone 15, built-in speaker, expression-2, VP-IO on, AGC default',
