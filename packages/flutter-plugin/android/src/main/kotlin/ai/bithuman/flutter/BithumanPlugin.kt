@@ -104,9 +104,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
          */
         fun draw(bmp: Bitmap) {
             if (stopped.get()) return
-            // The producer's CURRENT surface, every frame: Flutter replaces it when it lets go
-            // of its buffers (Impeller does that when the app is backgrounded or memory is
-            // trimmed, and makes a new one on return), so a Surface kept from load could be dead.
+            // The producer's CURRENT surface, every frame (cheap): a producer may hand out a new
+            // one over its life, so a Surface kept from load is not assumed to stay valid.
             val surface = entry.surface
             if (!surface.isValid) return
             val canvas = try { if (hwCanvas) surface.lockHardwareCanvas() else surface.lockCanvas(null) } catch (e: Exception) {
@@ -236,7 +235,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         }
         // Texture registration must happen on the platform thread; the fetch and the
         // engine warm-up must not (a first run downloads ~158 MB).
-        // ★ A SurfaceProducer, not a SurfaceTexture (2.6.24). Under Impeller (Vulkan, the
+        // ★ A SurfaceProducer, not a SurfaceTexture. Under Impeller (Vulkan, the
         // default on Android 10+) a SurfaceTexture reaches the raster thread through a GLES
         // interop — Flutter logs "migrate … to the new surface producer API" — and every
         // avatar frame paid for it there: 10.4 ms p50 of raster per frame on a Galaxy Z Flip5
@@ -272,7 +271,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 // was all a failed fetch ever logged.
                 if (cancelled) Log.i(TAG, "load of $code cancelled +${(System.nanoTime() - t0) / 1_000_000} ms: $e")
                 else Log.e(TAG, "load failed: $e${e.cause?.let { " (cause: $it)" } ?: ""}", e)
-                main.post { entry.release(); result.error(if (cancelled) "load_cancelled" else "load_failed", e.message ?: e.toString(), null) }
+                main.post { runCatching { entry.release() }; result.error(if (cancelled) "load_cancelled" else "load_failed", e.message ?: e.toString(), null) }
             } finally {
                 loadEvents.end(handle)
             }
