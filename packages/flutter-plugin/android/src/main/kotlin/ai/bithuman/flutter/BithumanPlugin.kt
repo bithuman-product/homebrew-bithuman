@@ -21,7 +21,10 @@
 //
 // Audio: the realtime session (Dart, WebSocket) hands the agent's 24 kHz PCM16 in via
 // playSpeakerPCM and takes the microphone's 24 kHz PCM16 out over the mic EventChannel;
-// MicCapture keeps the microphone open on the platform's communication path (full duplex).
+// MicCapture keeps the microphone open on the platform's communication path (full duplex),
+// on the person's headset when one is connected. From audioStart to audioStop the session
+// holds audio focus, and a phone call or another app taking the sound is pushed to Dart as
+// `audioInterruption` (AudioInterruptions.kt).
 
 package ai.bithuman.flutter
 
@@ -97,6 +100,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         /** A fresh player is waiting for the held one's threads to return (platform thread). */
         var resuming = false
         var mic: MicCapture? = null
+        /** audioStart → audioStop: the audio focus held and the call watched (AudioInterruptions.kt). */
+        var interruptions: AudioInterruptions? = null
         var micSink: EventChannel.EventSink? = null
         var micChannel: EventChannel? = null
         var framesDrawn = 0L
@@ -447,7 +452,21 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val enableMic = call.argument<Boolean>("enableMic") ?: true
         val gen = call.argument<Number>("micGen")?.toInt() ?: 0
         stopMic(s)
+        // The call's audio focus and the phone-call watch, for speaker-only sessions too: a call
+        // answered from its notification leaves the app on screen and would otherwise go on.
+        val watch = AudioInterruptions(context, main) { began, reason, shouldResume ->
+            if (!s.stopped.get() && !detached) runCatching {
+                channel.invokeMethod("audioInterruption", mapOf(
+                    "textureId" to s.entry.id(), "state" to if (began) "began" else "ended",
+                    "reason" to reason, "shouldResume" to shouldResume))
+            }
+        }
+        s.interruptions = watch
+        val clear = watch.start()
         if (!enableMic) return result.success(null)
+        // A call already holds the audio: no microphone (it would change the audio mode under the
+        // call); Dart has been told, and the session ends.
+        if (!clear) { Log.w(TAG, "a call holds the audio: the microphone stays closed"); return result.success(null) }
         // The channel name must match Dart byte-for-byte, gen and all.
         val ch = EventChannel(messenger, "ai.bithuman.avatar.mic/${s.entry.id()}/$gen")
         ch.setStreamHandler(object : EventChannel.StreamHandler {
@@ -466,13 +485,14 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         // Reply now so the session opens; the mic joins the moment the permission is answered.
         result.success(null)
         if (micGranted()) startCapture() else requestMic { granted ->
-            if (granted && !s.stopped.get() && s.micChannel === ch && !detached) startCapture()
+            if (granted && !s.stopped.get() && s.micChannel === ch && !detached && s.interruptions?.isInterrupted != true) startCapture()
             else Log.w(TAG, "microphone permission denied — speaker-only session")
         }
     }
 
     private fun stopMic(s: AvatarSession) {
         s.mic?.stop(); s.mic = null
+        s.interruptions?.stop(); s.interruptions = null
         s.micSink = null
         s.micChannel?.setStreamHandler(null); s.micChannel = null
     }

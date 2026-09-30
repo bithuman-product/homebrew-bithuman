@@ -41,6 +41,7 @@ import QuartzCore   // CACurrentMediaTime for the utterance-gate clock
 import os           // os_unfair_lock for the cross-thread graph-mutation gate
 #if os(iOS)
 import Flutter
+import CallKit     // CXCallObserver: is the interruption a phone (or VoIP) call?
 #elseif os(macOS)
 import FlutterMacOS
 import CoreAudio   // HAL default-device listeners for audio hot-swap (no AVAudioSession on macOS)
@@ -111,6 +112,15 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
 
   // Event channel sink — set when Dart subscribes.
   private var micEventSink: FlutterEventSink?
+
+  /// The system took this session's sound away (`began` true: a phone call ringing or answered —
+  /// also from the banner, with the app still on screen —, Siri, an alarm) or gave it back
+  /// (`began` false, with the system's shouldResume). `reason` is "call" when a call is in
+  /// progress, else "system". Main thread. The plugin forwards it to Dart as `audioInterruption`.
+  /// ★Until 2.6.25 only the audio engine heard it: the session paused its sound and the
+  /// realtime session above it went on, billed, under the phone call. iOS only (macOS has no
+  /// AVAudioSession interruptions); nil = nobody listens.
+  var onInterruption: ((_ began: Bool, _ reason: String, _ shouldResume: Bool) -> Void)?
 
   // Forward each resampled chunk to the render side so it lands in the
   // avatar's compose buffer at the same moment we hand it to the player.
@@ -676,6 +686,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     try session.setCategory(.playAndRecord, mode: .videoChat, options: options)
     try session.setPreferredSampleRate(48_000)
     try session.setActive(true)
+    if callObserver == nil { callObserver = CXCallObserver() }
     // ★THE PLATFORM ASYMMETRY, MEASURED RATHER THAN ASSUMED. iOS has an AVAudioSession
     // with a real output latency; macOS has no session at all. Audio handed to the player
     // reaches the ear that much later, and nothing in this file has ever read the number —
@@ -687,16 +698,40 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
           session.outputLatency * 1000, session.inputLatency * 1000,
           session.ioBufferDuration * 1000, session.sampleRate, route.isEmpty ? "none" : route)
     // PRIMARY fix: .defaultToSpeaker is unreliable under VP-IO, so force the
-    // loudspeaker route explicitly (no-op for Bluetooth/wired routes). This is
-    // a route override only — it does NOT change the mode and does NOT disable
-    // VP-IO, so AEC / barge-in stay intact (AEC comes from
-    // setVoiceProcessingEnabled on the nodes, not the session mode).
-    try session.overrideOutputAudioPort(.speaker)
+    // loudspeaker route explicitly. This is a route override only — it does NOT
+    // change the mode and does NOT disable VP-IO, so AEC / barge-in stay intact
+    // (AEC comes from setVoiceProcessingEnabled on the nodes, not the session mode).
+    // ★ONLY WITH NOTHING PERSONAL CONNECTED (2.6.25). The override is NOT a no-op on a
+    // Bluetooth or wired route: Apple's `.speaker` override moves the call to the built-in
+    // speaker and microphone "regardless of other settings", so a person in AirPods heard
+    // the agent from the phone. With headphones, a headset, Bluetooth, CarPlay or USB audio
+    // on the route, the route stands.
+    if Self.routeIsPersonal(session) {
+      NSLog("[RealtimeAudioIO] route kept (personal output: %@)",
+            session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","))
+    } else {
+      try session.overrideOutputAudioPort(.speaker)
+    }
     NSLog("[RealtimeAudioIO] session: category=%@ mode=%@ sr=%.0f out=%@",
           session.category.rawValue, session.mode.rawValue, session.sampleRate,
           session.currentRoute.outputs.map { $0.portType.rawValue }
             .joined(separator: ","))
   }
+
+  /// Outputs a person connects to hear a call privately (or in the car): the session never
+  /// overrides them to the loudspeaker.
+  private static let personalOutputs: Set<AVAudioSession.Port> = [
+    .headphones, .bluetoothHFP, .bluetoothA2DP, .bluetoothLE, .carAudio, .usbAudio,
+    .airPlay, .HDMI, .lineOut,
+  ]
+  static func routeIsPersonal(_ session: AVAudioSession) -> Bool {
+    session.currentRoute.outputs.contains { personalOutputs.contains($0.portType) }
+  }
+
+  /// Answers "is a phone or VoIP call ringing or running?" when an interruption begins.
+  private var callObserver: CXCallObserver?
+  /// The reason given with the last `began`, repeated with its `ended`.
+  private var interruptionReason = "system"
 
   // Strong refs on the notification observers so we can remove them in stop().
   private var interruptionObserver: NSObjectProtocol?
@@ -716,15 +751,25 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
             let type = AVAudioSession.InterruptionType(rawValue: typeRaw) else { return }
       switch type {
       case .began:
-        NSLog("[RealtimeAudioIO] AVAudioSession interruption BEGAN — pausing engine")
+        let inCall = self.callObserver?.calls.contains { !$0.hasEnded } ?? false
+        // A began that is only delivered now, for an interruption that happened while the app
+        // was suspended, is history: the engine is paused below as before, Dart is not told.
+        let stale = (info[AVAudioSessionInterruptionWasSuspendedKey] as? Bool) ?? false
+        NSLog("[RealtimeAudioIO] AVAudioSession interruption BEGAN (%@%@) — pausing engine",
+              inCall ? "call" : "system", stale ? ", was suspended" : "")
         if self.started, self.engine.isRunning {
           _ = bh_tryRun { self.engine.pause() }
           _ = bh_tryRun { self.player.pause() }
+        }
+        if self.started, !stale {
+          self.interruptionReason = inCall ? "call" : "system"
+          self.onInterruption?(true, self.interruptionReason, false)
         }
       case .ended:
         let opts = (info[AVAudioSessionInterruptionOptionKey] as? UInt).map {
           AVAudioSession.InterruptionOptions(rawValue: $0)
         } ?? []
+        if self.started { self.onInterruption?(false, self.interruptionReason, opts.contains(.shouldResume)) }
         if opts.contains(.shouldResume), self.started {
           do {
             try AVAudioSession.sharedInstance().setActive(true)

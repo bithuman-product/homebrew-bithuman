@@ -1,6 +1,7 @@
 package ai.bithuman.flutter
 
 import android.content.Context
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -8,6 +9,8 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 
 /**
@@ -33,6 +36,12 @@ import android.util.Log
  *    heard over the agent, so `speech_started` never fired (0 in a 5-minute owner
  *    session). The mode is restored on [stop].
  *
+ *  - ★THE ROUTE IS THE PERSON'S (2.6.25). Bluetooth earbuds or a headset (classic SCO or LE
+ *    Audio), a wired or USB headset or a hearing aid keep the call; the loudspeaker is selected
+ *    only when none is connected, never the earpiece. Until 2.6.25 the loudspeaker was forced
+ *    here whatever was connected. Devices that come or go during the call re-route it the same
+ *    way (AudioRules.pickCommunicationDevice; `[bhroute]` lines).
+ *
  *  - SILENCE IS SENT, NOT NOTHING. Dropping chunks leaves a hole in the uplink and the
  *    resumption reads to the server's turn detector as an onset. The stream is
  *    continuous at 10 chunks/s; the `bhmic` line every second carries the running
@@ -48,18 +57,16 @@ class MicCapture(
     private var aec: AcousticEchoCanceler? = null
     private var thread: Thread? = null
     private var modeBefore = AudioManager.MODE_NORMAL
+    /** API < 31: this session started the Bluetooth SCO link, so it stops it. */
+    private var scoStarted = false
+    private var deviceCallback: AudioDeviceCallback? = null
 
     /** Blocks nothing; the capture runs on its own thread until [stop]. Returns false if the mic did not open. */
     fun start(): Boolean {
         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         modeBefore = am.mode
         am.mode = AudioManager.MODE_IN_COMMUNICATION
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val speaker = am.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-            if (speaker == null || !am.setCommunicationDevice(speaker)) Log.w(TAG, "speakerphone not selected")
-        } else {
-            @Suppress("DEPRECATION") am.isSpeakerphoneOn = true
-        }
+        route(am, "start")
         val minBuf = AudioRecord.getMinBufferSize(RATE_IN, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val r = try {
             AudioRecord(
@@ -76,6 +83,11 @@ class MicCapture(
         }
         r.startRecording()
         live = true
+        // Earbuds put in or taken out mid-call re-route it (the callback also lists what is there now).
+        deviceCallback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { if (live) route(am, "device added") }
+            override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) { if (live) route(am, "device removed") }
+        }.also { cb -> runCatching { am.registerAudioDeviceCallback(cb, Handler(Looper.getMainLooper())) } }
         Log.i("bhmic", "OPEN source=VOICE_COMMUNICATION mode=${am.mode} device=${r.routedDevice?.type} " +
             "aec=${aec?.enabled} rateIn=$RATE_IN chunkMs=100 hostMs=${System.currentTimeMillis()}")
         // The SAME attestation Apple's RealtimeAudioIO emits, in the same vocabulary, so
@@ -102,14 +114,59 @@ class MicCapture(
     }
 
     private fun restoreMode(am: AudioManager) {
+        deviceCallback?.let { cb -> runCatching { am.unregisterAudioDeviceCallback(cb) } }
+        deviceCallback = null
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 am.clearCommunicationDevice()
             } else {
                 @Suppress("DEPRECATION")
                 am.isSpeakerphoneOn = false
+                if (scoStarted) {
+                    @Suppress("DEPRECATION") am.isBluetoothScoOn = false
+                    @Suppress("DEPRECATION") am.stopBluetoothSco()
+                    scoStarted = false
+                }
             }
-            am.mode = modeBefore
+            // A phone call that took over owns the mode now: leave it alone.
+            if (!AudioRules.isCallMode(am.mode)) am.mode = modeBefore
+        }
+    }
+
+    /**
+     * The session's output: the person's headset or earbuds when one is connected, else the
+     * loudspeaker (AudioRules). Called at start and whenever a device comes or goes.
+     */
+    private fun route(am: AudioManager, why: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val available = am.availableCommunicationDevices
+            val current = am.communicationDevice
+            val want = AudioRules.pickCommunicationDevice(available.map { it.type }, current?.type)
+            val dev = if (current != null && current.type == want) current else available.firstOrNull { it.type == want }
+            if (dev == null) { Log.w("bhroute", "[bhroute] at=$why nothing to select (available=${available.map { it.type }})"); return }
+            if (current?.id == dev.id) return
+            val ok = am.setCommunicationDevice(dev)
+            Log.i("bhroute", "[bhroute] at=$why selected=${dev.type}${if (ok) "" else " REFUSED"} was=${current?.type} " +
+                "available=${available.map { it.type }} personal=${AudioRules.isPersonal(dev.type)}")
+        } else {
+            val outs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type }
+            val r = AudioRules.legacyRoute(outs)
+            @Suppress("DEPRECATION")
+            when (r) {
+                AudioRules.LegacyRoute.BLUETOOTH_SCO -> {
+                    am.isSpeakerphoneOn = false
+                    if (!scoStarted) { am.startBluetoothSco(); am.isBluetoothScoOn = true; scoStarted = true }
+                }
+                AudioRules.LegacyRoute.HEADSET -> {
+                    am.isSpeakerphoneOn = false
+                    if (scoStarted) { am.isBluetoothScoOn = false; am.stopBluetoothSco(); scoStarted = false }
+                }
+                AudioRules.LegacyRoute.SPEAKER -> {
+                    if (scoStarted) { am.isBluetoothScoOn = false; am.stopBluetoothSco(); scoStarted = false }
+                    am.isSpeakerphoneOn = true
+                }
+            }
+            Log.i("bhroute", "[bhroute] at=$why legacy=$r outputs=$outs")
         }
     }
 

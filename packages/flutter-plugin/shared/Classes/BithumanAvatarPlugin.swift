@@ -164,6 +164,20 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
   }
   #endif
 
+  /// A phone call (or Siri, an alarm) taking this session's sound, and giving it back, as
+  /// `audioInterruption` on the avatar channel: {textureId, state: began|ended, reason:
+  /// call|system, shouldResume}. RealtimeAudioIO calls on the main thread. Dart's
+  /// BithumanRealtimeSession ends the call on `began` (2.6.25): until then the sound paused and
+  /// the realtime session went on, billed, under the phone call.
+  private func forwardInterruptions(of io: RealtimeAudioIO, textureId: Int64) {
+    io.onInterruption = { [weak self] began, reason, shouldResume in
+      self?.channel?.invokeMethod("audioInterruption", arguments: [
+        "textureId": textureId, "state": began ? "began" : "ended",
+        "reason": reason, "shouldResume": shouldResume,
+      ])
+    }
+  }
+
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
     case "load":
@@ -527,6 +541,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       if audioIOs[textureId] == nil {
         let io = RealtimeAudioIO()
         io.lipsyncSink = textures[textureId]   // nil = headless voice session
+        forwardInterruptions(of: io, textureId: textureId)
         audioIOs[textureId] = io
         if let messenger = registrarMessenger {
           // Unique per-session name (textureId/micGen) so the previous
@@ -709,6 +724,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       if audioIOs[textureId] == nil {
         let io = RealtimeAudioIO()
         io.lipsyncSink = textures[textureId]   // nil = headless local voice session
+        forwardInterruptions(of: io, textureId: textureId)
         audioIOs[textureId] = io
       }
       guard let io = audioIOs[textureId] else {

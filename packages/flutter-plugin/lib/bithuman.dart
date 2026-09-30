@@ -14,7 +14,7 @@ import 'package:flutter/services.dart';
 
 import 'src/voice_host.dart';
 
-export 'src/voice_host.dart' show VoiceHost;
+export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption;
 
 const _channel = MethodChannel('ai.bithuman.avatar');
 
@@ -71,6 +71,12 @@ class BithumanAvatar implements VoiceHost {
           // iOS system Picture-in-Picture lifecycle:
           // started | failed | stopped | restore (user tapped restore).
           avatar._pipController.add(args?['event'] as String? ?? '');
+        case 'audioInterruption':
+          // A phone call (Siri, another app's call) took this session's sound, or gave it back.
+          final e = BithumanAudioInterruption.fromMap(args);
+          if (e != null && !avatar._interruptionController.isClosed) {
+            avatar._interruptionController.add(e);
+          }
       }
       return null;
     });
@@ -629,6 +635,19 @@ class BithumanAvatar implements VoiceHost {
     });
   }
 
+  final StreamController<BithumanAudioInterruption> _interruptionController =
+      StreamController<BithumanAudioInterruption>.broadcast();
+
+  /// The platform took this avatar's session sound away, or gave it back (iOS:
+  /// an audio-session interruption such as a phone call, also one answered from
+  /// its banner; Android: the call's audio focus lost; macOS: never). Only
+  /// between [audioStart] and [audioStop]. `BithumanRealtimeSession` listens
+  /// and, by default, ends itself on a `began`.
+  @override
+  Stream<BithumanAudioInterruption> get audioInterruptions {
+    return _interruptionController.stream;
+  }
+
   /// Drop the underlying native runtime. Idempotent.
   Future<void> dispose() async {
     if (_disposed) return;
@@ -639,6 +658,7 @@ class BithumanAvatar implements VoiceHost {
     if (!_readyCompleter.isCompleted) _readyCompleter.complete();
     unawaited(_frameSizeController.close());
     unawaited(_pipController.close());
+    unawaited(_interruptionController.close());
     await _channel.invokeMethod('dispose', {'textureId': textureId});
   }
 }
