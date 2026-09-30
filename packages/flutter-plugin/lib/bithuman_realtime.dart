@@ -108,8 +108,9 @@ class BithumanRealtimeSession {
   /// canceller's onset residual (measured 2026-09-28, iPhone 15 loudspeaker: -28 /
   /// -23 / -27 dBFS peaks, two false `speech_started` in the first reply) does not.
   /// Null (the default) takes the device's row, `EchoProfile.onsetGuard`: 8 s on
-  /// iPhone, off on Android and macOS, whose measured residuals sit far below the
-  /// floor. `Duration.zero` disables it.
+  /// iPhone and Android, where the canceller's onset was measured to trip server_vad;
+  /// off on macOS, whose measured residual sits far below the floor. `Duration.zero`
+  /// disables it.
   final Duration? echoOnsetGuard;
   static const int _guardPeakFloor = 4096; // ≈ -18 dBFS
   static const Duration _guardTail = Duration(milliseconds: 1500);

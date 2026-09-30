@@ -131,12 +131,12 @@ void main() {
     await s.stop();
   });
 
-  test('by default the guard is the device row: on for iPhone only', () async {
+  test('by default the guard is the device row: on for phones, off on the Mac', () async {
     // EchoProfile.onsetGuard: 8 s where the onset residual was measured to trip server_vad
-    // (iPhone), off where it sits far below the floor (Android, macOS). The test host
-    // resolves a row by its OS, so the expectation reads the row.
+    // (iPhone 15, Galaxy Z Flip5), off where it sits far below the floor (macOS). The test
+    // host resolves a row by its OS, so the expectation reads the row.
     expect(EchoProfile.iphone.onsetGuard, const Duration(seconds: 8));
-    expect(EchoProfile.android.onsetGuard, Duration.zero);
+    expect(EchoProfile.android.onsetGuard, const Duration(seconds: 8));
     expect(EchoProfile.mac.onsetGuard, Duration.zero);
     final s = BithumanRealtimeSession(apiKey: 'k', avatar: host, model: 'm');
     final conn = await dial(s);

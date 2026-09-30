@@ -50,12 +50,16 @@ class EchoProfile {
   /// The realtime session's echo-onset guard on this device: for this much AUDIBLE agent
   /// time at the start of a session, mic chunks under −18 dBFS are sent as silence while
   /// the agent is audible (`BithumanRealtimeSession.echoOnsetGuard`, which overrides it).
-  /// On only where the echo canceller's ONSET was measured to trip server_vad: the iPhone
-  /// 15 loudspeaker run of 2026-09-28 (two false `speech_started` in the first reply, on
-  /// −28 / −23 / −27 dBFS residual peaks). Off where the measured residual sits far below
-  /// the floor (Android: exact digital zero during pure echo; macOS: ≤ −54 dBFS worst
-  /// second, with AGC off) — there the guard would only risk swallowing a quiet voice that
-  /// talks over the greeting.
+  /// On where the echo canceller's ONSET was measured to trip server_vad:
+  ///  * iPhone 15 loudspeaker, 2026-09-28: two false `speech_started` in the first reply,
+  ///    on −28 / −23 / −27 dBFS residual peaks;
+  ///  * Galaxy Z Flip5, 2026-09-30, call volume at its floor: with the guard off, 2 of 2
+  ///    20 s runs had one false `speech_started` ~3.3 s into the greeting (the mic read
+  ///    digital zero, then a −13 dBFS transient while the far end peaked); with it on, 0 of
+  ///    2 (the same transient appears and is silenced). The S25+ row's steady residual is
+  ///    digital zero, but that phone's onset was never the question.
+  /// Off on macOS (≤ −54 dBFS worst second, AGC off, 0 / 354 s): there the guard could only
+  /// swallow a quiet voice that talks over the greeting from a desk's distance.
   final Duration onsetGuard;
 
   /// OpenAI `turn_detection.server_vad.threshold` (0..1) sent by BOTH transports.
@@ -153,6 +157,7 @@ class EchoProfile {
   static const android = EchoProfile(
     device: EchoDeviceClass.android,
     serverVadThreshold: 0.5,
+    onsetGuard: Duration(seconds: 8),
     vpioAgc: false, // n/a: MODE_IN_COMMUNICATION + the platform AEC (MicCapture.kt)
     residualDbfsMax: -31,
     residualDbfsMedian: -90,
