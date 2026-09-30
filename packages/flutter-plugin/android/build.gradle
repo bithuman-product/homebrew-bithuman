@@ -1,10 +1,21 @@
 // bithuman — Android half of the umbrella plugin (expression-2 and essence-2 on device).
 //
 // The engines are the PUBLISHED `ai.bithuman:expression2-android` and
-// `ai.bithuman:essence2-android` AARs from Maven Central, so a fresh clone builds with no
-// private SDK and no vendor bundle. BOTH engines resolve from mavenCentral() alone.
-// google() stays in the lists below for AGP's own tooling (aapt2 and the build tools),
-// NOT to resolve an engine.
+// `ai.bithuman:essence2-android` AARs, so a fresh clone builds with no private SDK and no
+// vendor bundle. google() stays in the lists below for AGP's own tooling (aapt2 and the
+// build tools), NOT to resolve an engine.
+//
+// ★ WHERE THE ENGINES COME FROM (2026-09-30). bitHuman publishes `ai.bithuman` to its own
+// Maven repository, https://maven.bithuman.ai, and no longer to Maven Central; the versions
+// already on Central stay there and are served by maven.bithuman.ai too. This file adds that
+// repository to EVERY project of the app (rootProject.allprojects below), so a Flutter app
+// that depends on this plugin resolves the engines with nothing added to its own Gradle
+// files. It is a CONTENT FILTER (`includeGroup "ai.bithuman"`), not `exclusiveContent`, on
+// purpose: Gradle asks maven.bithuman.ai for ai.bithuman only; a version Central still
+// serves keeps resolving from Central first; and an app whose own settings already declare
+// maven.bithuman.ai as the exclusive home of ai.bithuman (the native Android docs do) keeps
+// working, because this filter never competes with an exclusive declaration. The engines'
+// own dependencies (kotlin-stdlib, com.qualcomm.qti) are still Central's.
 //
 // ★ It used to be otherwise, and the old note here outlived the fact. expression-2
 // carried a transitive `com.google.ai.edge.litert:litert` — which is 404 on Central, so
@@ -44,6 +55,11 @@ rootProject.allprojects {
         google()
         mavenCentral()
         mavenLocal()
+        // ai.bithuman (both engines), from bitHuman's own repository. See the header.
+        maven {
+            url = uri("https://maven.bithuman.ai")
+            content { includeGroup("ai.bithuman") }
+        }
     }
 }
 

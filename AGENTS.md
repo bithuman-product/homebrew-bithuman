@@ -18,7 +18,7 @@ Read facts from the docs, not from memory or from this file. The docs are genera
 |---|---|---|---|
 | An iPhone or iPad app | Swift package: `Expression2` or `Essence2Kit` | https://docs.bithuman.ai/platforms/ios | https://github.com/bithuman-product/bithuman-examples/tree/main/swift |
 | A Mac app | the same Swift package | https://docs.bithuman.ai/platforms/macos | `swift/macos-expression2` in bithuman-examples |
-| An Android app | Maven Central: `ai.bithuman:expression2-android`, `ai.bithuman:essence2-android` | https://docs.bithuman.ai/platforms/android | `android/` in bithuman-examples |
+| An Android app | maven.bithuman.ai (bitHuman's Maven repository): `ai.bithuman:expression2-android`, `ai.bithuman:essence2-android` | https://docs.bithuman.ai/platforms/android | `android/` in bithuman-examples |
 | A live avatar from the terminal, no code | the CLI | https://docs.bithuman.ai/platforms/cli | `api/cli/` in bithuman-examples |
 | Frames or MP4s from Python | `pip install bithuman` | https://docs.bithuman.ai/platforms/python | `python/quickstart/` in bithuman-examples |
 | A face for a LiveKit voice agent | `livekit-plugins-bithuman` | https://docs.bithuman.ai/platforms/livekit | `python/` in bithuman-examples |
@@ -55,7 +55,7 @@ Examples live in https://github.com/bithuman-product/bithuman-examples. This rep
 - **Billing.** Sessions bill active session time, talking or idle, to the second. Quote rates only from `/v1/pricing` or the docs pricing page.
 - **The API secret.** One credential for every surface, `BITHUMAN_API_SECRET`. Keep it in the environment or the Keychain, never in source, argv or a build flag. An app you distribute holds the secret on every device, so fetch it from your backend at startup, use a separate secret per app, and rotate it if usage looks wrong. In a LiveKit worker, name it `BITHUMAN_MASTER_SECRET` and pass a minted token (https://docs.bithuman.ai/platforms/livekit).
 - **Where things happen.** Say where the avatar renders (device, browser, your server, or the bitHuman cloud) and where the conversation runs (your stack, the CLI's local conversation brain, or bitHuman's servers). Phones, Macs and browsers stay online: a session checks the credential when it starts.
-- **Versions.** Never write a version from memory; read `versions.json`, the tap's tags (`git ls-remote --tags`), PyPI or Maven Central.
+- **Versions.** Never write a version from memory; read `versions.json`, the tap's tags (`git ls-remote --tags`), PyPI or maven.bithuman.ai (`ai.bithuman/<artifact>/maven-metadata.xml`).
 - **The CLI is not on PyPI.** `pip install bithuman` is the Python library and puts no `bithuman` command on PATH. Install the CLI with `brew install bithuman-product/bithuman/bithuman-cli` (macOS) or `curl -fsSL https://install.bithuman.ai | sh` (macOS, Linux).
 
 ## Working in this repository
