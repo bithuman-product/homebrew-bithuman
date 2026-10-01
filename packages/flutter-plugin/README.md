@@ -143,7 +143,8 @@ final session = BithumanRealtimeSession(
 );
 
 session.statusStream.listen((s) => debugPrint('status: $s'));
-session.botTranscriptStream.listen((delta) => debugPrint('bot: $delta'));
+// Captions: the agent's words as they are heard (cumulative per reply; replace, do not append).
+session.spokenTranscriptStream.listen((e) => setState(() => caption = e.text));
 session.userTranscriptStream.listen((t) => debugPrint('user: $t'));
 session.micLevelStream.listen((lvl) {/* drive a mic pulse */});
 session.botLevelStream.listen((lvl) {/* drive a speaking pulse */});
@@ -169,7 +170,7 @@ conformer to record audio, drive a different renderer, or stand a voice session 
 process that has no UI.
 
 ```dart
-class MyVoiceHost implements VoiceHost { /* 14 members, no render */ }
+class MyVoiceHost implements VoiceHost { /* 16 members, no render */ }
 
 final session = BithumanRealtimeSession(
   apiKey: key, avatar: MyVoiceHost(), systemPrompt: '…', voice: 'alloy', vadThreshold: 0,
@@ -235,7 +236,8 @@ Plus catalog helpers (anonymous, no auth):
 | `applySettings({systemPrompt})` | Hot-update the system prompt mid-session (voice cannot be changed mid-call). |
 | `muted` | When true, mic capture continues (needed for VP-IO reference) but bytes are not sent to OpenAI. |
 | `statusStream` | `RealtimeStatus` events: connecting, open, userSpeaking, userStopped, responseDone, closed, error. |
-| `botTranscriptStream` | Streaming partials of what the bot is saying. |
+| `spokenTranscriptStream` | `BithumanSpokenText` events: the agent's words released as the listener hears them (`text` is the reply's caption so far; a new `reply` number starts a new caption). The last event of a reply is `isFinal`; when it was cut (barge-in, a typed turn, `stop()`) it is also `interrupted` and holds only the words heard. Use this for captions. |
+| `botTranscriptStream` | Streaming partials of what the bot is saying, as the text ARRIVES (for a spoken reply, well ahead of the voice). |
 | `userTranscriptStream` | The user's transcribed speech (when OpenAI returns it). |
 | `micLevelStream` | Mic peak in [0, 1] per ~85 ms chunk. |
 | `botLevelStream` | Bot-audio peak in [0, 1] per chunk. |

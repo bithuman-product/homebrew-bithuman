@@ -34,11 +34,16 @@
 // a REAL `BithumanRealtimeSession` run end to end against a recorded host.
 // `test/e2e/headless_voice_host_test.dart` is exactly that and it RUNS in CI; a
 // headless lipsync recorder, an Android-shaped bridge or a second app's audio
-// stack conform by writing these fifteen.
+// stack conform by writing these sixteen.
 //
 // ★2.6.25 ADDED ONE: [VoiceHost.audioInterruptions]. The platform taking the
 // session's sound away (a phone call answered from its banner leaves the app on
 // screen) is a voice fact the session must act on: the call was billed under it.
+//
+// ★2.6.27 ADDED ONE: [VoiceHost.speechPlayout]. How much of the agent's audio the
+// listener has actually heard is a voice fact too: a reply's audio is handed over
+// in a burst, so only the host knows where the voice is, and captions released
+// on arrival ran seconds ahead of it (src/spoken_captions.dart).
 //
 // The engine side of the same line is `src/engine_protocol.dart`; the native
 // side is `Protocol/LipsyncSink.swift` and `Protocol/BithumanEngine.swift`.
@@ -142,6 +147,47 @@ abstract class VoiceHost {
   /// [BithumanAudioInterruption]. Only between [audioStart] and [audioStop].
   /// A host on a platform without interruptions (macOS) never emits.
   Stream<BithumanAudioInterruption> get audioInterruptions;
+
+  // ── how much of the agent's voice has been heard ───────────────────────────
+
+  /// Where playout stands on the audio handed to [playSpeakerPCM] since
+  /// [audioStart] (see [BithumanPlayout]): reported as the voice is heard, at
+  /// most ten times a second, at once when everything handed over has been heard,
+  /// and after every [interrupt]. Captions follow it
+  /// (`BithumanRealtimeSession.spokenTranscriptStream`). A host that cannot tell
+  /// may never emit; the session then estimates from the handover.
+  Stream<BithumanPlayout> get speechPlayout;
+}
+
+/// How much of the agent's audio has been heard, as the voice host reports it
+/// (`speechPlayout`). Both counts are 24 kHz samples of the audio handed to the
+/// host since its audio unit started ([VoiceHost.audioStart]):
+///
+/// - [fed]: every sample received, counted as it arrives;
+/// - [played]: the position heard up to — everything before it was made audible
+///   or discarded (a barge-in, a stop). Never above [fed], never backwards; both
+///   restart at zero on the next [VoiceHost.audioStart].
+class BithumanPlayout {
+  const BithumanPlayout({required this.played, required this.fed});
+
+  /// Samples heard (or discarded) so far.
+  final int played;
+
+  /// Samples handed to the host so far.
+  final int fed;
+
+  /// Everything handed over has been heard.
+  bool get caughtUp => played >= fed;
+
+  /// The native push `{played, fed}`; null when it is not one.
+  static BithumanPlayout? fromMap(Map<dynamic, dynamic>? m) {
+    final p = m?['played'], f = m?['fed'];
+    if (p is! int || f is! int || p < 0 || f < 0) return null;
+    return BithumanPlayout(played: p > f ? f : p, fed: f);
+  }
+
+  @override
+  String toString() => 'BithumanPlayout(played: $played, fed: $fed)';
 }
 
 /// The platform took a voice session's sound away ([began]), or gave it back.

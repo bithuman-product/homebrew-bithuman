@@ -10,7 +10,7 @@
 // stays; but it proves the voice layer only through the render class, and it
 // needs the Flutter binding's mock messenger to exist at all.
 //
-// This one implements the fifteen members of [VoiceHost] and nothing else. It
+// This one implements the sixteen members of [VoiceHost] and nothing else. It
 // imports no bithuman render library, touches no channel, and would compile in a
 // pure-Dart (non-Flutter) test. If the voice module ever reaches for a render
 // member again, THIS FILE STOPS COMPILING — which is a stronger statement than
@@ -21,7 +21,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:bithuman/realtime_transport.dart' show VoiceHost, BithumanAudioInterruption;
+import 'package:bithuman/realtime_transport.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout;
 
 class RecordingVoiceHost implements VoiceHost {
   /// Every call, in order, as `name` or `name:arg` — the assertion surface.
@@ -40,6 +40,38 @@ class RecordingVoiceHost implements VoiceHost {
   final _mic = StreamController<Uint8List>.broadcast();
   final _converse = StreamController<Map<dynamic, dynamic>>.broadcast();
   final _interruptions = StreamController<BithumanAudioInterruption>.broadcast();
+  final _playout = StreamController<BithumanPlayout>.broadcast();
+
+  /// Push a playout report at the session, as the host would while the voice is heard.
+  void emitPlayout(BithumanPlayout p) => _playout.add(p);
+
+  /// Play what [playSpeakerPCM] hands over at 1x (from the moment it is handed, after
+  /// [playoutLatency]) and report it as the native hosts do: at the first chunk, every
+  /// 100 ms while it plays, at once when everything handed over has played, and after every
+  /// [interrupt] (which discards the rest). Off by default.
+  bool playsOut = false;
+  Duration playoutLatency = const Duration(milliseconds: 100);
+  int _fed = 0, _played = 0, _lastReported = -1;
+  DateTime? _playFrom, _lastReportAt, _tickAt;
+  Timer? _player;
+
+  void _report() {
+    _lastReported = _played;
+    _lastReportAt = DateTime.now();
+    if (!_playout.isClosed) _playout.add(BithumanPlayout(played: _played, fed: _fed));
+  }
+
+  void _playTick() {
+    final now = DateTime.now();
+    final from = _playFrom;
+    final last = _tickAt ?? now;
+    _tickAt = now;
+    if (from == null || now.isBefore(from) || _played >= _fed) return;
+    final since = last.isAfter(from) ? last : from;
+    _played = (_played + now.difference(since).inMicroseconds * 24 ~/ 1000).clamp(0, _fed);
+    final caughtUp = _played >= _fed && _lastReported < _fed;
+    if (caughtUp || now.difference(_lastReportAt ?? DateTime(2000)).inMilliseconds >= 100) _report();
+  }
 
   /// Push an audio interruption at the session, as the platform would (a phone call).
   void emitInterruption(BithumanAudioInterruption e) => _interruptions.add(e);
@@ -63,6 +95,8 @@ class RecordingVoiceHost implements VoiceHost {
     await _mic.close();
     await _converse.close();
     await _interruptions.close();
+    _player?.cancel();
+    await _playout.close();
   }
 
   @override
@@ -75,13 +109,21 @@ class RecordingVoiceHost implements VoiceHost {
   Future<void> audioStart(
       {int vadThreshold = 0, bool enableMic = true, bool vpioAgc = true}) async {
     calls.add('audioStart:vad=$vadThreshold,mic=$enableMic,agc=$vpioAgc');
+    _fed = 0;
+    _played = 0;
+    _lastReported = -1;
+    _playFrom = null;
     onAudioStart?.call();
     final err = audioStartError;
     if (err != null) throw err;
   }
 
   @override
-  Future<void> audioStop() async => calls.add('audioStop');
+  Future<void> audioStop() async {
+    calls.add('audioStop');
+    _player?.cancel();
+    _player = null;
+  }
 
   @override
   Stream<Uint8List> get micStream {
@@ -94,14 +136,25 @@ class RecordingVoiceHost implements VoiceHost {
     calls.add('playSpeakerPCM');
     spoken.add(pcm24kPcm16le);
     spokenAt.add(DateTime.now());
+    if (playsOut) {
+      _fed += pcm24kPcm16le.length ~/ 2;
+      if (_played >= _fed - pcm24kPcm16le.length ~/ 2) _playFrom = DateTime.now().add(playoutLatency);
+      if (_lastReported < 0) _report();
+      _player ??= Timer.periodic(const Duration(milliseconds: 10), (_) => _playTick());
+    }
   }
 
   @override
   Future<void> notifyTurnEnd() async => calls.add('notifyTurnEnd');
 
   @override
-  Future<void> interrupt({String reason = 'app'}) async =>
-      calls.add('interrupt:$reason');
+  Future<void> interrupt({String reason = 'app'}) async {
+    calls.add('interrupt:$reason');
+    if (playsOut) {
+      _played = _fed;
+      _report();
+    }
+  }
 
   @override
   Future<void> attachWebrtcRemoteAudio(String trackId) async =>
@@ -142,5 +195,11 @@ class RecordingVoiceHost implements VoiceHost {
   Stream<BithumanAudioInterruption> get audioInterruptions {
     calls.add('audioInterruptions');
     return _interruptions.stream;
+  }
+
+  @override
+  Stream<BithumanPlayout> get speechPlayout {
+    calls.add('speechPlayout');
+    return _playout.stream;
   }
 }

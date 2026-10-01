@@ -87,6 +87,13 @@ class AvatarPlayer(
      * the track is `USAGE_MEDIA` and the recording contains the app's own audio.
      */
     private val capturable: Boolean = false,
+    /**
+     * Captions (2.6.27): the fed position of the newest unit made audible — 24 kHz samples of the
+     * audio [offer]ed since [resetPlayout], counted by the caller — on the main looper, once per
+     * presented unit and after [bargeIn] / [stop]. The plugin throttles and pushes it to Dart as
+     * `speechPlayout`.
+     */
+    private val onPlayout: ((played: Long) -> Unit)? = null,
     private val onFrame: (Bitmap) -> Unit,
 ) {
     /** Live health of the pipeline — surfaced by the app's debug overlay. */
@@ -110,7 +117,16 @@ class AvatarPlayer(
     private class AvUnit(val ptsSamples: Long, val frame: Bitmap, val epoch: Int,
                          val speech: Boolean, val turnGen: Int, val audio: ByteArray, val seq: Long = 0,
                          /** S = a frame with its own audio, C = catch-up, H = held frame + silence, T = tail, I = idle. */
-                         val kind: Char = 'S')
+                         val kind: Char = 'S',
+                         /**
+                          * Captions: the fed position (24 kHz samples since [resetPlayout]) heard once this
+                          * unit is — the end of the stream audio it carries (S/C/T), or for an idle unit
+                          * everything fed so far; -1 = none (H). Counts only under [fedGen] == [playGen].
+                          */
+                         val fedEnd: Long = -1L, val fedGen: Int = -1)
+
+    /** One chunk of the agent's voice and where it starts on the fed coordinate (-1: untagged). */
+    private class Chunk(val pcm: ByteArray, val fedStart: Long, val gen: Int)
 
     private val inbox = LinkedBlockingQueue<Any>()
     private val toWrite = ArrayBlockingQueue<AvUnit>(LEAD)     // producer -> writer
@@ -311,8 +327,53 @@ class AvatarPlayer(
         runCatching { track.release() }
     }
 
-    /** One chunk of the agent's voice: PCM16 mono little-endian @ 24 kHz. */
-    fun offer(pcm24k: ByteArray) { inbox.offer(pcm24k) }
+    /**
+     * One chunk of the agent's voice: PCM16 mono little-endian @ 24 kHz. [fedStart]: its first
+     * sample's position on the fed coordinate (the plugin's count since audioStart), for captions.
+     */
+    fun offer(pcm24k: ByteArray, fedStart: Long = -1L) {
+        if (fedStart >= 0) fedOffered = maxOf(fedOffered, fedStart + pcm24k.size / 2)
+        inbox.offer(Chunk(pcm24k, fedStart, playGen))
+    }
+
+    // ---------------------------------------------------------------- speech playout (captions)
+    //
+    // ★WHY (2.6.27). A reply's audio and its text reach the app in one burst, far faster than the
+    // voice is heard; captions shown on arrival ran up to 10 s ahead of the mouth. Where the voice
+    // really is, is known HERE: a unit is presented when the DAC clock reaches it. Each unit that
+    // carries stream audio is tagged with the fed position its audio ends at (the stream maps to
+    // the fed coordinate by one base per chunk), and presenting it moves [playedFed] there. An idle
+    // unit (nothing left to say) carries everything fed so far, so the count reaches what was fed
+    // once the reply has played out; a barge-in or a stop discards the rest (played = fed).
+
+    /** Bumped by [resetPlayout]: a unit tagged under an older generation moves nothing. */
+    @Volatile private var playGen = 0
+    /** Fed position one past the last sample offered (the caller's `fed`, as far as this player saw it). */
+    @Volatile private var fedOffered = 0L
+    /** Monotonic; never above [fedOffered]. Main looper. */
+    @Volatile private var playedFed = 0L
+    /** Fed position of stream offset 0, and the generation it belongs to (under [audioLock]). */
+    private var streamFedBase = 0L
+    private var streamFedGen = -1
+    /** Fed position one past the last sample that reached the stream (under [audioLock]). */
+    private var streamFedEnd = 0L
+
+    /** audioStart: the fed coordinate restarts at zero. Main thread. */
+    fun resetPlayout() {
+        playGen++
+        fedOffered = 0L
+        playedFed = 0L
+    }
+
+    /** Everything offered so far counts as heard or discarded (barge-in, stop). Main thread. */
+    private fun discardPlayout() {
+        if (fedOffered > playedFed) playedFed = fedOffered
+        onPlayout?.invoke(playedFed)
+    }
+
+    /** The fed position at stream byte offset [streamOffset], or -1 untagged. Caller holds audioLock. */
+    private fun fedAt(streamOffset: Long): Long =
+        if (streamFedGen == playGen) streamFedBase + streamOffset / 2 else -1L
 
     // The turn boundary decomposes into WAITING FOR AUDIO and RENDERING. The engine's
     // own counters separate them: wallMs is render time, chunks says whether the first
@@ -353,6 +414,7 @@ class AvatarPlayer(
         pBase = sessionSamples          // the device counter restarts; the session does not
         tsValid = false; tsReadAt = 0L  // and so does its timestamp
         inbox.offer(Reset)
+        discardPlayout()                // captions: the cut voice is never heard
     }
 
     /** The agent finished a sentence — let the engine render the padded tail. */
@@ -376,6 +438,7 @@ class AvatarPlayer(
         runCatching { track.pause() }
         runCatching { track.flush() }
         if (!started || writerGone) releaseTrack()   // no writer left to release it
+        if (fedOffered > playedFed) playedFed = fedOffered   // captions: nothing more will be heard
     }
 
     private var rateT0 = 0L
@@ -507,6 +570,8 @@ class AvatarPlayer(
                 var body: ByteArray? = null
                 var underLast = false
                 var stale = false
+                var fe = -1L
+                var fg = -1
                 synchronized(audioLock) {
                     // Every frame the SDK delivers has audio behind it (0.4.6, tail 0),
                     // so there is no "invented frame" arm here any more. There were two
@@ -531,16 +596,17 @@ class AvatarPlayer(
                             body = take(heldFrom + BYTES_PER_FRAME)      // its own samples, plus any short remainder before them
                         }
                     }
+                    if (body != null) { fe = fedAt(head); fg = playGen }
                 }
                 if (stale) { heldFrom = -1L; continue }
                 nSpeech++; stats.speechUnits = nSpeech; stats.markFirstAudio()
                 if (underLast) {
                     where = "catch-up"
-                    admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, body!!, 'C', e)
+                    admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, body!!, 'C', e, fe, fg)
                     continue                                   // the frame itself is still held
                 }
                 where = "speech-admit"
-                admitSpeech(speechFrames[slot], slot, body!!, 'S', e)
+                admitSpeech(speechFrames[slot], slot, body!!, 'S', e, fe, fg)
                 where = "speech-done"
                 heldFrom = -1L
                 lastSpeechSlot = slot
@@ -568,7 +634,15 @@ class AvatarPlayer(
             // engine, and only when the device is genuinely about to run dry does it
             // spend a frame of silence. That is the least silence that keeps the stream
             // continuous, and 0 under-runs says it was enough.
-            val speaking = !pending && (avatar.hasPendingTail || synchronized(audioLock) { head < audioLen })
+            // Captions: with nothing left to say, everything fed so far has been taken — the idle unit
+            // carries that position, so presenting it says the reply has been heard to its end.
+            var idleFed = -1L
+            var idleGen = -1
+            val speaking = !pending && (avatar.hasPendingTail || synchronized(audioLock) {
+                val more = head < audioLen
+                if (!more && streamFedGen == playGen) { idleFed = streamFedEnd; idleGen = playGen }
+                more
+            })
             if (speaking && toWrite.size > IDLE_FLOOR) {
                 where = "await-frames"; nAwait++; Thread.sleep(2); continue
             }
@@ -597,12 +671,15 @@ class AvatarPlayer(
             // Only THIS reply's audio: a frame held over from the previous reply must not
             // carry the next reply's opening — that is the start-up run-ahead 4a forbids.
             if (speaking && lastSpeechSlot >= 0) {
+                var fe = -1L
+                var fg = -1
                 val body = synchronized(audioLock) {
-                    if (heldFrameReply == replyOfHead() && head + BYTES_PER_FRAME <= audioLen) take(head + BYTES_PER_FRAME) else null
+                    (if (heldFrameReply == replyOfHead() && head + BYTES_PER_FRAME <= audioLen) take(head + BYTES_PER_FRAME) else null)
+                        ?.also { fe = fedAt(head); fg = playGen }
                 }
                 if (body != null) {
                     where = "catch-up"; nCatchUp++
-                    admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, body, 'C', e)
+                    admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, body, 'C', e, fe, fg)
                 } else {
                     where = "hold"; nHold++
                     admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, silence, 'H', e)
@@ -624,7 +701,7 @@ class AvatarPlayer(
             nIdle++; stats.idleUnits = nIdle
             val seq = ++admittedSeq
             slotSeq[slot] = seq
-            admit(AvUnit(sessionSamples, speechFrames[slot], e, false, stats.turnGen, silence, seq, 'I'))
+            admit(AvUnit(sessionSamples, speechFrames[slot], e, false, stats.turnGen, silence, seq, 'I', idleFed, idleGen))
             where = "idle-done"
             sessionSamples += SAMPLES_PER_FRAME
             slot = (slot + 1) % RING
@@ -646,7 +723,8 @@ class AvatarPlayer(
         // BithumanPlugin, in dispose(), here.
     }
 
-    private fun admitSpeech(frame: Bitmap, slot: Int, body: ByteArray, kind: Char, e: Int) {
+    private fun admitSpeech(frame: Bitmap, slot: Int, body: ByteArray, kind: Char, e: Int,
+                            fedEnd: Long = -1L, fedGen: Int = -1) {
         if (resetPending && e == epoch) nLeak++      // a unit of the new epoch admitted before the reset landed
         val seq = ++admittedSeq
         if (slot >= 0) slotSeq[slot] = seq
@@ -657,7 +735,7 @@ class AvatarPlayer(
             nMarkers++
             Log.i("bhmark", "MARKER $nMarkers ADMIT seq=$seq pts=$sessionSamples hostMs=${System.currentTimeMillis()}")
         }
-        admit(AvUnit(sessionSamples, f, e, true, stats.turnGen, body, seq, kind))
+        admit(AvUnit(sessionSamples, f, e, true, stats.turnGen, body, seq, kind, fedEnd, fedGen))
         sessionSamples += (body.size / 2).toLong()
     }
 
@@ -691,17 +769,20 @@ class AvatarPlayer(
     private fun drainTail(lastSpeechSlot: Int, e: Int): Boolean {
         if (lastSpeechSlot < 0) return false
         var body: ByteArray? = null
+        var fe = -1L
+        var fg = -1
         synchronized(audioLock) {
             val end = replyEnds.firstOrNull()
             if (end != null && head < end && !avatar.hasPendingTail && avatar.queuedFrames == 0) {
                 body = take(minOf(head + BYTES_PER_FRAME, end))
+                fe = fedAt(head); fg = playGen
                 nTailUnits++
             }
             replyOfHead()
         }
         val b = body ?: return false
         where = "tail"
-        admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, b, 'T', e)
+        admitSpeech(speechFrames[lastSpeechSlot], lastSpeechSlot, b, 'T', e, fe, fg)
         return true
     }
 
@@ -733,7 +814,7 @@ class AvatarPlayer(
                     synchronized(audioLock) { if (replyEnds.lastOrNull() != audioLen) replyEnds.addLast(audioLen) }
                     avatar.flushTail()
                 }
-                is ByteArray -> {
+                is Chunk -> {
                     // ★ THE STREAM AND THE ENGINE MUST AGREE SAMPLE FOR SAMPLE, because
                     // `audioSample * 3` indexes this buffer. The 24->16 kHz conversion
                     // consumes three samples for every two, so a chunk whose sample count
@@ -741,12 +822,23 @@ class AvatarPlayer(
                     // next chunk rather than dropped, and the buffer holds exactly the
                     // bytes that were fed. Buffer first, so a frame can never arrive
                     // before its audio is findable.
-                    val joined = if (carry.isEmpty()) item else carry + item
+                    val pcm = item.pcm
+                    val carryBefore = carry.size
+                    val joined = if (carry.isEmpty()) pcm else carry + pcm
                     val usable = joined.size / 6 * 6
                     carry = joined.copyOfRange(usable, joined.size)
+                    val whole = if (usable == joined.size) joined else joined.copyOfRange(0, usable)
+                    synchronized(audioLock) {
+                        // Captions: the chunk's first sample (fed position fedStart) lands at stream
+                        // offset audioLen + carryBefore, so stream offset X is fed sample base + X/2.
+                        if (item.fedStart >= 0) {
+                            streamFedBase = item.fedStart - (audioLen + carryBefore) / 2
+                            streamFedGen = item.gen
+                            streamFedEnd = item.fedStart + pcm.size / 2
+                        }
+                        if (usable > 0) append(whole)
+                    }
                     if (usable > 0) {
-                        val whole = if (usable == joined.size) joined else joined.copyOfRange(0, usable)
-                        synchronized(audioLock) { append(whole) }
                         avatar.feed(toFloat16k(whole))
                         nFed16k += whole.size / 3
                         // What reached the ENGINE and when: the conversation contract's delivery
@@ -998,6 +1090,8 @@ class AvatarPlayer(
         }
         if (u == null) return
         presentedSeq = maxOf(presentedSeq, u.seq)
+        if (u.fedGen == playGen && u.fedEnd > playedFed) playedFed = minOf(u.fedEnd, fedOffered)
+        onPlayout?.invoke(playedFed)
         if (u.speech) nPresSpeech++
         if (u.speech && replyFirstPending) {
             // The reply's first mouth on the glass: TTFA's end (the transport logs its start).
