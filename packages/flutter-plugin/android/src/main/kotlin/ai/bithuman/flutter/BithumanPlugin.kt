@@ -73,11 +73,14 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     private val main = Handler(Looper.getMainLooper())
     private val sessions = HashMap<Long, AvatarSession>()
     /**
-     * The Flutter engine let go of this plugin (platform thread). A load that finishes after that
-     * closes what it made instead of registering it: until 2.6.25 such a session was added to
-     * [sessions] after the detach had emptied it, and its player ran with nobody to stop it.
+     * The textures of loads still in flight, and the order of the engine's detach (TextureGate.kt).
+     * [TextureGates.detached]: the Flutter engine let go of this plugin (platform thread). A load
+     * that finishes after that closes what it made instead of registering it: until 2.6.25 such a
+     * session was added to [sessions] after the detach had emptied it, and its player ran with
+     * nobody to stop it.
      */
-    private var detached = false
+    private val textures = TextureGates()
+    private val detached: Boolean get() = textures.detached
     /** Callers waiting on a RECORD_AUDIO answer: Dart results and deferred mic starts. */
     private val permissionWaiters = ArrayList<(Boolean) -> Unit>()
 
@@ -86,7 +89,11 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val code: String,
         val avatar: AvatarEngine,
         val entry: TextureRegistry.SurfaceProducer,
+        /** [entry]'s release, once, on the platform thread (TextureGate.kt); made with the texture at load. */
+        val texture: TextureGate,
     ) {
+        /** The texture was released: nothing is drawn into it again (see [releaseTexture]). */
+        val textureReleased: Boolean get() = texture.released
         val ready = AtomicBoolean(false)
         val stopped = AtomicBoolean(false)
         /**
@@ -117,6 +124,13 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
          */
         fun draw(bmp: Bitmap) {
             if (stopped.get()) return
+            // Released (the engine detached, or a dispose ran) or the producer has no surface just
+            // now (onSurfaceCleanup): no draw, since a frame posted then would reach a producer
+            // nobody can show.
+            texture.draw { blit(bmp) }
+        }
+
+        private fun blit(bmp: Bitmap) {
             // The producer's CURRENT surface, every frame (cheap): a producer may hand out a new
             // one over its life, so a Surface kept from load is not assumed to stay valid.
             val surface = entry.surface
@@ -124,17 +138,59 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             val canvas = try { if (hwCanvas) surface.lockHardwareCanvas() else surface.lockCanvas(null) } catch (e: Exception) {
                 if (!stopped.get()) Log.w(TAG, "lock${if (hwCanvas) "Hardware" else ""}Canvas: ${e.message}"); return
             }
-            try { canvas.drawBitmap(bmp, 0f, 0f, null) } finally { surface.unlockCanvasAndPost(canvas) }
+            var posted = false
+            try { canvas.drawBitmap(bmp, 0f, 0f, null) } finally {
+                // Its own catch: a surface the producer let go of between the lock and here throws
+                // IllegalStateException, and on the main thread that would end the app.
+                posted = try { surface.unlockCanvasAndPost(canvas); true } catch (e: IllegalStateException) {
+                    if (!stopped.get() && !texture.surfaceGone) Log.w(TAG, "unlockCanvasAndPost: ${e.message}")
+                    false
+                }
+            }
+            if (!posted) return
             framesDrawn++
             if (!ready.getAndSet(true)) Log.i(TAG, "first frame on the texture")
             if (framesDrawn % 200 == 0L) Log.i(TAG, "texture frames=$framesDrawn ${player?.census() ?: ""}")
         }
+
+        /**
+         * Platform thread; idempotent. The texture goes back to Flutter now, and every later draw is
+         * a no-op. Called by the engine's detach (synchronously, while FlutterJNI is still attached),
+         * and at the end of a dispose, where it does nothing if the detach already ran.
+         */
+        fun releaseTexture() {
+            if (texture.release()) Log.i(TAG, "texture of $code released (frames drawn=$framesDrawn)")
+        }
+    }
+
+    /**
+     * A texture for a load: the producer, its once-only release, and the producer's surface
+     * callbacks. Platform thread.
+     */
+    private fun newTexture(): Pair<TextureRegistry.SurfaceProducer, TextureGate> {
+        val entry = textureRegistry.createSurfaceProducer()
+        val gate = TextureGate {
+            runCatching { entry.release() }.onFailure { Log.w(TAG, "texture release: $it") }
+        }
+        // The producer may take its surface away (the app went to the background and Flutter
+        // trimmed it) and hand out a new one later: no draws in between.
+        entry.setCallback(object : TextureRegistry.SurfaceProducer.Callback {
+            override fun onSurfaceAvailable() {
+                if (gate.surfaceGone) Log.i(TAG, "texture surface available again")
+                gate.surfaceGone = false
+            }
+            override fun onSurfaceCleanup() {
+                gate.surfaceGone = true
+                Log.i(TAG, "texture surface cleaned up: no draws until it is available again")
+            }
+        })
+        return entry to gate
     }
 
     // ---------------------------------------------------------------- lifecycle
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        detached = false
+        textures.attach()
         context = binding.applicationContext
         messenger = binding.binaryMessenger
         textureRegistry = binding.textureRegistry
@@ -143,11 +199,29 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         loadEvents = LoadEvents(messenger, main)
     }
 
+    /**
+     * ★The engine is going away, and FlutterJNI lets go of native right after this returns (same
+     * main-thread message). So every texture is released HERE, synchronously, before any session's
+     * asynchronous close starts (TextureGate.kt): each live session is stopped and its texture
+     * released, then each in-flight load's texture, and only then does [destroy] hand the engines
+     * to their bh-dispose threads. Until 2.6.27 the texture was released at the end of that thread,
+     * after the detach, and a frame still queued on the producer crashed the app in
+     * ImageReaderSurfaceProducer.onImage ("FlutterJNI is not attached to native").
+     */
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        detached = true
         channel.setMethodCallHandler(null)
         loadEvents.close()
-        sessions.keys.toList().forEach { destroy(it) }
+        val loads = textures.inFlight
+        textures.detach(sessions.keys.toList(),
+            quiesce = { id ->
+                sessions[id]?.let { s ->
+                    s.stopped.set(true)
+                    s.player?.let { runCatching { it.stop() } }
+                    s.releaseTexture()
+                }
+            },
+            closeAsync = { id -> destroy(id) })
+        if (loads > 0) Log.i(TAG, "engine detached: released the texture of $loads load(s) in flight")
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
@@ -258,7 +332,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         // beside it (video_player, already a producer) costs 2.5 ms. The producer is an
         // ImageReader whose buffers Impeller imports as they are. The draw is unchanged: the
         // same canvas blit (a hardware canvas for zero-copy hardware-buffer frames), into its surface.
-        val entry = textureRegistry.createSurfaceProducer()
+        val (entry, texture) = newTexture()
+        textures.loadStarted(texture)
         val handle = loadEvents.begin(code)
         val t0 = handle.t0
         Thread({
@@ -270,13 +345,14 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     handle.throwIfCancelled()
                 }
                 entry.setSize(avatar.width, avatar.height)
-                val s = AvatarSession(code, avatar, entry)
+                val s = AvatarSession(code, avatar, entry, texture)
                 val p = newPlayer(s)
                 s.player = p
                 main.post {
-                    if (detached) {
+                    if (!textures.loadFinished(texture)) {
                         // The engine detached while this load ran: nobody can show or stop this
-                        // session. Close it (threads, engine, texture) instead of registering it.
+                        // session. Its texture is already released (by the detach, or just now by
+                        // loadFinished); close the rest (threads, engine) instead of registering it.
                         Log.i(TAG, "load of $code finished after the engine detached: closing it")
                         s.stopped.set(true)
                         closeSession(s, null)
@@ -295,7 +371,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 // was all a failed fetch ever logged.
                 if (cancelled) Log.i(TAG, "load of $code cancelled +${(System.nanoTime() - t0) / 1_000_000} ms: $e")
                 else Log.e(TAG, "load failed: $e${e.cause?.let { " (cause: $it)" } ?: ""}", e)
-                main.post { runCatching { entry.release() }; result.error(if (cancelled) "load_cancelled" else "load_failed", e.message ?: e.toString(), null) }
+                main.post { textures.loadFailed(texture); runCatching { result.error(if (cancelled) "load_cancelled" else "load_failed", e.message ?: e.toString(), null) } }
             } finally {
                 loadEvents.end(handle)
             }
@@ -423,8 +499,9 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
 
     /**
      * Stop [s]'s player, then (off the platform thread) wait for its threads, close the engine and
-     * release the texture; [done] runs on the platform thread at the end. [s] is already out of
-     * [sessions] (or was never in it: a load that finished after the engine detached).
+     * release the texture (a no-op when the engine's detach released it already); [done] runs on the
+     * platform thread at the end. [s] is already out of [sessions] (or was never in it: a load that
+     * finished after the engine detached).
      */
     private fun closeSession(s: AvatarSession, done: (() -> Unit)?) {
         s.player?.let { runCatching { it.stop() } }
@@ -440,7 +517,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             } finally {
                 // Dart hears back whatever happened above: its dispose() never hangs.
                 main.post {
-                    runCatching { s.entry.release() }
+                    s.releaseTexture()
                     done?.invoke()
                 }
             }
