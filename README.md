@@ -29,7 +29,7 @@ Real-time, lip-synced avatars rendered on iPhone, iPad and Mac: Essence 2 (a pho
 Expression 2 (any character). Pass in 16 kHz speech from any voice stack; draw the frames.
 
 ```swift
-.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "2.19.3")
+.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "2.19.4")
 ```
 
 The Swift package lives in this repository, which is also our Homebrew tap, so Xcode and
@@ -50,11 +50,6 @@ The current version of every package is on [docs.bithuman.ai/versions.json](http
 | `Essence2` | `import Essence2` | the Essence 2 engine as a C library, for C, C++ and plugins | iOS 26 · macOS 26 |
 
 `bitHumanKit` 2.4.0 is legacy and frozen; new apps use `Expression2` or `Essence2Kit`.
-
-Known issue (2.19.3): linking `Expression2` or `Essence2` for macOS prints
-`ld: warning: ... libengine_core.a ... was built for newer 'macOS' version (14.0) than being linked (13.0)`.
-The macOS engine core in 2.19.3 is built for macOS 14, so macOS 13 is not verified for
-these products on a Mac; until a rebuilt engine core ships, plan on macOS 14 or newer there.
 
 Requires the Creator plan or higher from 12 October 2026. Each session needs an [API secret](https://docs.bithuman.ai/start/api-secret) and bills active session time ([pricing](https://docs.bithuman.ai/pricing)).
 

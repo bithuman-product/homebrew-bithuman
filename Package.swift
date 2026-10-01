@@ -52,8 +52,9 @@ let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releas
 
 // EngineCore (macOS engine core) ships on its OWN tap tag: essence2-v1.15.0's EngineCore had
 // its internal C++ symbols linkable (a .a exposes private externs); enginecore-v1.0.1 is the
-// restricted rebuild (bithuman-models #1636). libessence2 and Expression 2 are unchanged.
-let enginecoreTag = "enginecore-v1.0.1"
+// restricted rebuild (bithuman-models #1636). enginecore-v1.0.2 is the same core built for
+// macOS 13.0, this package's floor (bithuman-models #1723). libessence2 and Expression 2 are unchanged.
+let enginecoreTag = "enginecore-v1.0.2"
 let enginecoreBase = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(enginecoreTag)"
 
 let package = Package(
@@ -151,7 +152,7 @@ let package = Package(
         .binaryTarget(
             name: "EngineCore",
             url: "\(enginecoreBase)/EngineCore.xcframework.zip",
-            checksum: "64aa90b319d989d4d92b03435ba625a28bc43d8c86076bf695af99263ca8ac89"
+            checksum: "1d3b6de3956bf6b287169331d0e12eb5b750d285c49bf5a9569cc38097fa5e50"
         ),
         .target(
             name: "BithumanEngineCoreLink",
