@@ -47,13 +47,15 @@ mcp = FastMCP(
     "bitHuman",
     instructions=(
         "Tools for the bitHuman real-time AI avatar platform. Use them to "
-        "synthesize speech, generate and manage avatar agents, drive live "
+        "generate and manage avatar agents, drive live "
         "sessions (speak / inject context / gestures), mint website embed "
         "tokens, upload assets, and check credit balance. Avatars are keyed by "
         "a short agent code like 'A91XMB7113'. Agent generation and dynamics "
         "are async — poll the matching status tool until status is 'ready'. "
-        "Speech synthesis and agent generation consume credits; check the "
-        "balance first with get_credit_balance if cost matters."
+        "Agent generation and dynamics consume credits; check the "
+        "balance first with get_credit_balance if cost matters. There is no "
+        "text-to-speech tool: talking video is bring-your-own-audio "
+        "(https://docs.bithuman.ai/build/talking-video)."
     ),
 )
 
@@ -100,7 +102,7 @@ async def get_platform_status() -> dict:
     PUBLIC — no API secret required and no credits consumed (reads the same feed as
     https://status.bithuman.ai). Returns the overall status ("operational" |
     "degraded" | "down"), a human-readable summary, the operational/total service
-    count, and a per-service `groups` breakdown — avatar rendering, voice/TTS, agent
+    count, and a per-service `groups` breakdown — avatar rendering, agent
     generation, and each public API endpoint — each with its own status + recent
     uptime. Call this to tell a platform-wide incident apart from a problem with your
     own request before retrying or escalating.
@@ -133,74 +135,13 @@ async def get_credit_balance(user_id: str | None = None, app: str = "imaginex") 
         app: App identifier for multi-app subscriptions (default "imaginex").
 
     Returns balance, plan_credits, topup_credits, and a per-mode minutes_estimate.
-    Agent generation costs ~250 credits; speech and live minutes are metered.
+    Agent generation costs ~250 credits; live minutes are metered.
     """
     params: dict[str, str] = {"app": app}
     if user_id:
         params["user_id"] = user_id
     async with _client() as c:
         return _json_or_text(await c.get("/v2/credit-summaries", params=params))
-
-
-# ──────────────────────────────────────────────────────────────────────────
-# Voice / text-to-speech
-# ──────────────────────────────────────────────────────────────────────────
-
-@mcp.tool()
-async def list_voices() -> dict:
-    """List the built-in and custom TTS voices available to this account.
-
-    Built-in voices are M1–M5 (male) and F1–F5 (female). Use an id with
-    text_to_speech. Designed voices from the Voice Designer
-    (https://www.bithuman.ai/voice) are passed as a voice_code instead.
-    """
-    async with _client() as c:
-        return _json_or_text(await c.get("/v1/voices"))
-
-
-@mcp.tool()
-async def text_to_speech(
-    text: str,
-    output_path: str,
-    voice: str = "M1",
-    voice_code: str | None = None,
-    language: str = "en",
-    speed: float = 1.05,
-    total_steps: int = 8,
-) -> dict:
-    """Synthesize speech from text and save it as a WAV file. Consumes credits.
-
-    Args:
-        text: Text to speak (any length; multi-sentence supported).
-        output_path: Absolute path to write the resulting .wav file to.
-        voice: Built-in voice id (M1–M5, F1–F5). Ignored if voice_code is set.
-        voice_code: A designed-voice handle from the Voice Designer (UUID or
-            bv1_… code). Takes precedence over `voice`.
-        language: ISO-2 language code (31 languages supported).
-        speed: Playback rate, 0.7–2.0.
-        total_steps: Denoise steps — 5 fast, 8 balanced, 12 highest quality.
-
-    Returns the written file path and byte size. Read the WAV from output_path
-    to play or attach it.
-    """
-    payload: dict[str, Any] = {
-        "text": text,
-        "voice": voice,
-        "language": language,
-        "speed": speed,
-        "total_steps": total_steps,
-        "format": "wav",
-    }
-    if voice_code:
-        payload["voice_code"] = voice_code
-    async with _client() as c:
-        resp = await c.post("/v1/tts", json=payload)
-        if resp.status_code >= 400:
-            return _json_or_text(resp)
-        out = Path(output_path).expanduser()
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(resp.content)
-        return {"path": str(out), "bytes": len(resp.content), "format": "wav"}
 
 
 # ──────────────────────────────────────────────────────────────────────────

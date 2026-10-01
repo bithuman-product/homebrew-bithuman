@@ -26,7 +26,7 @@ It's a thin, fully-documented wrapper over the public REST API
 
 ## Tools
 
-The server exposes **22 tools**, each mapping to one documented REST endpoint
+The server exposes **20 tools**, each mapping to one documented REST endpoint
 (plus `get_platform_status`, which reads the public status feed):
 
 | Tool | What it does |
@@ -35,8 +35,6 @@ The server exposes **22 tools**, each mapping to one documented REST endpoint
 | `validate_api_secret` | Check the API secret is valid (free). |
 | `get_credit_balance` | Current credits, plan, and minutes estimate. |
 | `get_usage` | Usage/metering history (paginated, date-filterable). |
-| `list_voices` | Built-in (M1–M5 / F1–F5) and custom TTS voices. |
-| `text_to_speech` | Synthesize speech → a WAV file. |
 | `generate_agent` | Create an avatar agent from a prompt / image / audio (image-only appearance; `model`+`version` select the engine, e.g. essence + v2 = essence-2). |
 | `get_agent_status` | Poll agent generation progress. |
 | `get_agent` | Fetch an existing agent's details. |
@@ -102,8 +100,12 @@ JSON server block:
 - **Async work**: `generate_agent` and `generate_dynamics` return immediately
   with a `processing` status. Poll `get_agent_status` / `get_dynamics` until
   `ready` (generation takes 2–5 minutes).
-- **Credits**: `generate_agent` (~250 credits) and `text_to_speech` consume
+- **Credits**: `generate_agent` (~250 credits) and `generate_dynamics` consume
   credits. Check `get_credit_balance` first if cost matters.
+- **No text-to-speech**: bitHuman's TTS service is retired (`/v1/tts`, `/v1/voices`
+  answer 410 `ENDPOINT_RETIRED`), so `text_to_speech` and `list_voices` were removed in
+  0.3.6. Talking video is bring-your-own-audio — see
+  <https://docs.bithuman.ai/build/talking-video>.
 - **Errors**: non-2xx responses come back as a structured `{error, status_code,
   body, hint}` object. The error catalog is at
   <https://docs.bithuman.ai/api/errors>.
