@@ -57,7 +57,14 @@ rootProject.allprojects {
     repositories {
         google()
         mavenCentral()
-        mavenLocal()
+        // ★ Never ai.bithuman (2.6.27). mavenLocal() sits ABOVE maven.bithuman.ai here, and a
+        // build host's ~/.m2 can hold an engine candidate that was never published (a lane's
+        // `publishToMavenLocal`, e.g. essence2-android 0.8.0-cand1). For a version only
+        // maven.bithuman.ai serves (0.9.0 on), the local copy would be the one a store build
+        // resolved. With the group excluded, the engines resolve from their published home only.
+        mavenLocal {
+            content { excludeGroup("ai.bithuman") }
+        }
         // ai.bithuman (both engines), from bitHuman's own repository. See the header.
         maven {
             url = uri("https://maven.bithuman.ai")
@@ -146,13 +153,15 @@ dependencies {
     // Central's own .sha256 sidecar, fetched anonymously.
     //
     // ★ THE PIN MOVES ONLY AFTER CENTRAL SERVES THE VERSION, NEVER AFTER A LOCAL PUBLISH.
-    // `mavenLocal()` is in the repository list below mavenCentral(), and measured
+    // `mavenLocal()` was in the repository list below mavenCentral(), and measured
     // 2026-09-16 it cannot SHADOW a version Central serves — a poisoned ~/.m2 holding a
     // different artifact at 0.5.8 still resolved Central's bytes. What it CAN do is
     // supply a version Central LACKS, which is how plugin 2.4.0 came to import a class
     // Central's 0.4.6 did not have: `publishToMavenLocal` plus a pin bump compiles green
     // while no customer can resolve it. This pin was moved only once repo1.maven.org
     // served 0.5.12 (fetched anonymously 2026-09-20; the sha256 above is the sidecar's).
+    // Since 2.6.27 mavenLocal() excludes the ai.bithuman group outright (see the
+    // repositories above), so no engine can come from a host's ~/.m2 at all.
     //
     // 0.5.13 (public on Central since 2026-09-23): THE AAR KEEPS ITS OWN JNI BRIDGE THROUGH A
     // CONSUMER'S R8. 0.5.12 shipped no proguard.txt, so an app whose release build named its

@@ -20,6 +20,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show HttpClient, HttpClientResponse, Platform;
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'src/dev_levers.dart';
 import 'src/echo_profile.dart';
@@ -497,21 +498,23 @@ class OpenAIWebRTCSession {
           break;
         case 'session.created':
         case 'session.updated':
-          // Useful to confirm what config OpenAI actually accepted.
+          // Useful to confirm what config OpenAI actually accepted. Not in a release build: the
+          // session carries the instructions, and a resumed call's instructions quote the person.
           // ignore: avoid_print
-          print('[webrtc] $type — session: ${evt['session']}');
+          print(kReleaseMode ? '[webrtc] $type' : '[webrtc] $type — session: ${evt['session']}');
           break;
         case 'conversation.item.input_audio_transcription.completed':
           final txt = (evt['transcript'] as String?)?.trim() ?? '';
+          // A release build logs only the length: a person's words stay out of the device log.
           // ignore: avoid_print
           print('[AEC-PROBE] user-mic transcript '
-              '(agentAudioOut=$_agentAudioOut): "$txt"');
+              '(agentAudioOut=$_agentAudioOut): ${kReleaseMode ? '${txt.length} chars' : '"$txt"'}');
           break;
         case 'conversation.item.input_audio_transcription.delta':
           final delta = (evt['delta'] as String?)?.trim() ?? '';
           if (delta.isNotEmpty) {
             // ignore: avoid_print
-            print('[AEC-PROBE] (delta, agentAudioOut=$_agentAudioOut): "$delta"');
+            print('[AEC-PROBE] (delta, agentAudioOut=$_agentAudioOut): ${kReleaseMode ? '${delta.length} chars' : '"$delta"'}');
           }
           break;
         case 'conversation.item.input_audio_transcription.failed':
