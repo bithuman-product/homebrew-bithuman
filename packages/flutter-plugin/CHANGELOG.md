@@ -1,3 +1,23 @@
+## 2.6.26 — 2026-10-01 — no seam at the mouth corners; the Android engine comes from maven.bithuman.ai
+
+Tag `flutter-plugin-v2.6.26`. Engines: iOS/macOS Expression 2 `v2.19.2`, Essence 2
+`essence2-v1.15.2`, macOS `enginecore-v1.0.2` (Swift package 2.19.4); Android `essence2-android`
+0.9.0, `expression2-android` 0.5.2.
+
+* **No seam at the mouth corners (Essence 2, every platform).** The generated mouth is now blended
+  into the photo with a wider, feathered edge, so the step that could show at the mouth corners while
+  the avatar talks is gone. Android takes it with `essence2-android` 0.9.0. On iOS and macOS it
+  arrives with the avatar files themselves, and Essence 2 `essence2-v1.15.2` carries it on the
+  engine's fallback renderer too. No API change.
+* **The Android engine resolves from maven.bithuman.ai; apps add nothing.** bitHuman publishes its
+  Android engines to its own Maven repository, https://maven.bithuman.ai, and `essence2-android`
+  0.9.0 is the first version served only there. The plugin declares that repository for the
+  `ai.bithuman` group in every project of the app, so a Flutter app needs no change to its Gradle
+  files. Versions already on Maven Central keep resolving from Central.
+* **macOS 13 links again (macOS).** The macOS engine core is built for macOS 13
+  (`enginecore-v1.0.2`); with `enginecore-v1.0.1` an app targeting macOS 13 failed to link
+  ("built for newer 'macOS' version (14.0)").
+
 ## 2.6.25 — 2026-09-30 — the call ends when the phone rings; earbuds keep the call; smoother Android texture; faster first frame
 
 Tag `flutter-plugin-v2.6.25`. Engines unchanged: iOS/macOS Expression 2 `v2.19.2`, Essence 2

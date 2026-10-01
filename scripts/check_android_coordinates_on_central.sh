@@ -7,25 +7,32 @@
 #
 # A prose claim nothing grades rots. This grades it, against the registry:
 #
-#   1. every coordinate this build.gradle PINS is served by Maven Central, and
-#   2. every transitive dependency those pinned POMs declare is served by Central too —
-#      which is what "resolves from Central alone" actually means.
+#   1. every coordinate this build.gradle PINS is served by the repository that is its home, and
+#   2. every transitive dependency those pinned POMs declare is served by its home too.
+#
+# ★HOMES (2026-10-01). `ai.bithuman` lives on bitHuman's own repository, https://maven.bithuman.ai
+# (owner decision 2026-09-30; essence2-android 0.9.0 is the first version Central does not
+# serve, and the plugin declares maven.bithuman.ai for that group). Every other group is
+# graded against Maven Central. The plugin's header claim is exactly this split.
 #
 # google() may stay in the repository list for AGP's own tooling; this says nothing
 # about that. It says only that no ENGINE resolution depends on it.
 #
-# Exit 1 = a claim is false. Exit 2 = Central was unreachable (no verdict, not a pass).
+# Exit 1 = a claim is false. Exit 2 = a home was unreachable (no verdict, not a pass).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GRADLE="${1:-packages/flutter-plugin/android/build.gradle}"
 CENTRAL="https://repo1.maven.org/maven2"
+BITHUMAN="${BITHUMAN_MAVEN:-https://maven.bithuman.ai}"
+home_of() { [ "$1" = ai.bithuman ] && printf '%s' "$BITHUMAN" || printf '%s' "$CENTRAL"; }
+home_name() { [ "$1" = ai.bithuman ] && printf 'maven.bithuman.ai' || printf 'CENTRAL'; }
 [ -r "$GRADLE" ] || { echo "cannot read $GRADLE"; exit 2; }
 
-# HTTP status for a Central POM, retried; prints the code, or "ERR" if never reached.
+# HTTP status for a POM at its home, retried; prints the code, or "ERR" if never reached.
 pom_status() {
   local g="$1" a="$2" v="$3" url code
-  url="$CENTRAL/${g//.//}/$a/$v/$a-$v.pom"
+  url="$(home_of "$g")/${g//.//}/$a/$v/$a-$v.pom"
   for _ in 1 2 3; do
     code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "$url" 2>/dev/null) || code=000
     case "$code" in 200|404) printf '%s' "$code"; return 0 ;; esac
@@ -36,7 +43,7 @@ pom_status() {
 
 pom_body() {
   local g="$1" a="$2" v="$3"
-  curl -fsS --max-time 25 "$CENTRAL/${g//.//}/$a/$v/$a-$v.pom" 2>/dev/null
+  curl -fsS --max-time 25 "$(home_of "$g")/${g//.//}/$a/$v/$a-$v.pom" 2>/dev/null
 }
 
 # The PINNED coordinates — real dependency lines only, never a comment.
@@ -59,8 +66,8 @@ grade() {                     # grade <coord> <why>
     SEEN[$coord]="$code"
   fi
   case "$code" in
-    200) printf '  ok      %-52s %s\n' "$coord" "$why" ;;
-    404) printf '  NOT ON CENTRAL  %-44s %s\n' "$coord" "$why"; fail=1 ;;
+    200) printf '  ok      %-52s %s (%s)\n' "$coord" "$why" "$(home_name "$g")" ;;
+    404) printf '  NOT ON %s  %-44s %s\n' "$(home_name "$g")" "$coord" "$why"; fail=1 ;;
     *)   printf '  unreachable     %-44s %s\n' "$coord" "$why"; unreachable=1 ;;
   esac
 }
@@ -85,13 +92,15 @@ done
 
 echo
 if [ "$fail" = 1 ]; then
-  echo "FAIL — a coordinate this build resolves is NOT on Maven Central."
-  echo "       Either pick a pin that is, or add the repository AND correct the header"
-  echo "       comment, which tells a stranger the clone builds from Central alone."
+  echo "FAIL — a coordinate this build resolves is NOT served by its home (ai.bithuman:"
+  echo "       maven.bithuman.ai; everything else: Maven Central). Either pick a pin that is,"
+  echo "       or add the repository AND correct the header comment, which tells a stranger"
+  echo "       where the clone resolves the engines from."
   exit 1
 fi
 if [ "$unreachable" = 1 ]; then
-  echo "NO VERDICT — Central was unreachable. This is not a pass."
+  echo "NO VERDICT — a repository was unreachable. This is not a pass."
   exit 2
 fi
-echo "PASS — every pinned coordinate and every transitive dependency is on Maven Central."
+echo "PASS — every pinned coordinate and every transitive dependency is served by its home"
+echo "       (ai.bithuman: maven.bithuman.ai; everything else: Maven Central)."

@@ -16,7 +16,7 @@ STEPS=(
   "manifest-truth|0|python3 strings curl|formula licence + Package.swift vs shipped binaries + mutation proof (manifest-truth.yml)|$WF/manifest-truth.yml manifest-truth"
   "public-vocabulary|0|python3|no internal vocabulary in the tracked tree (public-vocabulary.yml:vocabulary)|$WF/public-vocabulary.yml vocabulary"
   "platform-guards|0|python3|bare #if os(macOS) states its reason + control (plugin-platform-guards.yml:guards)|$WF/plugin-platform-guards.yml guards"
-  "android-coordinates|0|python3 curl|pinned Android coordinates + transitive deps on Maven Central + controls (plugin-platform-guards.yml)|$WF/plugin-platform-guards.yml android-coordinates-on-central"
+  "android-coordinates|0|python3 curl|pinned Android coordinates + transitive deps served by their home (ai.bithuman: maven.bithuman.ai; else Central) + controls (plugin-platform-guards.yml)|$WF/plugin-platform-guards.yml android-coordinates-on-central"
   "dev-levers|0|python3|dev levers go through their door + controls (plugin-platform-guards.yml:dev-levers)|$WF/plugin-platform-guards.yml dev-levers"
   "voice-render-edge-dart|0|python3|Dart voice module does not import render + controls (plugin-platform-guards.yml)|$WF/plugin-platform-guards.yml voice-render-edge-dart"
   "latest-badge-selftest|0|python3|Latest-badge detector can refuse, no network (latest-badge.yml, --selftest only)|python3 tools/verify_latest_badge.py --selftest"
