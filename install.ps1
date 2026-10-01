@@ -3,7 +3,10 @@
 # %LOCALAPPDATA%\bithuman\bin (or $env:BITHUMAN_INSTALL_DIR), then puts that folder on your PATH.
 #   irm https://install.bithuman.ai/windows | iex
 # Environment: BITHUMAN_VERSION=cli-vX.Y.Z pins a release; BITHUMAN_INSTALL_DIR picks the directory;
+# BITHUMAN_MIRROR overrides the download mirror ('off' = GitHub only);
 # GITHUB_TOKEN (optional) uses your own GitHub API quota instead of this network's shared one.
+# Downloads come from bitHuman's mirror (maven.bithuman.ai, a byte-for-byte copy of each GitHub
+# release) first, so a normal install makes no GitHub request; GitHub is the fallback.
 # The Windows build is not code-signed. Files this script downloads carry no Mark-of-the-Web, so
 # Windows does not show a SmartScreen prompt for them; the sha256 check is what vouches for the bytes.
 # Docs: https://docs.bithuman.ai/platforms/cli
@@ -62,8 +65,49 @@
   if ($env:PROCESSOR_ARCHITEW6432) { $arch = $env:PROCESSOR_ARCHITEW6432 }
   if ($arch -ne 'AMD64') { Fail "this PC is $arch; the Windows build is x86_64 (AMD64)." }
 
-  # The release: a pinned tag, or the newest published cli-v* release that CARRIES the Windows asset.
+  # The bitHuman mirror first (scripts/mirror-cli-release.sh): maven-metadata.xml names the newest
+  # mirrored version, and <version>/<asset> + .sha256 are the GitHub release's own bytes. Anything it
+  # cannot serve (down, version or asset not mirrored) falls back to GitHub below.
+  $Mirror = 'https://maven.bithuman.ai/ai/bithuman/bithuman-cli'
+  if ($null -ne $env:BITHUMAN_MIRROR) { $Mirror = $env:BITHUMAN_MIRROR }
+  if ($Mirror -in @('off', 'none', '0')) { $Mirror = '' }
+  $Mirror = "$Mirror".TrimEnd('/')
+  $mh = @{ 'User-Agent' = 'bithuman-install-ps1' }
+
+  $work = Join-Path ([IO.Path]::GetTempPath()) ('bithuman-install-' + [guid]::NewGuid())
+  New-Item -ItemType Directory -Path $work | Out-Null
+  try {
+  $zip = Join-Path $work $Asset
   $tag = $env:BITHUMAN_VERSION
+  $sidecar = $null
+  $fromMirror = $false
+  if ($Mirror) {
+    try {
+      $mtag = $tag
+      if (-not $mtag) {
+        $mc = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Headers $mh -Uri "$Mirror/maven-metadata.xml").Content
+        if ($mc -is [byte[]]) { $mc = [Text.Encoding]::UTF8.GetString($mc) }
+        $meta = [xml]"$mc".Trim([char]0xFEFF)
+        $rel = "$($meta.metadata.versioning.release)".Trim()
+        if ($rel -match '^\d+\.\d+\.\d+$') { $mtag = "cli-v$rel" }
+      }
+      if ($mtag -like 'cli-v*') {
+        $murl = "$Mirror/$($mtag -replace '^cli-v', '')/$Asset"
+        $sidecar = Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Headers $mh -Uri "$murl.sha256"
+        Info "downloading $murl"
+        Invoke-WebRequest -UseBasicParsing -Headers $mh -Uri $murl -OutFile $zip | Out-Null
+        $tag = $mtag
+        $fromMirror = $true
+      }
+    } catch {
+      $sidecar = $null
+      Remove-Item -Force -Path $zip -ErrorAction SilentlyContinue
+      Info "the bitHuman mirror could not serve this install ($($_.Exception.Message)); using GitHub"
+    }
+  }
+
+  if (-not $fromMirror) {
+  # The release: a pinned tag, or the newest published cli-v* release that CARRIES the Windows asset.
   if (-not $tag) {
     try {
       $rels = Invoke-GitHub -Rest -Uri "https://api.github.com/repos/$Repo/releases?per_page=100"
@@ -79,12 +123,7 @@
     $tag = $pick.tag_name
   }
   $base = "https://github.com/$Repo/releases/download/$tag"
-  Info "installing bithuman $tag for Windows x86_64"
-
-  $work = Join-Path ([IO.Path]::GetTempPath()) ('bithuman-install-' + [guid]::NewGuid())
-  New-Item -ItemType Directory -Path $work | Out-Null
-  try {
-    $zip = Join-Path $work $Asset
+  Info "installing bithuman $tag for Windows x86_64 (from GitHub)"
     try {
       Invoke-GitHub -Uri "$base/$Asset" -OutFile $zip | Out-Null
       $sidecar = Invoke-GitHub -Uri "$base/$Asset.sha256"
@@ -94,6 +133,9 @@
       if ($code -eq 404) { Fail "the release $tag has no $Asset (or its .sha256) (HTTP 404)." }
       Fail "could not download $Asset from GitHub ($($_.Exception.Message)); run the installer again in a minute."
     }
+  } else {
+    Info "installing bithuman $tag for Windows x86_64 (from the bitHuman mirror)"
+  }
     $text = $sidecar.Content
     if ($text -is [byte[]]) { $text = [Text.Encoding]::ASCII.GetString($text) }
     $want = (($text.Trim()) -split '\s+')[0].ToLower()
