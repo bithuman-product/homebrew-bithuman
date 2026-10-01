@@ -1,3 +1,33 @@
+## 2.6.27 — 2026-10-01 — captions in step with the voice; no crash when the app closes on Android; privacy manifest shipped
+
+Tag `flutter-plugin-v2.6.27`. Engines unchanged: iOS/macOS Expression 2 `v2.19.2`, Essence 2
+`essence2-v1.15.2`, macOS `enginecore-v1.0.2`; Android `essence2-android` 0.9.0,
+`expression2-android` 0.5.2.
+
+* **Captions in step with the voice (iOS, macOS, Android).** A reply's text and audio reach the app
+  together, well before the voice has spoken them, so a caption built from `botTranscriptStream`
+  showed the end of a reply while the character was still on its first sentence.
+  `BithumanRealtimeSession.spokenTranscriptStream` releases the agent's words as they are heard:
+  each `BithumanSpokenText` is the reply's caption so far (`text`, cumulative; a new `reply` number
+  starts a new caption), and the reply's last event is `isFinal`. A barge-in, a typed turn or
+  `stop()` ends the caption with only the words heard (`interrupted`). The position comes from the
+  audio host, which now reports how much of the agent's audio has been heard
+  (`BithumanAvatar.speechPlayout`, `BithumanPlayout {played, fed}`). `botTranscriptStream` is
+  unchanged. **Source change for custom voice hosts:** `VoiceHost` gains `speechPlayout`; an
+  implementation that cannot tell may return an empty stream, and captions are then estimated
+  from when the audio was handed over.
+* **No crash when the app closes with an avatar on screen (Android).** Leaving the app with Back
+  while a character was shown could end in "FlutterJNI is not attached to native" (seen on some
+  devices). The avatar's texture is now released at once when Flutter lets go of the
+  plugin, before anything else is closed.
+* **Privacy manifest shipped (iOS, macOS).** The plugin's `PrivacyInfo.xcprivacy` declares the
+  file-timestamp (C617.1) and system-boot-time (35F9.1) APIs it uses, and is bundled into the app
+  as `bithuman_privacy.bundle`.
+* **Release builds keep what people say out of the device log.** A release build logs only the
+  length of a transcribed turn, never its words.
+* **The Android engines never come from a local Maven cache.** `mavenLocal()` no longer serves the
+  `ai.bithuman` group, so a build always resolves the published engine.
+
 ## 2.6.26 — 2026-10-01 — no seam at the mouth corners; the Android engine comes from maven.bithuman.ai
 
 Tag `flutter-plugin-v2.6.26`. Engines: iOS/macOS Expression 2 `v2.19.2`, Essence 2
