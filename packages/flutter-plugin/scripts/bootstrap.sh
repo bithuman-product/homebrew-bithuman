@@ -131,8 +131,8 @@ LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-c059a62066dd25deb3
 # nothing from it. It is linked whenever Expression 2 is (the plugin always links Expression 2),
 # so it is NOT skipped by BITHUMAN_SKIP_ESSENCE2. Must equal Package.swift's `essence2Tag` and
 # its EngineCore binaryTarget checksum (scripts/check-apple-engine-pin.sh A8).
-ENGINECORE_RELEASE="${ENGINECORE_RELEASE:-enginecore-v1.0.1}"
-ENGINECORE_SHA256="${ENGINECORE_SHA256:-64aa90b319d989d4d92b03435ba625a28bc43d8c86076bf695af99263ca8ac89}"
+ENGINECORE_RELEASE="${ENGINECORE_RELEASE:-enginecore-v1.0.2}"
+ENGINECORE_SHA256="${ENGINECORE_SHA256:-1d3b6de3956bf6b287169331d0e12eb5b750d285c49bf5a9569cc38097fa5e50}"
 
 # The UnifiedModelHeader module, as a plain static .a per slice.
 #
