@@ -76,7 +76,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: every pinned coordinate and every transitive dep is on Maven Central
+      - name: every pinned coordinate and every transitive dep is served by its home (ai.bithuman on maven.bithuman.ai, the rest on Maven Central)
         run: ./scripts/check_android_coordinates_on_central.sh
       - name: Positive control from history — the 0.3.0 pin MUST go red on litert
         run: |

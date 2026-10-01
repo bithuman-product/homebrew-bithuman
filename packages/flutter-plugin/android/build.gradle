@@ -27,7 +27,10 @@
 // qnn-runtime, 2.49.0) come in TRANSITIVELY: expression2-android 0.4.8 is the first POM that
 // declares them, so the two hand-declared lines this file carried for 0.4.7 are gone.
 // Revisit if the expression-2 pin ever moves BELOW 0.4.8 — 0.4.7's POM does not carry them
-// and the engine would silently render on the CPU. essence-2 resolves from Central alone.
+// and the engine would silently render on the CPU. essence-2 0.9.0 is the first engine
+// Central does NOT serve: it resolves from maven.bithuman.ai alone (its one dependency,
+// kotlin-stdlib, from Central). scripts/check_android_coordinates_on_central.sh grades
+// every ai.bithuman pin against maven.bithuman.ai and everything else against Central.
 //
 // ★ The floor is 0.4.7, which the presenter needs: `Expression2IdleLoop` (the idle clip
 // decoded in place, `next(bitmap)`) exists from 0.4.7 ONLY. Central's 0.4.6 — built
@@ -169,7 +172,11 @@ dependencies {
     // per store; renders are bit-identical to 0.5.15.
     // 0.8.0 (2026-09-26): useHardwareBuffers takes up to 32 slots (was 16), which the zero-copy
     // path below needs: the player's ring holds one frame per slot until the slot comes round.
-    implementation 'ai.bithuman:essence2-android:0.8.1'
+    // 0.9.0 (2026-10-01, maven.bithuman.ai only): the generated mouth is blended into the photo
+    // with a wider, feathered edge, so no step shows at the mouth corners. Measured against 0.8.1
+    // on a Galaxy Z Flip5, interleaved: frame rate +1.1 % / -0.1 % (older / current avatar files),
+    // memory within 4 MiB. No API change.
+    implementation 'ai.bithuman:essence2-android:0.9.0'
 
     // Plain-JVM unit tests of the platform-free parts (src/test/kotlin: EngineUsersTest — dispose
     // closes an engine only after its threads returned). Test scope only: nothing ships in the AAR.
