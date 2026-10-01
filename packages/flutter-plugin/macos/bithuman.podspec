@@ -111,6 +111,11 @@ Pod::Spec.new do |s|
     pod_resources << 'Engines/*/Vendor/*-resources/*.onnx'
   end
   s.resources = pod_resources
+  # The plugin's privacy manifest (required-reason APIs: file timestamp C617.1, system boot
+  # time 35F9.1), as its own bundle so the app's archive carries it under the plugin's name
+  # (bithuman_privacy.bundle/PrivacyInfo.xcprivacy). Until 2.6.27 the file was in the repo
+  # but in no file pattern, so no app ever shipped it.
+  s.resource_bundles = {'bithuman_privacy' => ['Resources/PrivacyInfo.xcprivacy']}
   s.dependency 'FlutterMacOS'
   s.platform         = :osx, '13.0'
   s.swift_version    = '5.9'

@@ -4,6 +4,8 @@
 .flutter-plugins-dependencies
 .packages
 build/
+# Gradle's own state when the Android half is built (android/.gradle): never committed.
+.gradle/
 .pub-cache/
 .pub/
 pubspec.lock

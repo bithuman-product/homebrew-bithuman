@@ -31,6 +31,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
@@ -1034,8 +1035,12 @@ class BithumanRealtimeSession {
         // on the user-mic leg. If these come back with the BOT's words, the
         // speaker is leaking into the mic past the AEC; room voices show up
         // as themselves. Log-only — drives the stress-protocol scoring.
+        // ★ A release build logs only the LENGTH: the device log is readable by other tools
+        // and a person's words do not belong in it. Debug and profile builds keep the text.
         // ignore: avoid_print
-        print('[AEC-PROBE] user-mic transcript: "${t ?? ''}"');
+        print(kReleaseMode
+            ? '[AEC-PROBE] user-mic transcript: ${(t ?? '').length} chars'
+            : '[AEC-PROBE] user-mic transcript: "${t ?? ''}"');
         break;
       case 'response.done':
         _haveActiveResponse = false;
