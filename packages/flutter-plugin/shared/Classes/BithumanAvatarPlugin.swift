@@ -559,6 +559,18 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
           NSLog("[BithumanAvatar] mic EventChannel registered: %@", micChan)
         }
       }
+      // Captions (2.6.27): `speechPlayout` {textureId, micGen, played, fed} — how much of the
+      // agent's audio handed to playSpeakerPCM since this audioStart has been heard. The counts
+      // restart here; Dart drops a push carrying any other micGen.
+      if let io = audioIOs[textureId] {
+        let playoutGen = args["micGen"] as? Int ?? 0
+        io.resetPlayout()
+        io.onPlayout = { [weak self] played, fed in
+          self?.channel?.invokeMethod("speechPlayout", arguments: [
+            "textureId": textureId, "micGen": playoutGen, "played": played, "fed": fed,
+          ])
+        }
+      }
       let enableMic = args["enableMic"] as? Bool ?? true
       let vadThreshold = args["vadThreshold"] as? Int
       // Uplink gain policy from the Dart echo table (EchoProfile.current.vpioAgc).

@@ -14,7 +14,7 @@ import 'package:flutter/services.dart';
 
 import 'src/voice_host.dart';
 
-export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption;
+export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout;
 
 const _channel = MethodChannel('ai.bithuman.avatar');
 
@@ -77,6 +77,12 @@ class BithumanAvatar implements VoiceHost {
           if (e != null && !avatar._interruptionController.isClosed) {
             avatar._interruptionController.add(e);
           }
+        case 'speechPlayout':
+          // How much of the agent's audio has been heard (captions follow it). A push from an
+          // earlier audio unit (another micGen) counts samples of a coordinate that is gone.
+          if (args?['micGen'] != avatar._micGen) return null;
+          final p = BithumanPlayout.fromMap(args);
+          if (p != null && !avatar._playoutController.isClosed) avatar._playoutController.add(p);
       }
       return null;
     });
@@ -637,6 +643,8 @@ class BithumanAvatar implements VoiceHost {
 
   final StreamController<BithumanAudioInterruption> _interruptionController =
       StreamController<BithumanAudioInterruption>.broadcast();
+  final StreamController<BithumanPlayout> _playoutController =
+      StreamController<BithumanPlayout>.broadcast();
 
   /// The platform took this avatar's session sound away, or gave it back (iOS:
   /// an audio-session interruption such as a phone call, also one answered from
@@ -646,6 +654,16 @@ class BithumanAvatar implements VoiceHost {
   @override
   Stream<BithumanAudioInterruption> get audioInterruptions {
     return _interruptionController.stream;
+  }
+
+  /// Where playout stands on the agent audio handed to [playSpeakerPCM] since
+  /// [audioStart] (iOS, macOS, Android): `{played, fed}` in 24 kHz samples, at most
+  /// ten times a second while the voice is heard, at once when everything handed
+  /// over has been heard and after every [interrupt]. `BithumanRealtimeSession`
+  /// releases the captions against it (`spokenTranscriptStream`).
+  @override
+  Stream<BithumanPlayout> get speechPlayout {
+    return _playoutController.stream;
   }
 
   /// Drop the underlying native runtime. Idempotent.
@@ -659,6 +677,7 @@ class BithumanAvatar implements VoiceHost {
     unawaited(_frameSizeController.close());
     unawaited(_pipController.close());
     unawaited(_interruptionController.close());
+    unawaited(_playoutController.close());
     await _channel.invokeMethod('dispose', {'textureId': textureId});
   }
 }

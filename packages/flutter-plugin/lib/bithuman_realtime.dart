@@ -39,8 +39,10 @@ import 'package:web_socket_channel/io.dart';
 import 'src/voice_host.dart';
 import 'src/dev_levers.dart';
 import 'src/echo_profile.dart';
+import 'src/spoken_captions.dart';
 
-export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption;
+export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout;
+export 'src/spoken_captions.dart' show BithumanSpokenText, SpokenCaptioner;
 
 /// One Realtime session over a single WebSocket.
 ///
@@ -399,8 +401,52 @@ class BithumanRealtimeSession {
   /// Streaming text of what the bot is saying — emitted from
   /// `response.audio_transcript.delta` events. Each event carries one
   /// partial chunk; callers concatenate to build the full reply.
+  ///
+  /// These arrive when the TEXT arrives, which for a spoken reply is far ahead
+  /// of the voice (a reply's text and audio come in one burst). For captions use
+  /// [spokenTranscriptStream], which releases the words as they are heard.
   final _botTranscript = StreamController<String>.broadcast();
   Stream<String> get botTranscriptStream => _botTranscript.stream;
+
+  /// The agent's words, released as the listener HEARS them (2.6.27): each event
+  /// is the reply's cumulative caption so far ([BithumanSpokenText.text]; replace,
+  /// do not append), and a new [BithumanSpokenText.reply] number starts a new
+  /// caption. The position comes from the voice host ([VoiceHost.speechPlayout]);
+  /// a host that does not report it is estimated from the handover. The last
+  /// event of a reply is [BithumanSpokenText.isFinal]: heard to the end, or cut
+  /// (a barge-in, a typed turn, [stop]) — then [BithumanSpokenText.interrupted]
+  /// and the text holds only the words heard before the cut.
+  Stream<BithumanSpokenText> get spokenTranscriptStream => _spoken.stream;
+  final _spoken = StreamController<BithumanSpokenText>.broadcast();
+  late final SpokenCaptioner _captions = SpokenCaptioner(
+    onCaption: (e) {
+      if (!_spoken.isClosed) _spoken.add(e);
+    },
+    onLog: _log,
+  );
+  StreamSubscription<BithumanPlayout>? _playoutSub;
+  Timer? _captionTick;
+
+  /// While a reply still has words to release: re-evaluate every 50 ms (the carry
+  /// between playout reports, and the estimate when the host reports none).
+  void _captionTickIfBusy() {
+    if (!_captions.busy) {
+      _captionTick?.cancel();
+      _captionTick = null;
+      return;
+    }
+    _captionTick ??= Timer.periodic(const Duration(milliseconds: 50), (_) {
+      _captions.tick();
+      if (!_captions.busy) {
+        _captionTick?.cancel();
+        _captionTick = null;
+      }
+    });
+  }
+
+  /// The reply an event belongs to, when the event names it.
+  static String? _responseId(Map<String, dynamic> evt) =>
+      (evt['response_id'] as String?) ?? ((evt['response'] as Map<String, dynamic>?)?['id'] as String?);
 
   /// User's transcribed speech (when OpenAI returns it). Useful for
   /// captions of "what you just said". Emitted on
@@ -463,6 +509,14 @@ class BithumanRealtimeSession {
     final oldSub = _interruptionSub;
     if (oldSub != null) unawaited(oldSub.cancel());
     _interruptionSub = avatar.audioInterruptions.listen(_onAudioInterruption);
+    // A new audio unit: the host's playout counts restart at zero, and so do the captions'.
+    _captions.reset();
+    final oldPlayout = _playoutSub;
+    if (oldPlayout != null) unawaited(oldPlayout.cancel());
+    _playoutSub = avatar.speechPlayout.listen((p) {
+      _captions.playout(p);
+      _captionTickIfBusy();
+    });
     try {
       // Bring up the native audio engine FIRST so VP-IO is already
       // running by the time the WS opens — the very first mic packet
@@ -864,6 +918,7 @@ class BithumanRealtimeSession {
     }
     _droppingCancelledAudio = true;
     _resetAudioPacing();
+    _captions.cut(); // before the interrupt: what was heard up to now, not what is discarded
     try {
       await avatar.interrupt(reason: 'text');
     } catch (_) {}
@@ -908,6 +963,9 @@ class BithumanRealtimeSession {
     // avatar even after we've torn the session down.
     _droppingCancelledAudio = true;
     _resetAudioPacing(); // release any delta parked in a pacing delay
+    _captions.cut();
+    _captionTick?.cancel();
+    _captionTick = null;
 
     // Wipe the lipsync queue + stop the speaker player IMMEDIATELY.
     // Without this, the avatar keeps animating the agent's last
@@ -917,6 +975,8 @@ class BithumanRealtimeSession {
     _micSub = null;
     await _interruptionSub?.cancel();
     _interruptionSub = null;
+    await _playoutSub?.cancel();
+    _playoutSub = null;
     await _wsSub?.cancel();
     await _ws?.sink.close();
     _ws = null;
@@ -994,6 +1054,9 @@ class BithumanRealtimeSession {
         final now = DateTime.now();
         _audibleUntil = (_audibleUntil.isAfter(now) ? _audibleUntil : now).add(chunkDur);
         _agentAudioMs += chunkDur.inMilliseconds;
+        // The captions count the same samples the host counts as `fed`, in the same order.
+        _captions.audio(pcm24kBytes.length ~/ 2, _responseId(evt));
+        _captionTickIfBusy();
         // No wait: hand the chunk to the plugin as it arrives. The engine bounds
         // the backlog; the presenter is clocked by the engine's frames.
         // Single call drives BOTH the speaker (VP-IO player node) AND
@@ -1012,6 +1075,7 @@ class BithumanRealtimeSession {
         _stressTimer?.cancel(); // a reply is in flight; the driver waits for its done
         _resetAudioPacing(); // fresh turn plays immediately, no carried lead
         _markConnectionValidated(); // the server is responding → socket healthy
+        _captions.replyStarted(_responseId(evt));
         break;
       case 'response.cancelled':
         _haveActiveResponse = false;
@@ -1021,12 +1085,26 @@ class BithumanRealtimeSession {
         // (Mirrors the WebRTC openai_webrtc_session response.cancelled fix.)
         _droppingCancelledAudio = true;
         _resetAudioPacing(); // invalidate any delta still parked in a pacing delay
+        // What was handed over still plays (no interrupt here); no more of it comes.
+        _captions.replyDone(_responseId(evt));
+        _captionTickIfBusy();
         break;
       case 'response.output_audio_transcript.delta':
         final delta = evt['delta'] as String?;
         if (delta != null && delta.isNotEmpty) {
           _botTranscript.add(delta);
+          // A cancelled reply's late text belongs to no caption.
+          if (!_droppingCancelledAudio) {
+            _captions.text(delta, _responseId(evt));
+            _captionTickIfBusy();
+          }
         }
+        break;
+      case 'response.output_audio_transcript.done':
+        if (!_droppingCancelledAudio) _captions.textDone(_responseId(evt), evt['transcript'] as String?);
+        break;
+      case 'response.output_audio.done':
+        if (!_droppingCancelledAudio) _captions.audioDone(_responseId(evt));
         break;
       case 'conversation.item.input_audio_transcription.completed':
         final t = evt['transcript'] as String?;
@@ -1045,6 +1123,9 @@ class BithumanRealtimeSession {
       case 'response.done':
         _haveActiveResponse = false;
         _status.add(RealtimeStatus.responseDone);
+        // The reply's text and audio are complete; what was handed over still plays out.
+        _captions.replyDone(_responseId(evt));
+        _captionTickIfBusy();
         final doneStatus = ((evt['response'] as Map<String, dynamic>?)?['status'] as String?) ?? '';
         if (doneStatus != 'completed') {
           _log('[barge] response.done status=$doneStatus hostMs=${DateTime.now().millisecondsSinceEpoch}');
@@ -1099,6 +1180,7 @@ class BithumanRealtimeSession {
         }
         _droppingCancelledAudio = true;
         _resetAudioPacing(); // drop any delta parked in a pacing delay
+        _captions.cut(); // the words heard before the cut, then the host discards the rest
         await avatar.interrupt(reason: 'speech_started');
         _log('[barge] interrupt returned hostMs=${DateTime.now().millisecondsSinceEpoch} '
             '(+${DateTime.now().millisecondsSinceEpoch - ssMs} ms after speech_started)');

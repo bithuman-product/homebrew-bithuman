@@ -58,6 +58,8 @@ private const val TAG = "BithumanAvatar"
 /** How long a fresh player (setIdleHold(false)) waits for the held player's threads to return. */
 private const val RESUME_WAIT_MS = 2_000L
 private const val MIC_PERMISSION_REQUEST = 0xB17
+/** `speechPlayout` pushes at most this often while the voice plays (plus at its end and on a cut). */
+private const val PLAYOUT_PUSH_MS = 100L
 
 class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     PluginRegistry.RequestPermissionsResultListener {
@@ -114,6 +116,20 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         var micSink: EventChannel.EventSink? = null
         var micChannel: EventChannel? = null
         var framesDrawn = 0L
+
+        // Captions (2.6.27): `speechPlayout` {played, fed}, 24 kHz samples since audioStart.
+        // Platform thread only.
+        /** audioStart → audioStop: playout is reported. */
+        var playoutOn = false
+        /** The micGen of the audioStart these counts belong to (Dart drops any other). */
+        var playMicGen = 0
+        /** Samples received by playSpeakerPCM since audioStart, counted before anything else. */
+        var fedSamples = 0L
+        /** Heard or discarded; monotonic, never above [fedSamples]. */
+        var playedSamples = 0L
+        var pushedPlayed = -1L
+        var pushedFed = -1L
+        var pushedAtMs = 0L
         private val hwCanvas = avatar.hardwareFrames
 
         /**
@@ -254,11 +270,25 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             "playSpeakerPCM" -> {
                 val s = session(call) ?: return result.error("no_session", "unknown textureId", null)
                 val pcm = call.argument<ByteArray>("pcm")
-                if (pcm != null && pcm.isNotEmpty()) { s.player?.noteFirstByte(); s.player?.offer(pcm) }
+                if (pcm != null && pcm.isNotEmpty()) {
+                    // `fed` first, before anything can drop the chunk (captions count what Dart handed over).
+                    val fedStart = s.fedSamples
+                    s.fedSamples += pcm.size / 2
+                    val p = s.player
+                    if (p != null) { p.noteFirstByte(); p.offer(pcm, fedStart) }
+                    else notePlayed(s, s.fedSamples)        // no player (held): this audio is never heard
+                    if (fedStart == 0L) pushPlayout(s, force = true)   // the first chunk: a playout source exists
+                }
                 result.success(null)
             }
             "notifyTurnEnd" -> { session(call)?.player?.endOfReply(); result.success(null) }
-            "interrupt" -> { session(call)?.player?.bargeIn(call.argument<String>("reason") ?: "app"); result.success(null) }
+            "interrupt" -> {
+                val s = session(call)
+                s?.player?.bargeIn(call.argument<String>("reason") ?: "app")
+                // Everything handed over is discarded: captions end on what was heard before the cut.
+                if (s != null) { notePlayed(s, s.fedSamples); pushPlayout(s, force = true) }
+                result.success(null)
+            }
             // The transport's instrument lines, into logcat beside the player's own.
             "log" -> { Log.i("bhdart", call.argument<String>("line") ?: ""); result.success(null) }
             // The mouth is driven by the real audio here; nothing to gate.
@@ -266,7 +296,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
 
             // --- the microphone out ---
             "audioStart" -> audioStart(call, result)
-            "audioStop" -> { session(call)?.let { stopMic(it) }; result.success(null) }
+            "audioStop" -> { session(call)?.let { it.playoutOn = false; stopMic(it) }; result.success(null) }
             "micPermissionStatus" -> result.success(if (micGranted()) "authorized" else "notDetermined")
             "requestMicPermission" -> requestMic { granted -> result.success(if (granted) "authorized" else "denied") }
 
@@ -442,7 +472,37 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     private fun newPlayer(s: AvatarSession): AvatarPlayer {
         val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         val workers = s.users.newWorkers { name, e -> Log.e(TAG, "$name stopped on an exception: $e", e) }
-        return AvatarPlayer(s.avatar, workers, debuggable = debuggable, capturable = false) { bmp -> s.draw(bmp) }
+        return AvatarPlayer(s.avatar, workers, debuggable = debuggable, capturable = false,
+            onPlayout = { played -> notePlayed(s, played) }) { bmp -> s.draw(bmp) }
+    }
+
+    // ---------------------------------------------------------------- speech playout (captions)
+
+    /** The player says [played] (fed coordinate) has been heard. Platform thread. */
+    private fun notePlayed(s: AvatarSession, played: Long) {
+        val p = minOf(played, s.fedSamples)
+        if (p > s.playedSamples) s.playedSamples = p
+        pushPlayout(s)
+    }
+
+    /**
+     * `speechPlayout` to Dart: at most every 100 ms while the position moves, at once when it
+     * reaches everything fed (the reply has been heard to its end) and when [force]d (the first
+     * chunk of an audio unit, a barge-in). Platform thread.
+     */
+    private fun pushPlayout(s: AvatarSession, force: Boolean = false) {
+        if (!s.playoutOn || s.stopped.get() || detached) return
+        val played = s.playedSamples
+        val fed = s.fedSamples
+        if (played == s.pushedPlayed && fed == s.pushedFed) return
+        val now = android.os.SystemClock.uptimeMillis()
+        val caughtUp = played >= fed && s.pushedPlayed < fed
+        if (!force && !caughtUp && (played == s.pushedPlayed || now - s.pushedAtMs < PLAYOUT_PUSH_MS)) return
+        s.pushedPlayed = played; s.pushedFed = fed; s.pushedAtMs = now
+        runCatching {
+            channel.invokeMethod("speechPlayout", mapOf(
+                "textureId" to s.entry.id(), "micGen" to s.playMicGen, "played" to played, "fed" to fed))
+        }
     }
 
     /**
@@ -531,6 +591,10 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val enableMic = call.argument<Boolean>("enableMic") ?: true
         val gen = call.argument<Number>("micGen")?.toInt() ?: 0
         stopMic(s)
+        // A new audio unit: the playout counts restart at zero (captions, `speechPlayout`).
+        s.playMicGen = gen; s.fedSamples = 0L; s.playedSamples = 0L
+        s.pushedPlayed = -1L; s.pushedFed = -1L; s.pushedAtMs = 0L; s.playoutOn = true
+        s.player?.resetPlayout()
         // The call's audio focus and the phone-call watch, for speaker-only sessions too: a call
         // answered from its notification leaves the app on screen and would otherwise go on.
         val watch = AudioInterruptions(context, main) { began, reason, shouldResume ->

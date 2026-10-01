@@ -362,10 +362,111 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
       farSumSq = 0; farN = 0; farPeak = 0; farLineAt = now
     }
   }
-  // The AEC warm-up squelch that read this clock is gone (VP-IO carries echo now);
-  // the schedule sites still call it, harmlessly. Kept as a no-op rather than edited
-  // out of six call sites — one line, and the sites read clearly as "audio scheduled".
-  @inline(__always) private func notePlayoutScheduled(_ seconds: TimeInterval) {}
+  // MARK: - Speech playout (captions in step with the voice), 2.6.27
+  //
+  // ★WHY. A reply's audio and its text reach the app in one burst, far faster than the voice
+  // is heard; captions shown on arrival ran seconds ahead of the mouth. Where the voice really
+  // is, is known here: what playSpeakerPCM24k received (`fed`), what still waits in the paced
+  // FIFO or the first-frame hold, and what the player has been handed but not yet played
+  // (every schedule site calls notePlayoutScheduled, which keeps the time the scheduled audio
+  // will have been heard, output latency included). `played` = fed − unreleased − not yet
+  // heard, monotonic; a barge-in or stop discards the rest (played = fed). The plugin pushes
+  // it to Dart as `speechPlayout` (onPlayout), at most every 100 ms while it moves, at once
+  // when it reaches fed. Paths without the FIFO (no avatar, the first-frame hold) are covered
+  // by the same arithmetic: their audio goes straight to the player.
+
+  /// `speechPlayout`: (played, fed) in 24 kHz samples since resetPlayout(). Main thread. Set
+  /// by the plugin at audioStart; nil = nothing reported (LOCAL mode, a headless test).
+  var onPlayout: ((_ played: Int64, _ fed: Int64) -> Void)?
+  /// Samples received by playSpeakerPCM24k, counted before any gate or drop. Main thread.
+  private var playoutFed: Int64 = 0
+  /// Heard or discarded: monotonic, never above playoutFed. Main thread.
+  private var playoutPlayed: Int64 = 0
+  /// When everything scheduled on the player so far will have been heard (host time).
+  private var playoutHeardEnd: CFTimeInterval = 0
+  private let playoutLock = NSLock()
+  /// The output path's latency, read at start(): audio scheduled now is heard this much later.
+  private var playoutLatency: CFTimeInterval = 0
+  private var playoutPushedPlayed: Int64 = -1
+  private var playoutPushedFed: Int64 = -1
+  private var playoutPushedAt: CFTimeInterval = 0
+  private var playoutTimer: DispatchSourceTimer?
+
+  /// Audio was handed to the player (every schedule site): it will have been heard
+  /// [seconds] after the later of now + the output latency and the end of what is already queued.
+  private func notePlayoutScheduled(_ seconds: TimeInterval) {
+    let now = CACurrentMediaTime()
+    playoutLock.lock()
+    playoutHeardEnd = max(playoutHeardEnd, now + playoutLatency) + seconds
+    playoutLock.unlock()
+  }
+
+  /// A new audio unit (audioStart): the counts restart at zero. Main thread.
+  func resetPlayout() {
+    playoutTimer?.cancel(); playoutTimer = nil
+    playoutFed = 0; playoutPlayed = 0
+    playoutPushedPlayed = -1; playoutPushedFed = -1; playoutPushedAt = 0
+    playoutLock.lock(); playoutHeardEnd = 0; playoutLock.unlock()
+  }
+
+  /// Main thread: playSpeakerPCM24k received [samples].
+  private func notePlayoutFed(_ samples: Int) {
+    let first = playoutFed == 0
+    playoutFed += Int64(samples)
+    if first { pushPlayout(force: true) }   // a playout source exists
+    guard playoutTimer == nil, onPlayout != nil else { return }
+    let t = DispatchSource.makeTimerSource(queue: .main)
+    t.schedule(deadline: .now() + 0.05, repeating: 0.05, leeway: .milliseconds(10))
+    t.setEventHandler { [weak self] in self?.playoutTick() }
+    playoutTimer = t
+    t.resume()
+  }
+
+  private func playoutTick() {
+    let sr = serverTtsFormat.sampleRate
+    embodyPacedLock.lock(); var waiting = Int64(embodyPaced.count); embodyPacedLock.unlock()
+    speakerGenLock.lock()
+    waiting += gateHeldBuffers.reduce(Int64(0)) { $0 + Int64($1.frameLength) }
+    speakerGenLock.unlock()
+    playoutLock.lock(); let heardEnd = playoutHeardEnd; playoutLock.unlock()
+    let now = CACurrentMediaTime()
+    // The paced FIFO releases whole slices only: a remainder shorter than one, with the player
+    // quiet, is never played (the reply is over) — it counts as discarded.
+    let quantum = Int64(sr * (lipsyncSink?.audioReleaseSeconds ?? 0.05))
+    if waiting < quantum && now > heardEnd + 0.15 { waiting = 0 }
+    let left = max(0, playoutFed - waiting)
+    let notYetHeard = min(left, Int64(max(0, heardEnd - now) * sr))
+    let played = min(playoutFed, left - notYetHeard)
+    if played > playoutPlayed { playoutPlayed = played }
+    pushPlayout()
+    if playoutPlayed >= playoutFed && playoutPushedPlayed >= playoutFed {
+      playoutTimer?.cancel(); playoutTimer = nil
+    }
+  }
+
+  /// Everything received so far is heard or discarded (a barge-in, a stop).
+  private func discardPlayout() {
+    let apply = { [weak self] in
+      guard let self else { return }
+      self.playoutLock.lock(); self.playoutHeardEnd = 0; self.playoutLock.unlock()
+      self.playoutPlayed = self.playoutFed
+      self.pushPlayout(force: true)
+    }
+    if Thread.isMainThread { apply() } else { DispatchQueue.main.async(execute: apply) }
+  }
+
+  /// To Dart (main thread): at most every 100 ms while `played` moves; at once when it reaches
+  /// `fed`, and when [force]d.
+  private func pushPlayout(force: Bool = false) {
+    guard let cb = onPlayout else { return }
+    let played = playoutPlayed, fed = playoutFed
+    if played == playoutPushedPlayed && fed == playoutPushedFed { return }
+    let now = CACurrentMediaTime()
+    let caughtUp = played >= fed && playoutPushedPlayed < fed
+    if !force && !caughtUp && (played == playoutPushedPlayed || now - playoutPushedAt < 0.1) { return }
+    playoutPushedPlayed = played; playoutPushedFed = fed; playoutPushedAt = now
+    cb(played, fed)
+  }
   /// A cut: the reason travels with the line (server speech_started, the app's text
   /// turn, the LOCAL energy VAD, a stop) so a reader can tell a phantom from a person.
   private var bargeN = 0
@@ -1278,6 +1379,8 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     engine.prepare()
     try engine.start()
     self.playerFormat = player.outputFormat(forBus: 0)
+    // Captions: audio scheduled now is heard this much later (the output path's latency).
+    playoutLatency = min(0.5, max(0, engine.outputNode.presentationLatency))
     player.play()
     #if os(iOS)
     started = true
@@ -1300,6 +1403,8 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   }
 
   func stop() {
+    playoutTimer?.cancel(); playoutTimer = nil
+    playoutPlayed = playoutFed
     if !started { return }
     #if os(iOS)
     started = false
@@ -1425,6 +1530,8 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     NSLog("[bhbarge] CUT %d reason=%@ hostMs=%lld flushedInMs=%.1f unreleasedSamples=%d oldSlicesAfterCut=%d",
           bargeN, reason, Int64(t0.timeIntervalSince1970 * 1000),
           Date().timeIntervalSince(t0) * 1000, pacedDropped, oldSlicesAfterCut)
+    // Captions: the cut voice is never heard; they end on what was heard before it.
+    discardPlayout()
   }
 
   // MARK: - The LOCAL-mode duplex gate
@@ -1720,6 +1827,8 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   /// happen synchronously here so the avatar's compose queue and the player's
   /// render queue drain from the same source at the same instant.
   func playSpeakerPCM24k(_ pcm: Data) {
+    // Captions: `fed` counts what arrived, before any gate below can drop it.
+    notePlayoutFed(pcm.count / 2)
     spkChunkCount += 1
     if spkChunkCount == 1 || spkChunkCount % 50 == 0 {
       vlog("[RealtimeAudioIO] bot chunk #\(spkChunkCount) (\(pcm.count) bytes from OpenAI)")
