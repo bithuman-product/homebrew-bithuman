@@ -92,7 +92,7 @@ run_case() { # <name> ; scenario files already in $work/$name
   cp "$work/tarball.tgz" "$d/tarball.tgz"
   mkdir -p "$d/bin"
   env -i PATH="$work/fakebin:/usr/bin:/bin" HOME="$d" FAKE_DIR="$d" \
-    BITHUMAN_INSTALL_DIR="$d/bin" BITHUMAN_NO_MODIFY_PATH=1 \
+    BITHUMAN_INSTALL_DIR="$d/bin" BITHUMAN_NO_MODIFY_PATH=1 BITHUMAN_MIRROR=off \
     ${CASE_VERSION:+BITHUMAN_VERSION=$CASE_VERSION} \
     ${CASE_TOKEN:+GITHUB_TOKEN=$CASE_TOKEN} \
     sh "$installer" > "$d/out" 2>&1

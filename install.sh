@@ -3,12 +3,41 @@
 # installs it into ~/.local/bin (or $BITHUMAN_INSTALL_DIR).
 #   curl -fsSL https://install.bithuman.ai | sh
 # Environment: BITHUMAN_VERSION=cli-vX.Y.Z pins a release; BITHUMAN_INSTALL_DIR picks the directory;
+# BITHUMAN_MIRROR overrides the download mirror ("off" = GitHub only);
 # GITHUB_TOKEN (optional) spends your own GitHub API quota instead of this network's shared one.
 # Docs: https://docs.bithuman.ai/sdk/cli
 
 set -eu
 
 GITHUB_REPO="bithuman-product/homebrew-bithuman"
+
+# ── The bitHuman download mirror (2026-10-01) ───────────────────────────────
+# Release metadata and tarballs come from bitHuman's own origin first:
+#   https://maven.bithuman.ai/ai/bithuman/bithuman-cli/maven-metadata.xml   newest version (<release>)
+#   https://maven.bithuman.ai/ai/bithuman/bithuman-cli/<X.Y.Z>/<asset>[.sha256]
+# a byte-for-byte copy of each GitHub release (scripts/mirror-cli-release.sh, RELEASE.md),
+# so a normal install makes no GitHub request at all and never meets GitHub's
+# 60-requests-per-hour-per-network limit. Anything the mirror cannot answer (it is down, the
+# version or target is not mirrored, a sidecar is missing) falls back to GitHub exactly as before.
+MIRROR="${BITHUMAN_MIRROR-https://maven.bithuman.ai/ai/bithuman/bithuman-cli}"
+case "$MIRROR" in off|none|0) MIRROR="" ;; esac
+MIRROR="${MIRROR%/}"
+
+mirror_fetch() { # <url> <outfile> [progress] -> 0 only on HTTP 200; quiet, short connect timeout
+  if [ -n "${3:-}" ]; then
+    curl -fSL --progress-bar --connect-timeout 10 --speed-limit 1024 --speed-time 30 -o "$2" "$1" 2>/dev/null
+  else
+    curl -fsSL --connect-timeout 10 --max-time 30 -o "$2" "$1" 2>/dev/null
+  fi
+}
+
+mirror_latest() { # -> cli-vX.Y.Z from the mirror's maven-metadata.xml, or nothing
+  [ -n "$MIRROR" ] || return 0
+  _ml=$(curl -fsSL --connect-timeout 10 --max-time 30 "$MIRROR/maven-metadata.xml" 2>/dev/null || true)
+  _mv=$(printf '%s\n' "$_ml" | sed -n 's:.*<release>\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)</release>.*:\1:p' | head -1)
+  [ -n "$_mv" ] && printf 'cli-v%s\n' "$_mv"
+  return 0
+}
 
 err() { printf '%s\n' "install: error: $*" >&2; }
 info() { printf 'install: %s\n' "$*"; }
@@ -430,6 +459,10 @@ target="${arch}-${os}"
 
 version="${BITHUMAN_VERSION:-}"
 if [ -z "$version" ]; then
+  version=$(mirror_latest)
+  [ -n "$version" ] && info "latest release (bitHuman mirror): $version"
+fi
+if [ -z "$version" ]; then
   info "querying latest release..."
   api_url="https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100"
   tags=$(gh_get "$api_url" \
@@ -479,6 +512,31 @@ info "install dir: $install_dir"
 tarball_name="bithuman-${target}.tar.gz"
 tarball_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${tarball_name}"
 
+tmpdir=$(mktemp -d 2>/dev/null || mktemp -d -t 'bithuman-install')
+trap 'rm -rf "$tmpdir" "$_gh_state"' EXIT INT TERM HUP
+sha_file="$tmpdir/${tarball_name}.sha256"
+
+# The mirror first: it must hold BOTH the sidecar and the tarball, or GitHub is used.
+from_mirror=""
+case "$version" in cli-v[0-9]*) _mver=${version#cli-v} ;; *) _mver="" ;; esac
+if [ -n "$MIRROR" ] && [ -n "$_mver" ]; then
+  _murl="$MIRROR/$_mver/$tarball_name"
+  if mirror_fetch "$_murl.sha256" "$sha_file"; then
+    info "downloading $_murl"
+    if mirror_fetch "$_murl" "$tmpdir/$tarball_name" progress; then
+      from_mirror=1
+      tarball_url=$_murl
+    else
+      rm -f "$tmpdir/$tarball_name" "$sha_file"
+      info "the bitHuman mirror did not deliver $tarball_name; falling back to GitHub"
+    fi
+  else
+    rm -f "$sha_file"
+    info "the bitHuman mirror has no $version/$tarball_name (or is unreachable); using GitHub"
+  fi
+fi
+
+if [ -z "$from_mirror" ]; then
 _avail=$(target_availability "$version" "$tarball_name")
 [ "$_avail" = SKIP ] && exit_if_rate_limited
 case "$_avail" in
@@ -520,9 +578,6 @@ case "$_avail" in
     ;;
 esac
 
-tmpdir=$(mktemp -d 2>/dev/null || mktemp -d -t 'bithuman-install')
-trap 'rm -rf "$tmpdir" "$_gh_state"' EXIT INT TERM HUP
-
 info "downloading $tarball_url"
 if ! gh_fetch "$tarball_url" "$tmpdir/$tarball_name" progress; then
   exit_if_rate_limited
@@ -544,9 +599,10 @@ if ! gh_fetch "$tarball_url" "$tmpdir/$tarball_name" progress; then
   exit 1
 fi
 
+fi  # end of the GitHub fallback
+
 sha_url="${tarball_url}.sha256"
-sha_file="$tmpdir/${tarball_name}.sha256"
-if gh_fetch "$sha_url" "$sha_file"; then
+if [ -n "$from_mirror" ] || gh_fetch "$sha_url" "$sha_file"; then
   info "verifying sha256..."
   expected=$(awk '{print $1}' "$sha_file")
   if command -v shasum >/dev/null 2>&1; then
