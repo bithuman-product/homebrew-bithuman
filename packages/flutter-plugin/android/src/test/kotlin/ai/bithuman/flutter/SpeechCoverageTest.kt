@@ -32,26 +32,28 @@ class SpeechCoverageTest {
 
     @Test
     fun a_held_frame_re_shown_under_its_audio_is_due_but_not_shown() {
-        // The frozen face the old line called 86-93%: one new frame, then its frame held under 10 units of audio.
+        // The frozen face the old line called 86-93%: one new frame, then its frame held under 9 units of audio.
         val c = cov()
         c.play(1, ("S" + "C".repeat(9)).repeat(10)); c.endUtterance()
+        // Below half from the 25th unit (1.0 s), flagged once that has lasted a second (unit 50), to the end.
+        assertTrue(lines.toString(), lines.any { it.startsWith("FROZEN utterance=1 at=1000ms: under 50% unique frames for 1000ms") })
         assertEquals("UTT 1 unique=10 due=100 cov=10% frozen=3000ms episodes=1", lines.last())
-        assertTrue(lines.any { it.startsWith("FROZEN utterance=1 at=1000ms: 3 unique of 25") })
         assertEquals(10, c.coveragePct)
     }
 
     @Test
-    fun frozen_needs_a_whole_second_below_half_and_ends_when_it_recovers() {
+    fun frozen_needs_more_than_a_second_below_half_and_ends_when_it_recovers() {
         val c = cov()
         c.play(1, "S".repeat(25))            // 1 s in step
-        c.play(1, "C".repeat(12))            // 0.48 s held: the last second is still 13/25 unique
-        assertTrue("not frozen yet: $lines", lines.none { it.startsWith("FROZEN") })
-        c.play(1, "C")                       // 13 held: 12/25 < 50%
-        assertTrue(lines.last(), lines.last().startsWith("FROZEN utterance=1 at=1520ms: 12 unique of 25"))
+        c.play(1, "C".repeat(13))            // the last second drops to 12/25 at unit 38
+        c.play(1, "S".repeat(13))            // back to 13/25 at unit 51: a 0.52 s dip, not flagged
+        assertTrue("a short dip is not a frozen face: $lines", lines.none { it.startsWith("FROZEN") })
+        c.play(1, "C".repeat(60))            // below half from unit 64 (a window of 12 unique)
+        assertTrue(lines.toString(), lines.last().startsWith("FROZEN utterance=1 at=2560ms: under 50% unique frames for 1000ms"))
         c.play(1, "S".repeat(13))            // the last second back to 13/25
-        assertTrue(lines.last(), lines.last().startsWith("FROZEN-END utterance=1 after 520ms"))
+        assertTrue(lines.last(), lines.last().startsWith("FROZEN-END utterance=1 after 2400ms"))
         c.endUtterance()
-        assertEquals("UTT 1 unique=38 due=51 cov=74% frozen=520ms episodes=1", lines.last())
+        assertEquals("UTT 1 unique=51 due=124 cov=41% frozen=2400ms episodes=1", lines.last())
     }
 
     @Test
@@ -69,8 +71,8 @@ class SpeechCoverageTest {
     @Test
     fun an_utterance_that_ends_frozen_says_so() {
         val c = cov()
-        c.play(1, "S" + "C".repeat(40)); c.endUtterance()
-        assertTrue(lines.any { it.startsWith("FROZEN-END utterance=1 after") && it.endsWith("the utterance ended frozen") })
-        assertTrue(lines.last(), lines.last().startsWith("UTT 1 unique=1 due=41 cov=2%"))
+        c.play(1, "S" + "C".repeat(60)); c.endUtterance()
+        assertTrue(lines.toString(), lines.any { it.startsWith("FROZEN-END utterance=1 after 1440ms") && it.endsWith("the utterance ended frozen") })
+        assertTrue(lines.last(), lines.last().startsWith("UTT 1 unique=1 due=61 cov=1% frozen=1440ms episodes=1"))
     }
 }

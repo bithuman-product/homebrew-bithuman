@@ -8,9 +8,10 @@
 // of voice at 25 fps, 50 ms at 20); only a NEW frame (`S`) that reached the glass counts as shown.
 // A unit coalesced away in a vsync (its audio played, its frame never shown) is due and not shown.
 //
-// One line per utterance (`UTT`), and a `FROZEN` line when the newest 1 s of voice showed fewer than
-// half its frames (with `FROZEN-END` and how long), so a device run — and later telemetry — names a
-// frozen face instead of averaging it away. Free of Android: SpeechCoverageTest.
+// One line per utterance (`UTT`), and a `FROZEN` line when coverage over the newest second of voice has
+// stayed below half for more than a second (with `FROZEN-END` and how long), so a device run — and later
+// telemetry — names a frozen face instead of averaging it away; a dip shorter than that is not flagged.
+// Free of Android: SpeechCoverageTest.
 package ai.bithuman.flutter
 
 class SpeechCoverage(
@@ -40,6 +41,8 @@ class SpeechCoverage(
     private var windowUnique = 0
     private var frozen = false
     private var frozenAtDue = 0
+    /** Due index where the 1 s window first went below [frozenBelow]; -1 while it is not below. */
+    private var lowSince = -1
 
     /**
      * A presented (or coalesced) unit of the current epoch. [carriesAudio]: it plays reply audio
@@ -56,15 +59,26 @@ class SpeechCoverage(
         if (window.size > unitsPerSecond) { if (window.removeFirst()) windowUnique-- }
         val full = window.size >= unitsPerSecond
         val low = full && windowUnique < frozenBelow * window.size
-        if (frozen) { uttFrozenUnits++; frozenUnitsTotal++ }
-        if (low && !frozen) {
-            frozen = true; frozenAtDue = uttDue; uttEpisodes++; frozenEpisodes++
-            log("FROZEN utterance=${utterances + 1} at=${ms(uttDue)}ms: $windowUnique unique of ${window.size} frames due over the last 1 s " +
-                "(${100 * windowUnique / window.size}% < ${(frozenBelow * 100).toInt()}%)")
-        } else if (!low && frozen && full) {
-            frozen = false
-            log("FROZEN-END utterance=${utterances + 1} after ${ms(uttDue - frozenAtDue)}ms: $windowUnique unique of ${window.size} over the last 1 s")
+        if (low) {
+            if (lowSince < 0) lowSince = uttDue
+            if (!frozen && uttDue - lowSince >= unitsPerSecond) {
+                frozen = true; frozenAtDue = lowSince; uttEpisodes++; frozenEpisodes++
+                log("FROZEN utterance=${utterances + 1} at=${ms(lowSince)}ms: under ${(frozenBelow * 100).toInt()}% unique frames " +
+                    "for ${ms(uttDue - lowSince)}ms (now $windowUnique of ${window.size} due over the last 1 s)")
+            }
+        } else if (lowSince >= 0) {
+            if (frozen) {
+                endEpisode()
+                log("FROZEN-END utterance=${utterances + 1} after ${ms(uttDue - frozenAtDue)}ms: $windowUnique unique of ${window.size} over the last 1 s")
+            }
+            lowSince = -1
         }
+    }
+
+    private fun endEpisode() {
+        frozen = false
+        val n = uttDue - frozenAtDue
+        uttFrozenUnits += n; frozenUnitsTotal += n
     }
 
     /** The reply's voice ended (idle on the glass) or was cut (a barge-in): summarise it. */
@@ -73,9 +87,10 @@ class SpeechCoverage(
         open = false
         utterances++
         if (frozen) {
-            frozen = false
+            endEpisode()
             log("FROZEN-END utterance=$utterances after ${ms(uttDue - frozenAtDue)}ms: the utterance ended frozen")
         }
+        lowSince = -1
         window.clear(); windowUnique = 0
         log("UTT $utterances unique=$uttUnique due=$uttDue cov=${if (uttDue > 0) 100 * uttUnique / uttDue else 100}% " +
             "frozen=${ms(uttFrozenUnits)}ms episodes=$uttEpisodes")
