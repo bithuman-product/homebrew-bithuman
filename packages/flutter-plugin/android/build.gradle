@@ -192,8 +192,11 @@ dependencies {
     // frame. 0.9.1 places its threads on the non-little cores and adds `setPlayoutPosition` /
     // `lastFrameIndex` / `skippedFrames`: told where the voice is (AvatarEngine.kt, PlayoutClock.kt),
     // it skips the render of a frame whose audio has already gone out, so a slow phone shows fewer
-    // frames, each on its own audio. `idle(ByteBuffer)` is legal again in zero-copy mode (the
-    // cursor step after every speech frame). Additive API; the plugin needs it from 2.6.29.
+    // frames, each on its own audio (the plugin's clock is OFF by default in 2.6.29:
+    // `BithumanAvatar.load(skipAhead: true)` turns it on). The idle walk only moves forward (a
+    // skipped frame no longer sends the cursor back past its decoded history). `idle(ByteBuffer)` is
+    // legal again in zero-copy mode (the cursor step after every speech frame). Additive API; the
+    // plugin needs it from 2.6.29. Same store behaviour as 0.9.0.
     implementation 'ai.bithuman:essence2-android:0.9.1'
 
     // Plain-JVM unit tests of the platform-free parts (src/test/kotlin: EngineUsersTest — dispose

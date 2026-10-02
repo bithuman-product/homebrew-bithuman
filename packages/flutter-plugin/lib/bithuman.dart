@@ -122,12 +122,18 @@ class BithumanAvatar implements VoiceHost {
   /// Essence2 runs on macOS + iOS arm64, and on Android (`engine: 'essence2'`,
   /// where [imxPath] is the agent CODE and [apiSecret] is required: the members
   /// come through the metered door and every frame is metered).
+  ///
+  /// [skipAhead] (Android, Essence 2; 2.6.29): the player tells the engine where the voice is, and a
+  /// phone that renders below real time shows fewer frames in step with the voice instead of a
+  /// frozen face. null = the plugin's default (OFF in 2.6.29); false = every frame rendered in order.
+  /// Ignored by Expression 2 and on iOS / macOS.
   static Future<BithumanAvatar> load(
     String imxPath, {
     String? apiSecret,
     String engine = 'essence',
     String? motionDir,
     int chunk = 16,
+    bool? skipAhead,
   }) async {
     _installNativeCallbacks();
     // The agent dir set just before (setExpression2AgentDir) is in place first.
@@ -141,6 +147,7 @@ class BithumanAvatar implements VoiceHost {
         'engine': engine,
         'motionDir': ?motionDir,
         'chunk': chunk,
+        'skipAhead': ?skipAhead,
       });
     } on PlatformException catch (e) {
       // The engine refused the model file (2.6.29): a typed, terminal error carrying the native

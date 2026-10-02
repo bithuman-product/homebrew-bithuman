@@ -151,6 +151,16 @@ class PlayoutClockTest {
         assertEquals(10, PlayoutClock.idleSteps(509, 0, 250))  // two whole laps left out
     }
 
+    @Test
+    fun the_clock_switch_lever_then_option_then_default() {
+        assertEquals(true, PlayoutClock.enabled(lever = 1, option = false, default = false))
+        assertEquals(false, PlayoutClock.enabled(lever = 2, option = true, default = true))
+        assertEquals(false, PlayoutClock.enabled(lever = 0, option = false, default = true))
+        assertEquals(true, PlayoutClock.enabled(lever = 0, option = true, default = false))
+        assertEquals(true, PlayoutClock.enabled(lever = 0, option = null, default = true))
+        assertEquals(false, PlayoutClock.enabled(lever = 7, option = null, default = false))
+    }
+
     @Test(timeout = 10_000)
     fun no_lock_order_deadlock_and_the_producer_never_waits_on_a_feed() {
         // A feed holds the adapter's monitor and the SDK's main lock for 200 ms (the block compute).
