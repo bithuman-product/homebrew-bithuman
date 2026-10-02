@@ -138,8 +138,40 @@ class Expression2Engine(private val avatar: Expression2Avatar) : AvatarEngine {
     override val pendingAudioSlices get() = runCatching { avatar.pendingAudioSlices }.getOrDefault(-1)
     override fun stats(): EngineStats? =
         runCatching { avatar.stats() }.getOrNull()?.let { EngineStats(it.wallMs, it.chunks, it.frames) }
-    override val idle: IdleClip? = avatar.idleLoop?.let { loop -> Expression2Idle(loop) }
+    /**
+     * ★NO IDLE CLIP IS NOT A BLANK SCREEN (2.6.33). A character published without its idle clip has no
+     * [Expression2Avatar.idleLoop] (`idleLoopUnavailableReason` says why; BithumanPlugin logs it once at
+     * load). The player shows nothing until it has an idle frame or a reply's frame, so the first frame
+     * — and with it `ready` — never came and the app never dialled. [StillIdle] stands in: one frame
+     * rendered from a moment of silence, shown as a one-frame clip until the first reply.
+     */
+    override val idle: IdleClip? = avatar.idleLoop?.let { loop -> Expression2Idle(loop) } ?: StillIdle()
     override fun close() = avatar.close()
+
+    private inner class StillIdle : IdleClip {
+        private val still = StillFrame(object : StillSource<java.nio.ByteBuffer> {
+            override val busy get() = avatar.hasPendingTail || avatar.queuedFrames > 0
+            override fun feedSilence(samples16k: Int) = avatar.feed(FloatArray(samples16k))
+            override fun flush() = avatar.flushTail()
+            override fun pull(): java.nio.ByteBuffer? {
+                val bmp = avatar.newFrameBitmap()
+                if (avatar.pull(bmp) == null) return null
+                val buf = java.nio.ByteBuffer.allocateDirect(bmp.byteCount)
+                bmp.copyPixelsToBuffer(buf); bmp.recycle()
+                return buf
+            }
+            override fun reset() = avatar.resetState(true)
+        }, { android.util.Log.i("bhav", it) })
+        override val frameCount = 1
+        override val wraps = 0
+        @Volatile override var lastIndex = -1; private set
+        override fun next(dst: Bitmap): Int {
+            val px = still.get() ?: return -1
+            px.rewind(); dst.copyPixelsFromBuffer(px)
+            lastIndex = 0
+            return 0
+        }
+    }
 
     private class Expression2Idle(private val loop: Expression2IdleLoop) : IdleClip {
         override fun next(dst: Bitmap): Int = loop.next(dst)
