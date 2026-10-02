@@ -1,3 +1,18 @@
+## Unreleased — avatar files published before the mouth-corner fix
+
+Ships with `essence2-android` > 0.9.0 and Essence 2 > `essence2-v1.15.2` (both carry the refusal and the
+refresh). Every live Essence 2 avatar was re-published with the mouth-corner fix on 2026-10-01; the
+engines now refuse a file published before it.
+
+* **Android: an identity installed before the re-publish refreshes itself.** The store no longer opens such an install
+  from its cache; the load downloads the changed parts (not the whole identity) and opens the current one. If the
+  engine still refuses (a check that passed), the load fetches it again once and opens it — a second refusal is the
+  load's error.
+* **iOS / macOS: an out-of-date file is named in the log** (`[essence2] OUT-OF-DATE AVATAR FILE … download it again`)
+  with the engine's sentence, instead of a bare `rc=-2 — idle only`. Download the file again
+  (`GET /v1/agent/{code}/model/download`). (Essence2Kit's `Essence2Download.identity(agentCode:)` +
+  `Essence2Engine.create` refresh a downloaded file by themselves.)
+
 ## 2.6.28 — 2026-10-01 — the character's own voice no longer cuts it off; Sofia opens without waiting on the network; a paywall ends the call cleanly
 
 Tag `flutter-plugin-v2.6.28`. Engines unchanged: iOS/macOS Expression 2 `v2.19.2`, Essence 2

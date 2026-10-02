@@ -465,8 +465,23 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         loadEvents.fetched(handle)
         handle.throwIfCancelled()
         loadEvents.stage(handle, LoadHandle.STAGE_PREPARE)
-        val w2v = java.io.File(bundle.dir, Essence2Avatar.W2V_MEMBER)
-        val avatar = Essence2Avatar.create(bundle.dir, w2v, 0)
+        val avatar = try {
+            Essence2Avatar.create(bundle.dir, java.io.File(bundle.dir, Essence2Avatar.W2V_MEMBER), 0)
+        } catch (e: IllegalStateException) {
+            // ★AN INSTALL PUBLISHED BEFORE THE MOUTH-CORNER FIX IS FETCHED AGAIN, ONCE (2026-10-02). The
+            // engine refuses it ("... REFUSED for identity '<code>'"); the door serves every live identity's
+            // current bundle. essence2-android's store already skips such an install in
+            // `cached`, so this is the belt for a check that passed and an engine that still
+            // refused: a forced fetch (only the changed members) and one more open. A second
+            // refusal is the load's error, as any other.
+            if (e.message?.contains("REFUSED for identity '") != true) throw e
+            Log.i(TAG, "$code: the installed bundle is out of date; fetching it again (once)")
+            val fresh = store.fetch(code, true, handle.storeCancel) { _, done, total ->
+                loadEvents.fetchProgress(handle, done, total)
+            }
+            handle.throwIfCancelled()
+            Essence2Avatar.create(fresh.dir, java.io.File(fresh.dir, Essence2Avatar.W2V_MEMBER), 0)
+        }
         loadEvents.stage(handle, LoadHandle.STAGE_PREPARED)
         // Zero-copy delivery by default (2.6.19). `debug.bh.e2.copy=1` keeps the copy path for a
         // same-bytes A/B, and only a DEBUGGABLE host app honours it (see AvatarPlayer.debuggable).

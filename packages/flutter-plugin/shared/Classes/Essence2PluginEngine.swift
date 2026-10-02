@@ -19,6 +19,8 @@ final class Essence2Engine: BithumanEngine {
   static var activeAgentDir: String? = nil
   /// Accepted for the old call shape; the engine ignores it.
   static var motionDir: String? = nil
+  /// The engine's sentence for the last identity it refused as OUT OF DATE (-4), else nil.
+  static var lastCreateRefusal: String? = nil
 
   private var handle: UnsafeMutableRawPointer?
   let width: Int
@@ -30,7 +32,18 @@ final class Essence2Engine: BithumanEngine {
     var h: UnsafeMutableRawPointer? = nil
     if let path = Self.activeAgentDir {
       let rc = path.withCString { be_essence2_create($0, nil, 0, &h) }
-      if rc != 0 { NSLog("[essence2] be_essence2_create failed rc=%d — idle only", rc); h = nil }
+      if rc == -4 {
+        // ★AN AVATAR FILE PUBLISHED BEFORE THE MOUTH-CORNER FIX (essence2 engine 2026-10-02): the engine
+        // refuses it and says which agent. The file must be downloaded again (the download door
+        // serves the current one) — say so loudly, with the engine's sentence, never just "idle".
+        var buf = [CChar](repeating: 0, count: 2048)
+        _ = be_essence2_last_refusal(&buf, Int32(buf.count))
+        let why = String(cString: buf)
+        NSLog("[essence2] OUT-OF-DATE AVATAR FILE %@ — download it again (GET /v1/agent/<code>/model/download); engine: %@",
+              path, why.isEmpty ? "(no sentence)" : why)
+        Self.lastCreateRefusal = why.isEmpty ? "out-of-date avatar file: \(path)" : why
+        h = nil
+      } else if rc != 0 { NSLog("[essence2] be_essence2_create failed rc=%d — idle only", rc); h = nil }
     }
     handle = h
     var w: Int32 = 0, ht: Int32 = 0

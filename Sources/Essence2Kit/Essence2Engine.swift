@@ -75,6 +75,13 @@ public enum Essence2KitError: Error, CustomStringConvertible, Sendable {
     case resourcesUnavailable(String)
     /// The engine never became ready within the timeout.
     case notReady(seconds: Double)
+    /// The identity file is OUT OF DATE: published before the renderer this engine carries,
+    /// which refuses it (-4 from `be_essence2_create`, essence2 engine 2026-10-02). A file
+    /// `Essence2Download` fetched is fetched again by `create` itself; this is thrown for a
+    /// file your app keeps. Download it again (`Essence2Download.identity(agentCode:)`, or
+    /// "Download model" in the agent's studio at bithuman.ai) — retrying the same file never
+    /// works. `agentCode` is "" when the file names none; `reason` is the engine's sentence.
+    case identityOutdated(path: String, agentCode: String, reason: String)
 
     public var description: String {
         switch self {
@@ -82,6 +89,12 @@ public enum Essence2KitError: Error, CustomStringConvertible, Sendable {
         case .identityUnreadable(let p): return "\(p): the Essence 2 engine could not open this identity file"
         case .resourcesUnavailable(let m): return "Essence 2 resources: \(m)"
         case .notReady(let s): return "the Essence 2 engine was not ready after \(Int(s)) s"
+        case .identityOutdated(let p, let code, _):
+            let who = code.isEmpty ? "<agent code>" : code
+            return "\(p): this Essence 2 avatar file\(code.isEmpty ? "" : " (\(code))") is out of date — it was "
+                + "published before the renderer in this SDK, which can no longer open it. Download it "
+                + "again: Essence2Download.identity(agentCode: \"\(who)\"), or \"Download model\" in the "
+                + "agent's studio at bithuman.ai."
         }
     }
 }
@@ -159,9 +172,41 @@ public final class Essence2Engine: @unchecked Sendable {
     ///     they are fetched once from the release this package pins, checked against their
     ///     sha256, and kept in Application Support.
     ///   - readyTimeout: seconds to wait for the warm-up.
+    ///
+    /// An identity file `Essence2Download` fetched that has gone out of date (published before
+    /// the renderer this engine carries) is fetched again from the download door, ONCE, and
+    /// opened — the app never sees the refusal. Any other out-of-date file throws
+    /// `Essence2KitError.identityOutdated`, naming the agent and the fix.
     public static func create(identity: URL,
                               resourcesDirectory: URL? = nil,
                               readyTimeout: Double = 300) async throws -> Essence2Engine {
+        do {
+            return try await createOnce(identity: identity, resourcesDirectory: resourcesDirectory,
+                                        readyTimeout: readyTimeout)
+        } catch Essence2KitError.identityOutdated(let path, let code, let reason)
+                    where !code.isEmpty && Essence2Download.isDownloaded(identity) {
+            // ★A DOOR-FETCHED FILE HEALS ITSELF (2026-10-02): the door serves every live
+            // identity's current file, so the fix is to fetch it again — done here, once.
+            let fresh: URL
+            do {
+                fresh = try await Essence2Download.identity(agentCode: code,
+                                                            directory: identity.deletingLastPathComponent())
+            } catch {
+                throw Essence2KitError.identityOutdated(path: path, agentCode: code, reason: reason)
+            }
+            guard fresh.standardizedFileURL != identity.standardizedFileURL else {
+                throw Essence2KitError.identityOutdated(path: path, agentCode: code, reason: reason)
+            }
+            let engine = try await createOnce(identity: fresh, resourcesDirectory: resourcesDirectory,
+                                              readyTimeout: readyTimeout)
+            try? FileManager.default.removeItem(at: identity)   // the stale copy is never opened again
+            return engine
+        }
+    }
+
+    private static func createOnce(identity: URL,
+                                   resourcesDirectory: URL?,
+                                   readyTimeout: Double) async throws -> Essence2Engine {
         let res: URL
         if let given = resourcesDirectory { res = given } else { res = try await Essence2Resources.ensure() }
         Essence2Resources.point(at: res)
@@ -171,6 +216,11 @@ public final class Essence2Engine: @unchecked Sendable {
         case 0: break
         case -3: throw Essence2KitError.meteringRefused(reason: lastRefusal()
                     ?? "refusing to serve: metering refused this session (see the engine's log line)")
+        case -4:
+            let why = lastRefusal() ?? "the avatar file was published before the renderer in this SDK"
+            throw Essence2KitError.identityOutdated(path: identity.path,
+                                                    agentCode: Essence2Download.agentCode(inRefusal: why),
+                                                    reason: why)
         default: throw Essence2KitError.identityUnreadable(path: identity.path)   // -2 (and -1: bad argument)
         }
         guard let h else { throw Essence2KitError.identityUnreadable(path: identity.path) }
@@ -710,6 +760,18 @@ public enum Essence2Download {
                                                    appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
         return root.appendingPathComponent("bitHuman/essence2/avatars", isDirectory: true)
+    }
+
+    /// True when `file` is one this downloader wrote: it names its files by their sha256.
+    static func isDownloaded(_ file: URL) -> Bool {
+        file.lastPathComponent.range(of: "^[0-9a-f]{64}\\.imx$", options: .regularExpression) != nil
+    }
+
+    /// The agent code the engine's out-of-date refusal names (`for identity '<code>'`), or "".
+    static func agentCode(inRefusal sentence: String) -> String {
+        guard let r = sentence.range(of: "for identity '[A-Za-z0-9_-]{1,64}'", options: .regularExpression)
+        else { return "" }
+        return String(sentence[r].dropFirst("for identity '".count).dropLast())
     }
 
     static func cached(_ sha: String, in dir: URL) throws -> URL? {
