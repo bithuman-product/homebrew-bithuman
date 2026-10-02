@@ -76,7 +76,8 @@ public enum Essence2KitError: Error, CustomStringConvertible, Sendable {
     /// The engine never became ready within the timeout.
     case notReady(seconds: Double)
     /// The identity file is OUT OF DATE: published before the renderer this engine carries,
-    /// which refuses it (-4 from `be_essence2_create`, essence2 engine 2026-10-02). A file
+    /// which refuses it (-4 from `be_essence2_create`: the essence2 engines after essence2-v1.15.2,
+    /// which this package pins and which still opens such a file). A file
     /// `Essence2Download` fetched is fetched again by `create` itself; this is thrown for a
     /// file your app keeps. Download it again (`Essence2Download.identity(agentCode:)`, or
     /// "Download model" in the agent's studio at bithuman.ai) — retrying the same file never
@@ -180,27 +181,56 @@ public final class Essence2Engine: @unchecked Sendable {
     public static func create(identity: URL,
                               resourcesDirectory: URL? = nil,
                               readyTimeout: Double = 300) async throws -> Essence2Engine {
+        try await create(identity: identity, resourcesDirectory: resourcesDirectory,
+                         readyTimeout: readyTimeout,
+                         fetchAgain: { code, dir in try await Essence2Download.identity(agentCode: code, directory: dir) })
+    }
+
+    /// `create` with the re-download as a parameter (tests serve a local file instead of the door).
+    static func create(identity: URL,
+                       resourcesDirectory: URL?,
+                       readyTimeout: Double,
+                       fetchAgain: (_ agentCode: String, _ directory: URL) async throws -> URL)
+                       async throws -> Essence2Engine {
+        try await openHealing(identity: identity,
+                              open: { try await createOnce(identity: $0, resourcesDirectory: resourcesDirectory,
+                                                           readyTimeout: readyTimeout) },
+                              fetchAgain: fetchAgain)
+    }
+
+    /// ★A DOOR-FETCHED FILE HEALS ITSELF (2026-10-02): the door serves every live identity's
+    /// current file, so the fix for an out-of-date one is to fetch it again — done here, ONCE.
+    ///
+    /// - `open(identity)` refuses with `identityOutdated` naming an agent, and `identity` is a
+    ///   file the downloader wrote (`Essence2Download.isDownloaded`): `fetchAgain(code, its
+    ///   directory)` once, then `open` the fresh file once. Only after that open succeeds is the
+    ///   stale file removed. The second open is not healed again: its refusal is final.
+    /// - The download fails, or hands back the same file (the door still serves those bytes):
+    ///   the original `identityOutdated` is thrown and the stale file is kept.
+    /// - Any other file (the app's own), or a refusal that names no agent: `identityOutdated`
+    ///   as thrown, and nothing is downloaded. Every other error passes through untouched.
+    ///
+    /// Generic over what `open` returns so the decision is testable without an engine.
+    static func openHealing<Opened>(identity: URL,
+                                    open: (URL) async throws -> Opened,
+                                    fetchAgain: (_ agentCode: String, _ directory: URL) async throws -> URL)
+                                    async throws -> Opened {
         do {
-            return try await createOnce(identity: identity, resourcesDirectory: resourcesDirectory,
-                                        readyTimeout: readyTimeout)
+            return try await open(identity)
         } catch Essence2KitError.identityOutdated(let path, let code, let reason)
                     where !code.isEmpty && Essence2Download.isDownloaded(identity) {
-            // ★A DOOR-FETCHED FILE HEALS ITSELF (2026-10-02): the door serves every live
-            // identity's current file, so the fix is to fetch it again — done here, once.
+            let refused = Essence2KitError.identityOutdated(path: path, agentCode: code, reason: reason)
             let fresh: URL
             do {
-                fresh = try await Essence2Download.identity(agentCode: code,
-                                                            directory: identity.deletingLastPathComponent())
+                fresh = try await fetchAgain(code, identity.deletingLastPathComponent())
             } catch {
-                throw Essence2KitError.identityOutdated(path: path, agentCode: code, reason: reason)
+                throw refused
             }
-            guard fresh.standardizedFileURL != identity.standardizedFileURL else {
-                throw Essence2KitError.identityOutdated(path: path, agentCode: code, reason: reason)
-            }
-            let engine = try await createOnce(identity: fresh, resourcesDirectory: resourcesDirectory,
-                                              readyTimeout: readyTimeout)
+            guard fresh.standardizedFileURL.resolvingSymlinksInPath()
+                    != identity.standardizedFileURL.resolvingSymlinksInPath() else { throw refused }
+            let opened = try await open(fresh)
             try? FileManager.default.removeItem(at: identity)   // the stale copy is never opened again
-            return engine
+            return opened
         }
     }
 

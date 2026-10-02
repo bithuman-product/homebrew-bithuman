@@ -1,16 +1,17 @@
 // Essence2KitOutdatedIdentityTests — an identity file published before the renderer this SDK
 // carries (2026-10-02).
 //
-// ★WHY. The essence2 engine refuses an avatar file published before the mouth-corner fix
-// (2026-10-01); through essence2-v1.15.x `be_essence2_create` answered that with -2, which
-// Essence2Kit could only report as `identityUnreadable` ("could not open this identity file") —
-// no reason, no fix, and a door-downloaded file stayed refused until the app deleted its cache.
-// The engine now answers -4 with a sentence naming the agent; Essence2Kit fetches a file the
-// download door put in its cache again, once, and throws `identityOutdated` (agent + fix) for
-// any other file. These tests hold the pure pieces of that: which files are door downloads, the
-// agent code read from the engine's sentence, and the sentence a developer reads. The
-// engine-driven proof (an out-of-date house bundle refused with -4, then healed) runs on a Mac
-// against a real identity.
+// ★WHY. The essence2 engine after essence2-v1.15.2 refuses an avatar file published before the
+// mouth-corner fix (2026-10-01): `be_essence2_create` answers -4 with a sentence naming the agent
+// (bithuman-models #1763/#1766). essence2-v1.15.2, the engine this package pins, predates that:
+// it still OPENS such a file on its older renderer (measured 2026-10-02 on an M4 with house avatar
+// A23KSG5258: two such files, one with a lip template and one without, both open and render
+// speech; neither answers -2 or -4). Once the pin moves, Essence2Kit fetches
+// a file the download door put in its cache again, once, and throws `identityOutdated` (agent +
+// fix) for any other file. These tests hold the pure pieces of that: which files are door
+// downloads, the agent code read from the engine's sentence, and the sentence a developer reads.
+// The heal itself is Essence2KitHealTests (scripted opens + a local door, and an opt-in run of a
+// real out-of-date house bundle on the linked engine).
 
 import XCTest
 import Essence2
