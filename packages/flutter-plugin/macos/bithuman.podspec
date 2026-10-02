@@ -50,6 +50,15 @@ Pod::Spec.new do |s|
     auth_hook_syms.all? { |sym| system("nm -gU '#{lib}' 2>/dev/null | grep -q ' #{sym}$'") }
   end
 
+  # Essence 2 SKIP-AHEAD (2.6.30): the presenter tells the engine where the voice is and stamps each
+  # frame with the engine's own ordinal. essence2-apple v1.15.3 adds the three calls; an earlier staged
+  # engine has none of them, and the adapter must still build against it — so, as with the auth hooks,
+  # the staged BYTES decide: ESSENCE2_SKIP_AHEAD only when a staged engine lib exports all three.
+  skip_ahead_syms = %w[_be_essence2_set_playout_position _be_essence2_last_frame_index _be_essence2_skipped_frames]
+  skip_ahead = engine_libs.any? do |lib|
+    skip_ahead_syms.all? { |sym| system("nm -gU '#{lib}' 2>/dev/null | grep -q ' #{sym}$'") }
+  end
+
   # INVARIANT #1 (design §0.2) — CI ASSERT: an engine's native core is a PLAIN
   # STATIC .a, NEVER a 2nd module-map (C-module) xcframework (two would break each
   # other's Clang module resolution — the clash 3b53fc0 fixed). The single
@@ -218,6 +227,7 @@ Pod::Spec.new do |s|
   # out, and the pod build is byte-identical to the embody-only build.
   conds = ['$(inherited)']
   conds << 'ESSENCE2_AVAILABLE' if essence2_lib
+  conds << 'ESSENCE2_SKIP_AHEAD' if essence2_lib && skip_ahead
   # Set from the staged bytes, never from intent: the local-brain code compiles
   # in ONLY when the framework it calls is actually present.
   conds << 'CONVERSE_AVAILABLE'  if converse_fw

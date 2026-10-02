@@ -286,7 +286,7 @@ stage_expression2() {
 # macOS podspec vendors explicitly. Deliberately NOT under Engines/*/Vendor: that glob decides
 # whether Essence 2 is present (ESSENCE2_AVAILABLE) and probes engine libs for auth hooks, and
 # EngineCore is neither an avatar engine nor optional. ENGINECORE_XCF_ZIP=<path> stages a
-# candidate build (with X2_XCF_DIR).
+# candidate build (with X2_XCF_DIR, or ESSENCE2_XCF_DIR for a candidate Essence 2 engine).
 stage_enginecore() {
     local dl lib; dl="$(mktemp -d)"
     rm -f "$PLUGIN_ROOT/macos/Vendor/libengine_core.a"
@@ -323,9 +323,17 @@ stage_essence2() {
     rm -rf "$PLUGIN_ROOT/macos/Engines/essence2" "$PLUGIN_ROOT/ios/Engines/essence2"
     [ "${BITHUMAN_SKIP_ESSENCE2:-0}" = "1" ] && { log "BITHUMAN_SKIP_ESSENCE2=1 — embody-only build"; return 0; }
     local dl; dl="$(mktemp -d)"
-    log "Fetching Essence 2 $LIBESSENCE2_RELEASE (${LIBESSENCE2_SHA256:0:16}…, resources ${LIBESSENCE2_RESOURCES_SHA256:0:16}…) …"
-    fetch_tap_zip "$LIBESSENCE2_RELEASE" libessence2.xcframework.zip "$LIBESSENCE2_SHA256" "$dl"
-    fetch_tap_zip "$LIBESSENCE2_RESOURCES_RELEASE" libessence2-resources.zip "$LIBESSENCE2_RESOURCES_SHA256" "$dl"
+    if [ -n "${ESSENCE2_XCF_DIR:-}" ]; then
+        # A CANDIDATE engine (an unpublished build, e.g. before a pin move): the two archives a release
+        # carries, from a local directory. The pinned digests above are not what is staged then.
+        log "Staging Essence 2 from ESSENCE2_XCF_DIR=$ESSENCE2_XCF_DIR (candidate)"
+        cp "$ESSENCE2_XCF_DIR/libessence2.xcframework.zip" "$ESSENCE2_XCF_DIR/libessence2-resources.zip" "$dl/" \
+            || die "ESSENCE2_XCF_DIR has no libessence2.xcframework.zip + libessence2-resources.zip"
+    else
+        log "Fetching Essence 2 $LIBESSENCE2_RELEASE (${LIBESSENCE2_SHA256:0:16}…, resources ${LIBESSENCE2_RESOURCES_SHA256:0:16}…) …"
+        fetch_tap_zip "$LIBESSENCE2_RELEASE" libessence2.xcframework.zip "$LIBESSENCE2_SHA256" "$dl"
+        fetch_tap_zip "$LIBESSENCE2_RESOURCES_RELEASE" libessence2-resources.zip "$LIBESSENCE2_RESOURCES_SHA256" "$dl"
+    fi
     ( cd "$dl" && unzip -q -o libessence2.xcframework.zip && mkdir -p res && unzip -q -o libessence2-resources.zip -d res ) \
         || die "could not unzip the Essence 2 archives"
     local x="$dl/libessence2.xcframework" res="$dl/res"

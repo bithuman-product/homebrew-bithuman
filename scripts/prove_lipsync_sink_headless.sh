@@ -35,6 +35,11 @@ final class HeadlessSink: LipsyncSink {
   var onSpeechFramePublished: (() -> Void)?
   var canReleaseSpeechAudio: (() -> Bool)?
   var markerOnNextRelease = false
+  var voiceClocked: Bool { false }
+  func enqueueVoice(_ samples24k: [Float]) {}
+  var scheduleVoice: (([Float]) -> CFTimeInterval?)?
+  var voiceQueued24k: Int { 0 }
+  func noteVoiceScheduled(samples24k: Int, heardAt: CFTimeInterval) {}
   private(set) var bytes = 0
   private(set) var paused = false
   private(set) var cleared = 0

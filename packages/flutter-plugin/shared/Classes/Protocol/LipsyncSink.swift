@@ -7,7 +7,7 @@
 // ★WHY THIS EXISTS. `RealtimeAudioIO` is the voice unit: one AVAudioEngine that
 // owns the mic, the speaker and Apple's VP-IO echo canceller. It needs nothing
 // from the avatar except somewhere to hand lipsync bytes and a per-frame release
-// tick — twelve members. It nevertheless named the CONCRETE render class
+// tick — twelve members (2.6.30 adds the five of the voice's own clock). It nevertheless named the CONCRETE render class
 // (`weak var avatarTextureForLipsync: AvatarTexture?`), which made "voice with
 // no render" untypeable even though every one of those 22 references was already
 // `?.`-guarded and `playSpeakerPCM24k` already carried a no-avatar branch. The
@@ -72,6 +72,30 @@ protocol LipsyncSink: AnyObject {
   /// voice unit reads-and-clears it so the click lands in that frame's own slice.
   /// Debug builds only (DevLevers) — a release build never sets it.
   var markerOnNextRelease: Bool { get set }
+
+  // MARK: the voice on its own clock (Essence 2, 2.6.30)
+
+  /// True when the render side plays the voice on its OWN clock and shows frames against it
+  /// (VoiceClock.swift) instead of releasing a slice per published frame. The voice unit then
+  /// hands the reply's voice to `enqueueVoice` (before the same chunk's `enqueuePCM`), installs
+  /// `scheduleVoice`, and neither buffers it nor installs `onSpeechFramePublished`.
+  var voiceClocked: Bool { get }
+
+  /// The reply's voice at the voice unit's rate (24 kHz mono Float32), as it arrives.
+  func enqueueVoice(_ samples24k: [Float])
+
+  /// Installed by the voice unit: schedule these samples on the speaker NOW and return the host
+  /// time their first sample will be heard, or nil when the speaker could not take them (a macOS
+  /// device swap owns the graph; the caller keeps them and tries again).
+  var scheduleVoice: (([Float]) -> CFTimeInterval?)? { get set }
+
+  /// Voice samples (24 kHz) the render side holds and has not scheduled yet — the captions'
+  /// playout counts them as not heard.
+  var voiceQueued24k: Int { get }
+
+  /// The voice unit scheduled [samples24k] of the reply's voice, heard from [heardAt] (the
+  /// per-frame release path): the render side's per-reply voice meter counts it.
+  func noteVoiceScheduled(samples24k: Int, heardAt: CFTimeInterval)
 
   // MARK: the four things the voice unit tells the render side
 

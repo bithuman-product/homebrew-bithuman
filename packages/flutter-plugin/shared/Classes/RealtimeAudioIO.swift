@@ -394,11 +394,15 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
 
   /// Audio was handed to the player (every schedule site): it will have been heard
   /// [seconds] after the later of now + the output latency and the end of what is already queued.
-  private func notePlayoutScheduled(_ seconds: TimeInterval) {
+  /// Returns when the first of these samples will be heard (Essence 2's voice clock reads it).
+  @discardableResult
+  private func notePlayoutScheduled(_ seconds: TimeInterval) -> CFTimeInterval {
     let now = CACurrentMediaTime()
     playoutLock.lock()
-    playoutHeardEnd = max(playoutHeardEnd, now + playoutLatency) + seconds
+    let start = max(playoutHeardEnd, now + playoutLatency)
+    playoutHeardEnd = start + seconds
     playoutLock.unlock()
+    return start
   }
 
   /// A new audio unit (audioStart): the counts restart at zero. Main thread.
@@ -425,6 +429,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
   private func playoutTick() {
     let sr = serverTtsFormat.sampleRate
     embodyPacedLock.lock(); var waiting = Int64(embodyPaced.count); embodyPacedLock.unlock()
+    waiting += Int64(lipsyncSink?.voiceQueued24k ?? 0)   // Essence 2's voice, held by the render side (2.6.30)
     speakerGenLock.lock()
     waiting += gateHeldBuffers.reduce(Int64(0)) { $0 + Int64($1.frameLength) }
     speakerGenLock.unlock()
@@ -1943,6 +1948,16 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
         NSLog("[elevate-av] utterance start: holding speaker for first frame")
         pollElevateGate(gen: gen)
       }
+    } else if let sink = lipsyncSink, sink.voiceClocked {
+      // ESSENCE 2 (2.6.30): the voice plays on its OWN clock. The render side holds the reply's
+      // voice and schedules it a short lead ahead of the speaker from the first frame on (plus the
+      // cushion), whatever the picture does, and shows each frame against what is heard
+      // (VoiceClock.swift). No per-frame release: a slow engine is no longer heard as a choppy voice.
+      // The closure is re-pointed at THIS session on every chunk (a reconnect makes a new unit).
+      sink.scheduleVoice = { [weak self] samples in self?.scheduleVoiceSlice(samples) }
+      if let s = inBuf.floatChannelData?[0] {
+        sink.enqueueVoice(Array(UnsafeBufferPointer(start: s, count: Int(frameCount))))
+      }
     } else if lipsyncSink != nil {
       // embody: do NOT schedule now. Buffer the bot audio; it's released 50 ms
       // per published lip-frame by releaseEmbodyAudioFrame() so audio is paired
@@ -1973,6 +1988,28 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
 
     // 2. Lipsync — resample 24 → 16 kHz and push to the avatar runtime.
     pushLipsync(from: inBuf, frameCount: frameCount)
+  }
+
+  /// Essence 2's voice on its own clock (2.6.30): the render side hands the speaker this slice of the
+  /// reply's voice NOW (render thread, under the render side's audio lock, so a barge-in cannot land
+  /// between taking the slice and scheduling it). Returns the host time its first sample is heard, or
+  /// nil when a macOS device swap owns the graph (the caller keeps the slice and tries again).
+  func scheduleVoiceSlice(_ samples: [Float]) -> CFTimeInterval? {
+    let n = samples.count
+    guard n > 0, let buf = AVAudioPCMBuffer(pcmFormat: serverTtsFormat, frameCapacity: AVAudioFrameCount(n)) else { return nil }
+    buf.frameLength = AVAudioFrameCount(n)
+    guard let dst = buf.floatChannelData?[0] else { return nil }
+    samples.withUnsafeBufferPointer { dst.update(from: $0.baseAddress!, count: n) }
+    // macOS-only: device-swap-safe scheduling; iOS has no HAL swap so it schedules directly
+    #if os(macOS)
+    if !scheduleAndPlayGuarded(buf) { return nil }
+    #else
+    player.scheduleBuffer(buf, completionHandler: nil)
+    if !player.isPlaying && !playbackPaused { player.play() }
+    #endif
+    let at = notePlayoutScheduled(Double(n) / serverTtsFormat.sampleRate)
+    noteFarEnd(dst, n)
+    return at
   }
 
   /// Release ONE lip-frame's worth (50 ms @ 24 kHz) of buffered bot audio to the
@@ -2045,7 +2082,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
         NSLog("[embody-marker] click mixed into the released slice at host %.3f s", CACurrentMediaTime())
       }
     }
-    notePlayoutScheduled(secs)   // match the actual released quantum (0.04 essence2 / 0.05 embody)
+    let heardAt = notePlayoutScheduled(secs)   // match the actual released quantum (0.04 essence2 / 0.05 embody)
     // macOS-only: device-swap-safe scheduling; iOS has no HAL swap so it schedules directly
     #if os(macOS)
     // Atomic w.r.t. the swap (see scheduleAndPlayGuarded). If a swap began in the
@@ -2063,6 +2100,7 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     if !player.isPlaying && !playbackPaused { player.play() }
     #endif
     if let f = buf.floatChannelData?[0] { noteFarEnd(f, need) }
+    lipsyncSink?.noteVoiceScheduled(samples24k: need, heardAt: heardAt)   // the per-reply voice meter
     embodyPacedLock.lock(); let epochNow = pacedEpoch; embodyPacedLock.unlock()
     if epochNow != epochAtTake {
       // A cut landed between taking this slice and scheduling it: 50 ms of the

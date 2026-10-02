@@ -107,6 +107,47 @@ final class Essence2Engine: BithumanEngine {
     return r.bytes > 0 ? (Array(scratch.prefix(r.bytes)), r.speech) : nil
   }
 
+  // ── Skip-ahead (essence2-apple v1.15.3+; the Apple twin of Android's PlayoutClock) ──────────────
+  // Compiled in only when the staged engine exports all three calls: the podspec sets
+  // ESSENCE2_SKIP_AHEAD from the staged libessence2.a's symbols (as it does BH_ENGINE_AUTH_HOOKS), so
+  // this adapter still builds against an engine without them, and then reports that it has none.
+
+  /// The staged engine has be_essence2_set_playout_position / _last_frame_index / _skipped_frames.
+  static var supportsSkipAhead: Bool {
+    #if ESSENCE2_SKIP_AHEAD
+    return true
+    #else
+    return false
+    #endif
+  }
+
+  /// Where the voice is: 16 kHz samples of the audio pushed since the last reset already heard;
+  /// negative = this reply's voice has not started. Any thread. A no-op without the engine call.
+  func setPlayoutPosition(_ samples16k: Int64) {
+    #if ESSENCE2_SKIP_AHEAD
+    if let h = handle { _ = be_essence2_set_playout_position(h, samples16k) }
+    #endif
+  }
+
+  /// The ordinal of the frame the last pull wrote (it carries samples [i*640, (i+1)*640) of the audio
+  /// pushed since the last reset); -1 for an idle / ramp frame, or without the engine call.
+  var lastFrameIndex: Int64 {
+    #if ESSENCE2_SKIP_AHEAD
+    return handle.map { be_essence2_last_frame_index($0) } ?? -1
+    #else
+    return -1
+    #endif
+  }
+
+  /// Speech frames skip-ahead skipped since create (0 without the engine call).
+  var skippedFrames: Int64 {
+    #if ESSENCE2_SKIP_AHEAD
+    return handle.map { be_essence2_skipped_frames($0) } ?? 0
+    #else
+    return 0
+    #endif
+  }
+
   var queuedFrames: Int { framesAvailable }
   /// The engine keeps only a few frames ready; enter speech as soon as one exists.
   var speechCushion: Int { 1 }

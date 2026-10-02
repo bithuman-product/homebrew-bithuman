@@ -214,6 +214,8 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       texture.capabilities = EngineRegistry.capabilities(for: engineArg)
       texture.motionDir = args["motionDir"] as? String
       texture.apiSecret = args["apiSecret"] as? String
+      // Essence 2 skip-ahead (2.6.30 on Apple, with an engine that has the calls): the app's opt-in.
+      texture.skipAhead = args["skipAhead"] as? Bool
       let textureId = textureRegistry.register(texture)
       texture.textureId = textureId
       texture.registry = textureRegistry
@@ -973,6 +975,44 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
   private var holdRuns = 0
   private var fifoLineAt: CFTimeInterval = 0
   private var ticksWithFrame1s = 0, ticksWithout1s = 0
+
+  // ---- Essence 2: the voice on its own clock (2.6.30; VoiceClock.swift has the why) ----
+  /// The open stream's voice (24 kHz) not yet handed to the speaker. Guarded by audioLock.
+  private var voiceQueue: [Float] = []
+  /// Where in voiceQueue a NEW stream's voice begins while the previous stream's unplayed voice is
+  /// still in front of it (audio after >= idleResetSecs of none: the engine resets on the next tick,
+  /// and the old stream's voice goes with its frames). Guarded by audioLock.
+  private var voiceStreamCut: Int? = nil
+  /// The voice unit hands this texture the voice (enqueueVoice). Without it (Dart's pushAudio, the iOS
+  /// WebRTC tap) the speaker is not ours to clock, and frames are shown in turn as before. audioLock.
+  private var voiceSeen = false
+  /// The reply the arriving audio belongs to, when its first audio came, whether its turn ended, and
+  /// which reply a barge-in cut. Guarded by audioLock.
+  private var replySeq = 0
+  private var replyFirstAudioAt: CFTimeInterval = 0
+  private var turnEndedForReply = false
+  private var bargedReply = -1
+  /// Installed by the voice unit (RealtimeAudioIO.scheduleVoiceSlice).
+  var scheduleVoice: (([Float]) -> CFTimeInterval?)? = nil
+  /// The load option `skipAhead` (Dart BithumanAvatar.load); nil = the default.
+  var skipAhead: Bool? = nil
+  /// Skip-ahead's default on Apple: OFF, as on Android in 2.6.29 — the app opts in per load.
+  static let skipAheadDefault = false
+  // renderQueue only:
+  private let voiceClock = VoiceClock()
+  private var voiceOpen = false
+  private var voiceFirstFrameAt: CFTimeInterval = 0
+  private var voiceDrySince: CFTimeInterval = 0
+  /// A pulled frame waiting for its voice; its pixels are in bgrBuffer (nothing else writes it meanwhile).
+  private var heldFrame: (bytes: Int, speech: Bool, start16: Int64)? = nil
+  /// The next speech frame's ordinal when the engine names none (an engine before skip-ahead).
+  private var deliveredSpeech: Int64 = 0
+  private var replyMeter: VoiceReplyMeter? = nil
+  private var meterReply = -1
+  private var skippedAtReplyStart: Int64 = 0
+  private var replyLineAt: CFTimeInterval = 0
+  /// The voice opens this long after a reply's first speech frame is ready.
+  private static let voiceCushion: Double = DevLevers.e2CushionMs.map { $0 / 1000 } ?? VoiceClockPolicy.cushionSeconds
   private func noteHoldRunEnded() {
     holdRuns += 1
     NSLog("[bhrun] HOLD %d ticks (%d ms) ended at hostMs=%lld holds=%d", holdTicks, holdTicks * 40,
@@ -1035,7 +1075,11 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     bargeIdlePending = true
     audioSinceBarge = false
     replyFirstFramePending = false
+    let voiceDropped = voiceQueue.count
+    voiceQueue.removeAll(keepingCapacity: true); voiceStreamCut = nil   // the cut reply's voice is never heard
+    bargedReply = replySeq
     audioLock.unlock()
+    if voiceDropped > 0 { NSLog("[bhvoice] CUT: %d ms of the reply's voice not played", voiceDropped * 1000 / 24000) }
     NSLog("[bhbarge] RESET q=%d unfedSamples=%d hostMs=%lld", qBefore, dropped,
           Int64(Date().timeIntervalSince1970 * 1000))
     #if os(macOS) || os(iOS)
@@ -1067,6 +1111,7 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     audioLock.lock()
     let remaining = audioQueue
     audioQueue.removeAll(keepingCapacity: true)
+    turnEndedForReply = true
     audioLock.unlock()
     NSLog("[embody-av] onTurnEnd: feeding %d residual lipsync samples + flushTail", remaining.count)
     if !remaining.isEmpty { avatar?.feed(remaining) }
@@ -1108,15 +1153,73 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     if lastAudioArrivalTime > 0, (now - lastAudioArrivalTime) >= Self.idleResetSecs {
       pendingUtteranceReset = true
     }
-    if !audioSinceBarge || lastAudioArrivalTime == 0
+    if !audioSinceBarge || lastAudioArrivalTime == 0 || turnEndedForReply
         || (now - lastAudioArrivalTime) >= Self.idleResetSecs {
       replyFirstFramePending = true     // this arrival begins a reply: its first mouth frame is TTFA's end
+      replySeq += 1; replyFirstAudioAt = now; turnEndedForReply = false
     }
     audioQueue.append(contentsOf: floats)
     audioArrived += n
     audioSinceBarge = true
     lastAudioArrivalTime = now
     audioLock.unlock()
+  }
+
+  // ---- the voice on its own clock: the voice unit's side (LipsyncSink, 2.6.30) ----
+
+  /// Essence 2 plays the voice on its own clock and shows frames against it (VoiceClock.swift).
+  /// The pre-2.6.30 voice-gated presenter stays behind a dev lever, for an A/B.
+  var voiceClocked: Bool {
+    #if ESSENCE2_AVAILABLE
+    return capabilities.driveModel == .atomicSlotClock && !DevLevers.e2VoiceGated
+    #else
+    return false
+    #endif
+  }
+
+  /// The reply's voice (24 kHz), handed over just before the same chunk's enqueuePCM.
+  func enqueueVoice(_ samples24k: [Float]) {
+    guard !samples24k.isEmpty else { return }
+    let now = CACurrentMediaTime()
+    audioLock.lock()
+    // enqueuePCM makes the same test for this chunk next: audio after idleResetSecs of none opens a
+    // new stream (the engine resets on the next tick). Mark where its voice begins; that tick drops
+    // whatever of the previous stream's voice is still in front of it, with its frames.
+    if lastAudioArrivalTime > 0, (now - lastAudioArrivalTime) >= Self.idleResetSecs, !voiceQueue.isEmpty {
+      voiceStreamCut = voiceQueue.count
+    }
+    voiceQueue.append(contentsOf: samples24k)
+    voiceSeen = true
+    audioLock.unlock()
+  }
+
+  var voiceQueued24k: Int {
+    audioLock.lock(); defer { audioLock.unlock() }
+    return voiceQueue.count
+  }
+
+  /// The per-frame release path scheduled a frame's voice (renderQueue: the tick that published the
+  /// frame made the release). The frame is on the glass now and its audio is heard from [heardAt].
+  func noteVoiceScheduled(samples24k: Int, heardAt: CFTimeInterval) {
+    guard let m = replyMeter else { return }
+    m.voice(count: samples24k, heardAt: heardAt, rate: VoiceClockPolicy.voiceRate)
+    m.shown(avMs: (heardAt - CACurrentMediaTime()) * 1000)
+  }
+
+  /// The reply's line (`[bhvoice] REPLY ...`). renderQueue.
+  private func closeReplyMeter(skipped: Int64) {
+    guard let m = replyMeter else { return }
+    replyMeter = nil
+    m.skipped = skipped
+    if m.hasContent { NSLog("%@", m.line()) }
+  }
+
+  private func closeReplyMeterAtExit() {
+    #if ESSENCE2_AVAILABLE
+    closeReplyMeter(skipped: (e2Engine?.skippedFrames ?? 0) - skippedAtReplyStart)
+    #else
+    closeReplyMeter(skipped: 0)
+    #endif
   }
 
   #if os(iOS)
@@ -1180,6 +1283,7 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     renderQueue.async {
       self.timer?.cancel()
       self.timer = nil
+      self.closeReplyMeterAtExit()
       #if os(macOS) || os(iOS)
       self.embodyDisplayTimer?.cancel()
       self.embodyDisplayTimer = nil
@@ -1700,7 +1804,14 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
       // The start-gate's hold-skip reads startGateEngineReady (→ avatar?.isReady
       // → be_essence2_is_ready), so no separate ready flag is needed here.
       NSLog("[essence2-av] engine ready — speech path live")
+      logSkipAhead(rt)
     }
+    if voiceClocked { composeTickEssence2Voice(rt); return }
+    // The pre-2.6.30 presenter (a dev lever, for an A/B): the same per-reply voice meter.
+    audioLock.lock(); let gReply = replySeq, gFirst = replyFirstAudioAt, gEnded = turnEndedForReply, gBarged = bargedReply
+    let gQuiet = audioQueue.isEmpty; audioLock.unlock()
+    followReply(gReply, firstAudioAt: gFirst, barged: gBarged, mode: "gated", engine: rt)
+    if gEnded, gQuiet, lastSpeechPullAt > 0, CACurrentMediaTime() - lastSpeechPullAt > 1.0 { closeReplyMeter(rt) }
 
     audioLock.lock()
     let paused = lipsyncPaused
@@ -1787,6 +1898,251 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     if pending.isEmpty, quietFor > 0.2, cap > 0 {
       if rt.idle(into: &bgrBuffer) > 0 { publishBGRToTexture(); noteIdleFramePresented() }   // → be_essence2_idle_frame
     }
+  }
+
+  private var e2Engine: Essence2Engine? { avatar as? Essence2Engine }
+
+  /// Skip-ahead for this session: the dev lever (BH_E2_CLOCK 1 on / 2 off), then the app's load option,
+  /// then the default — and only with an engine that has the calls (essence2-apple v1.15.3+).
+  private var skipAheadOn: Bool {
+    guard Essence2Engine.supportsSkipAhead else { return false }
+    switch DevLevers.e2Clock {
+    case 1: return true
+    case 2: return false
+    default: return skipAhead ?? Self.skipAheadDefault
+    }
+  }
+
+  private func logSkipAhead(_ rt: any BithumanEngine) {
+    let src = DevLevers.e2Clock == 1 || DevLevers.e2Clock == 2 ? "BH_E2_CLOCK=\(DevLevers.e2Clock)"
+      : skipAhead != nil ? "load option" : "default"
+    NSLog("[essence2] presenter=%@ cushionMs=%.0f skip-ahead=%@ (%@; the engine %@)",
+          voiceClocked ? "voice-clock" : "voice-gated", Self.voiceCushion * 1000, skipAheadOn ? "on" : "off", src,
+          Essence2Engine.supportsSkipAhead ? "has the calls" : "has no skip-ahead calls")
+  }
+
+  /// The per-reply meter follows the reply the arriving audio belongs to. renderQueue.
+  private func followReply(_ reply: Int, firstAudioAt: CFTimeInterval, barged: Int, mode: String, engine rt: any BithumanEngine) {
+    if let m = replyMeter, barged == m.reply { m.bargedIn = true }
+    guard reply != meterReply else {
+      // While a reply plays, its line so far every 2 s: a session that ends mid-reply keeps its numbers.
+      let now = CACurrentMediaTime()
+      if let m = replyMeter, m.hasContent, now - replyLineAt >= 2.0 {
+        replyLineAt = now
+        m.skipped = (e2Engine?.skippedFrames ?? 0) - skippedAtReplyStart
+        NSLog("%@ so-far", m.line())
+      }
+      return
+    }
+    closeReplyMeter(rt)
+    meterReply = reply
+    skippedAtReplyStart = e2Engine?.skippedFrames ?? 0
+    let m = VoiceReplyMeter(reply: reply, mode: mode, cushionMs: mode == "clock" ? Int((Self.voiceCushion * 1000).rounded()) : 0)
+    m.firstAudioAt = firstAudioAt
+    replyMeter = m
+  }
+
+  private func closeReplyMeter(_ rt: any BithumanEngine) {
+    closeReplyMeter(skipped: (e2Engine?.skippedFrames ?? 0) - skippedAtReplyStart)
+  }
+
+  /// One render tick of Essence 2 with the voice on its OWN clock (2.6.30; VoiceClock.swift has the
+  /// why). The voice is scheduled a short lead ahead of the speaker from a reply's first frame (plus the
+  /// cushion) on, whatever the picture does; each tick shows the frame whose audio is being heard,
+  /// drops the frames whose audio has gone by while a newer one is ready, and holds one that is early.
+  private func composeTickEssence2Voice(_ rt: any BithumanEngine) {
+    let now = CACurrentMediaTime()
+    audioLock.lock()
+    let paused = lipsyncPaused
+    let needsReset = paused ? false : pendingUtteranceReset
+    if !paused { pendingUtteranceReset = false }
+    let epochAtTop = bargeEpoch
+    let take = paused ? 0 : audioQueue.count   // hold queue while paused
+    let pending = take > 0 ? audioQueue : []
+    if take > 0 { audioQueue.removeAll(keepingCapacity: true); audioFed += take }
+    var oldVoice = 0
+    if needsReset, let cut = voiceStreamCut {
+      oldVoice = min(cut, voiceQueue.count); voiceQueue.removeFirst(oldVoice); voiceStreamCut = nil
+    }
+    let fedTotal = audioFed, lastAudio = lastAudioArrivalTime, hasVoice = voiceSeen
+    let reply = replySeq, firstAudioAt = replyFirstAudioAt, turnEnded = turnEndedForReply, barged = bargedReply
+    audioLock.unlock()
+    if take > 0 {
+      NSLog("[bhfeed] +%d fed=%d q=%d hostMs=%lld", take, fedTotal, rt.framesAvailable, Int64(Date().timeIntervalSince1970 * 1000))
+    }
+    if needsReset {
+      rt.resetState()                              // → be_essence2_reset: a new stream, coordinate 0
+      voiceClock.reset(); voiceOpen = false; voiceFirstFrameAt = 0; voiceDrySince = 0
+      heldFrame = nil; deliveredSpeech = 0
+      if oldVoice > 0 {
+        NSLog("[bhvoice] NEW-STREAM: %d ms of the previous stream's voice dropped with its frames", oldVoice * 1000 / 24000)
+      }
+    }
+    if !pending.isEmpty { rt.pushAudio(pending) }
+    followReply(reply, firstAudioAt: firstAudioAt, barged: barged, mode: "clock", engine: rt)
+
+    let cap = frameW * frameH * 3
+    if cap > 0, bgrBuffer.count < cap { bgrBuffer = [UInt8](repeating: 0, count: cap) }
+    let e2 = e2Engine
+    let skipOn = skipAheadOn
+
+    // 1. The voice: a short lead on the speaker while it is open. It closes once dry at a reply's end
+    //    (or after a long dry spell), and the next reply waits for its own first frame + the cushion.
+    if voiceOpen {
+      if !paused { pumpVoice(now) }
+      if voiceQueuedForStream() == 0 && now >= voiceClock.heardEnd {
+        if voiceDrySince == 0 { voiceDrySince = now }
+        if turnEnded || now - voiceDrySince >= VoiceClockPolicy.closeAfterDrySeconds {
+          closeVoice(e2, skipOn)
+          if turnEnded { closeReplyMeter(rt) }   // the reply is over and heard: its line now
+        }
+      } else {
+        voiceDrySince = 0
+      }
+    }
+    // 2. Skip-ahead: the engine hears where the voice is (negative before the reply's first sample).
+    //    ★Under audioLock, and only if no cut moved the epoch since the top of this tick: a barge-in
+    //    bumps the epoch under this lock BEFORE it resets the engine, so a position of the cut reply can
+    //    never reach the engine after its reset (it would skip the new reply's frames as already heard;
+    //    on the M4 one barge-in in eight, before this guard, held the new reply's face for 1.9 s).
+    if skipOn, voiceOpen, let h = voiceClock.heard16(at: now) {
+      audioLock.lock()
+      if bargeEpoch == epochAtTop { e2?.setPlayoutPosition(h < 0 ? -1 : Int64(h)) }
+      audioLock.unlock()
+    }
+
+    // 3. The picture.
+    var h16 = voiceOpen ? voiceClock.heard16(at: now) : nil
+    var shown = false
+    var pulls = 0
+    frames: while true {
+      if heldFrame == nil {
+        guard pulls < 12, rt.framesAvailable > 0 else { break frames }
+        let (got, isSpeech) = rt.pull(into: &bgrBuffer)
+        pulls += 1
+        guard got > 0 else { break frames }
+        // ★ THE FENCE (as in the voice-gated tick): a frame pulled across a cut is not shown.
+        audioLock.lock(); let epochNow = bargeEpoch; let stale = !audioSinceBarge; audioLock.unlock()
+        if epochNow != epochAtTop {
+          bargeFenced += 1
+          NSLog("[bhbarge] FENCED a frame pulled across the cut (epoch %d -> %d) fenced=%d", epochAtTop, epochNow, bargeFenced)
+          return
+        }
+        if isSpeech && stale {
+          bargeLeaks += 1
+          NSLog("[bhbarge] LEAK old-reply speech frame after the cut (+%.0f ms) leaks=%d",
+                (now - bargeAt) * 1000, bargeLeaks)
+          continue frames
+        }
+        var start16: Int64 = -1
+        if isSpeech {
+          let idx = e2?.lastFrameIndex ?? -1
+          if idx >= 0 {
+            start16 = idx * VoiceClockPolicy.hop16      // the engine's own ordinal: skipped frames are missing
+            deliveredSpeech = idx + 1
+          } else {
+            // An engine without ordinals: count, re-anchored at a reply's first frame on the voice not
+            // yet played (the engine pads a reply's last block, so counting alone runs ahead).
+            if !voiceOpen && voiceFirstFrameAt == 0 {
+              deliveredSpeech = max(deliveredSpeech, (Int64(voiceClock.scheduled16) + VoiceClockPolicy.hop16 / 2) / VoiceClockPolicy.hop16)
+            }
+            start16 = deliveredSpeech * VoiceClockPolicy.hop16
+            deliveredSpeech += 1
+          }
+        }
+        heldFrame = (got, isSpeech, start16)
+      }
+      guard let f = heldFrame else { break frames }
+      if !f.speech || !hasVoice {
+        // An idle / ramp frame, or a stream whose voice is not ours (no voice unit): shown in turn.
+        publishBGRToTexture(); heldFrame = nil; shown = true
+        if f.speech { noteSpeechShown(now) } else { noteIdleFramePresented() }
+        break frames
+      }
+      if !voiceOpen {
+        if voiceFirstFrameAt == 0 {
+          voiceFirstFrameAt = now
+          if let m = replyMeter, m.firstFrameAt == 0 { m.firstFrameAt = now }
+        }
+        // The cushion: the engine renders ahead while the reply's first frame (and its voice) waits.
+        guard now - voiceFirstFrameAt + 0.001 >= Self.voiceCushion else { break frames }
+        voiceOpen = true; voiceDrySince = 0
+        pumpVoice(now)
+        h16 = voiceClock.heard16(at: now)
+      }
+      let voiceEnd16 = voiceClock.scheduled16
+        + Double(voiceQueuedForStream()) * VoiceClockPolicy.engineRate / VoiceClockPolicy.voiceRate
+      let av = h16.map { VoiceClockedPresenter.avMs(heard16: $0, start16: f.start16) } ?? 0
+      let v = VoiceClockedPresenter.verdict(avMs: av, newerReady: rt.framesAvailable > 0,
+                                             beyondVoice: h16 == nil || Double(f.start16) >= voiceEnd16)
+      if DevLevers.e2Trace {
+        NSLog("[bhvtrace] start16=%lld heard16=%.0f av=%.0f verdict=%@ q=%d sched16=%.0f end16=%.0f idx=%lld",
+              f.start16, h16 ?? -1, av, "\(v)", rt.framesAvailable, voiceClock.scheduled16, voiceEnd16, e2?.lastFrameIndex ?? -2)
+      }
+      switch v {
+      case .dropLate:
+        heldFrame = nil
+        replyMeter?.dropped += 1
+        continue frames
+      case .hold:
+        break frames
+      case .show, .showLate, .showBeyondVoice:
+        publishBGRToTexture(); heldFrame = nil; shown = true
+        noteSpeechShown(now)
+        if v == .showBeyondVoice {
+          replyMeter?.beyond += 1
+        } else {
+          replyMeter?.shown(avMs: av)
+          if v == .showLate { replyMeter?.lateShown += 1 }
+        }
+        break frames
+      }
+    }
+    if shown { noteFifo(now, queuedFrames: rt.framesAvailable, hadFrame: true); return }
+    if heldFrame != nil || voiceOpen || !pending.isEmpty || (lastSpeechPullAt > 0 && now - lastSpeechPullAt < 1.0) {
+      noteFifo(now, queuedFrames: rt.framesAvailable, hadFrame: false)
+    }
+    // Idle: nothing to show, nothing held, no voice open, quiet a moment → the engine's idle frame.
+    let quietFor = lastAudio > 0 ? (now - lastAudio) : Double.greatestFiniteMagnitude
+    if heldFrame == nil, !voiceOpen, pending.isEmpty, quietFor > 0.2, cap > 0 {
+      if rt.idle(into: &bgrBuffer) > 0 { publishBGRToTexture(); noteIdleFramePresented() }   // → be_essence2_idle_frame
+    }
+  }
+
+  /// Keep VoiceClockPolicy.leadSeconds of the voice scheduled on the speaker. renderQueue.
+  private func pumpVoice(_ now: CFTimeInterval) {
+    guard let schedule = scheduleVoice else { return }
+    audioLock.lock()
+    let avail = voiceStreamCut ?? voiceQueue.count
+    let n = VoiceClockedPresenter.pumpCount(now: now, heardEnd: voiceClock.heardEnd, queued: avail)
+    guard n > 0 else { audioLock.unlock(); return }
+    // Scheduled UNDER audioLock: a barge-in (clearAudioQueue takes this lock before the voice unit
+    // flushes the player) can never fall between taking the slice and scheduling it, so no voice of a
+    // cut reply reaches the speaker after the cut.
+    guard let at = schedule(Array(voiceQueue.prefix(n))) else { audioLock.unlock(); return }
+    voiceQueue.removeFirst(n)
+    if let c = voiceStreamCut { voiceStreamCut = c - n }
+    audioLock.unlock()
+    let dry = voiceClock.add(Int64(n), heardAt: at)
+    replyMeter?.voice(count: n, heardAt: at, rate: VoiceClockPolicy.voiceRate)
+    if dry >= 0.04 { NSLog("[bhvoice] GAP %.0f ms: the voice ran dry (its audio had not arrived)", dry * 1000) }
+  }
+
+  /// The voice of the open stream not yet scheduled (up to a new stream's cut).
+  private func voiceQueuedForStream() -> Int {
+    audioLock.lock(); defer { audioLock.unlock() }
+    return voiceStreamCut ?? voiceQueue.count
+  }
+
+  private func closeVoice(_ e2: Essence2Engine?, _ skipOn: Bool) {
+    voiceOpen = false; voiceFirstFrameAt = 0; voiceDrySince = 0
+    if skipOn { e2?.setPlayoutPosition(-1) }   // the next reply's voice has not started: nothing skips until it has
+  }
+
+  private func noteSpeechShown(_ now: CFTimeInterval) {
+    lastSpeechPullAt = now
+    speechFrameLock.lock(); _speechFramesPublished += 1; speechFrameLock.unlock()
+    noteSpeechFramePresented(now)
   }
   #endif
 
