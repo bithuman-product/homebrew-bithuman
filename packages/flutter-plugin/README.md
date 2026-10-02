@@ -1,5 +1,7 @@
 # bithuman — the avatar umbrella Flutter plugin (Layer 2)
 
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/vq3FyeN6k4)
+
 The **single Flutter dependency** the bitHuman avatar app consumes
 (`bithuman-app` git-deps this repo). It is engine-agnostic glue — a `Texture`
 widget + the method channel `ai.bithuman.avatar` + `RealtimeAudioIO`/`Converse*`

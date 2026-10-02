@@ -79,9 +79,9 @@ enum DevLevers {
   static let testWav: String? = path("EMBODY_TEST_WAV")
   /// Run `benchSync(20)` once after warm-up.
   static let bench = flag("EMBODY_BENCH")
-  /// Essence 2: the pre-2.6.30 presenter (each frame's 40 ms of voice released when that frame is
-  /// shown), so one build serves both arms of an A/B against the voice on its own clock.
-  static let e2VoiceGated = flag("BH_E2_VOICE_GATED")
+  /// Essence 2's presenter, over the load option `voiceClock`: "clock" (the voice on its own clock) or "gated"
+  /// (the voice-gated default with its stall guard), so one build serves both arms of an A/B.
+  static let e2Presenter: String? = env("BH_E2_PRESENTER").flatMap { $0 == "clock" || $0 == "gated" ? $0 : nil }
   /// Essence 2: the voice cushion in ms (VoiceClockPolicy.cushionSeconds otherwise) — the cushion series.
   static let e2CushionMs: Double? = env("BH_E2_CUSHION_MS").flatMap { Double($0) }
   /// Essence 2 skip-ahead: 1 on, 2 off; otherwise the app's load option, then the default (Android's

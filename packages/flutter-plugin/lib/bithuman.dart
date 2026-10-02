@@ -129,7 +129,14 @@ class BithumanAvatar implements VoiceHost {
   /// renders below real time shows fewer frames in step with the voice instead of a frozen face.
   /// null = the plugin's default (OFF); false = every frame rendered in order. Android since 2.6.29;
   /// iOS / macOS since 2.6.30, with an Essence 2 engine that has the skip-ahead calls
-  /// (essence2-apple v1.15.3+; an earlier engine ignores it). Ignored by Expression 2.
+  /// (essence2-apple v1.15.3+; an earlier engine ignores it). Ignored by Expression 2. On iOS / macOS it
+  /// acts with [voiceClock].
+  ///
+  /// [voiceClock] (iOS / macOS, Essence 2; 2.6.31): play the voice on its own clock and show each frame when its
+  /// sound is heard (the voice opens 200 ms after a reply's first frame). null / false = the default: each
+  /// frame's 40 ms of voice is released when the frame is shown, with a stall guard that releases the voice
+  /// anyway when no frame came for a tick (the voice never waits more than 40 ms). Ignored on Android (its
+  /// player always plays the voice on its own clock) and by Expression 2.
   static Future<BithumanAvatar> load(
     String imxPath, {
     String? apiSecret,
@@ -137,6 +144,7 @@ class BithumanAvatar implements VoiceHost {
     String? motionDir,
     int chunk = 16,
     bool? skipAhead,
+    bool? voiceClock,
   }) async {
     _installNativeCallbacks();
     // The agent dir set just before (setExpression2AgentDir) is in place first.
@@ -151,6 +159,7 @@ class BithumanAvatar implements VoiceHost {
         'motionDir': ?motionDir,
         'chunk': chunk,
         'skipAhead': ?skipAhead,
+        'voiceClock': ?voiceClock,
       });
     } on PlatformException catch (e) {
       // The engine refused the model file (2.6.29): a typed, terminal error carrying the native

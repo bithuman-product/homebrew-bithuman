@@ -216,6 +216,9 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       texture.apiSecret = args["apiSecret"] as? String
       // Essence 2 skip-ahead (2.6.30 on Apple, with an engine that has the calls): the app's opt-in.
       texture.skipAhead = args["skipAhead"] as? Bool
+      // Essence 2 presenter (2.6.31): voice-gated with a stall guard by default; `voiceClock: true` opts in to
+      // the voice on its own clock (a 200 ms cushion).
+      texture.voiceClockOption = args["voiceClock"] as? Bool
       let textureId = textureRegistry.register(texture)
       texture.textureId = textureId
       texture.registry = textureRegistry
@@ -996,6 +999,12 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
   var scheduleVoice: (([Float]) -> CFTimeInterval?)? = nil
   /// The load option `skipAhead` (Dart BithumanAvatar.load); nil = the default.
   var skipAhead: Bool? = nil
+  /// The load option `voiceClock` (Dart BithumanAvatar.load, 2.6.31); nil = the default (voice-gated).
+  var voiceClockOption: Bool? = nil
+  /// The voice-gated presenter's stall guard (VoiceClock.swift). renderQueue only.
+  private let stallGuard = StallGuard()
+  /// A stall-guard release is in flight: noteVoiceScheduled counts its voice, but no frame was shown.
+  private var releasingForGuard = false
   /// Skip-ahead's default on Apple: OFF, as on Android in 2.6.29 — the app opts in per load.
   static let skipAheadDefault = false
   // renderQueue only:
@@ -1167,11 +1176,17 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
 
   // ---- the voice on its own clock: the voice unit's side (LipsyncSink, 2.6.30) ----
 
-  /// Essence 2 plays the voice on its own clock and shows frames against it (VoiceClock.swift).
-  /// The pre-2.6.30 voice-gated presenter stays behind a dev lever, for an A/B.
+  /// Essence 2 with the voice on its own clock (VoiceClock.swift): an OPT-IN since 2.6.31 (the load option
+  /// `voiceClock: true`; a debug build's BH_E2_PRESENTER=clock|gated decides first). The default is the
+  /// voice-gated presenter with its stall guard: on the iPhone 18 Pro it has no gaps and the earlier first word.
   var voiceClocked: Bool {
     #if ESSENCE2_AVAILABLE
-    return capabilities.driveModel == .atomicSlotClock && !DevLevers.e2VoiceGated
+    guard capabilities.driveModel == .atomicSlotClock else { return false }
+    switch DevLevers.e2Presenter {
+    case "clock": return true
+    case "gated": return false
+    default: return voiceClockOption ?? false
+    }
     #else
     return false
     #endif
@@ -1203,7 +1218,7 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
   func noteVoiceScheduled(samples24k: Int, heardAt: CFTimeInterval) {
     guard let m = replyMeter else { return }
     m.voice(count: samples24k, heardAt: heardAt, rate: VoiceClockPolicy.voiceRate)
-    m.shown(avMs: (heardAt - CACurrentMediaTime()) * 1000)
+    if !releasingForGuard { m.shown(avMs: (heardAt - CACurrentMediaTime()) * 1000) }
   }
 
   /// The reply's line (`[bhvoice] REPLY ...`). renderQueue.
@@ -1838,11 +1853,12 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
       logSkipAhead(rt)
     }
     if voiceClocked { composeTickEssence2Voice(rt); return }
-    // The pre-2.6.30 presenter (a dev lever, for an A/B): the same per-reply voice meter.
+    // THE DEFAULT (2.6.31): voice-gated, with the stall guard. The same per-reply voice meter.
     audioLock.lock(); let gReply = replySeq, gFirst = replyFirstAudioAt, gEnded = turnEndedForReply, gBarged = bargedReply
     let gQuiet = audioQueue.isEmpty; audioLock.unlock()
     followReply(gReply, firstAudioAt: gFirst, barged: gBarged, mode: "gated", engine: rt)
-    if gEnded, gQuiet, lastSpeechPullAt > 0, CACurrentMediaTime() - lastSpeechPullAt > 1.0 { closeReplyMeter(rt) }
+    if gEnded, gQuiet, replyMeter?.hasContent == true, lastSpeechPullAt > 0,
+       CACurrentMediaTime() - lastSpeechPullAt > 1.0 { closeReplyMeter(rt) }
 
     audioLock.lock()
     let paused = lipsyncPaused
@@ -1861,7 +1877,7 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
       NSLog("[bhfeed] +%d fed=%d q=%d hostMs=%lld", take, fedTotal, rt.framesAvailable, Int64(Date().timeIntervalSince1970 * 1000))
     }
 
-    if needsReset { rt.resetState() }            // → be_essence2_reset (essence2 witness)
+    if needsReset { rt.resetState(); stallGuard.reset() }   // → be_essence2_reset (essence2 witness)
     if !pending.isEmpty { rt.pushAudio(pending) }   // → pushI16 (exact ×32768 int16 conv, byte-frozen)
 
     let cap = frameW * frameH * 3
@@ -1881,14 +1897,24 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     // le_a2x lookahead is pure TTFB, NOT an offset → no DA_AV_AUDIO_DELAY). The
     // speaker can never lead the displayed frames → there is never a reason to
     // drop, so every generated frame shows (full motion).
+    //
+    // ★THE STALL GUARD (2.6.31; StallGuard in VoiceClock.swift). A tick with no speech frame while the reply's
+    // voice is waiting releases that tick's 40 ms of voice anyway, so the voice never waits more than one tick
+    // on an engine that falls behind; the frames whose voice went ahead are then dropped while a newer one is
+    // ready (or shown without voice) until the picture is back in step. A reply's first frame still opens its
+    // voice. On a fast phone it never fires (the iPhone 18 Pro had a frame on every tick in speech).
     let backlog = rt.framesAvailable
+    var releasedVoice = false
     if backlog > 0 {
-      // pull(into:) returns `speech` = the be_essence2_pulled_speech_frames DELTA:
-      // true for a GENERATED (real lip-motion) frame, false for an onset-warmup /
-      // idle passthrough — collapsing the former pulledSpeechFrames() before/after
-      // pair into one call (byte-identical: same be_essence2_pull_frame).
-      let (got, isSpeech) = rt.pull(into: &bgrBuffer)
-      if got > 0 {
+      var pulls = 0
+      frames: while true {
+        // pull(into:) returns `speech` = the be_essence2_pulled_speech_frames DELTA:
+        // true for a GENERATED (real lip-motion) frame, false for an onset-warmup /
+        // idle passthrough — collapsing the former pulledSpeechFrames() before/after
+        // pair into one call (byte-identical: same be_essence2_pull_frame).
+        let (got, isSpeech) = rt.pull(into: &bgrBuffer)
+        pulls += 1
+        guard got > 0 else { break frames }
         // ★ THE FENCE: a cut moved the epoch between the read at the top and this
         // pull, OR no reply audio has arrived since the cut → the frame is the
         // cancelled reply's. Not shown, not paired. (Android's guard, Apple side.)
@@ -1904,19 +1930,44 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
                 (CACurrentMediaTime() - bargeAt) * 1000, bargeLeaks)
           return
         }
-        publishBGRToTexture()                       // every frame shown — never dropped
-        if isSpeech {                               // a GENERATED frame → release its paired 40 ms + mark speech
-          lastSpeechPullAt = CACurrentMediaTime()
+        if isSpeech {
+          let now = CACurrentMediaTime()
+          switch stallGuard.speechFrame(now: now, newerReady: pulls < 8 && rt.framesAvailable > 0) {
+          case .drop:                               // the guard already released its voice; a newer frame is ready
+            replyMeter?.dropped += 1
+            continue frames
+          case .showWithoutVoice:                   // the guard released its voice; nothing newer: show, release nothing
+            publishBGRToTexture()
+            replyMeter?.lateShown += 1
+          case .showAndRelease:                     // a GENERATED frame → release its paired 40 ms + mark speech
+            publishBGRToTexture()
+            onSpeechFramePublished?()                // releaseEmbodyAudioFrame: emit THIS frame's audio slice
+            releasedVoice = true
+          }
+          lastSpeechPullAt = now
           speechFrameLock.lock(); _speechFramesPublished += 1; speechFrameLock.unlock()
-          onSpeechFramePublished?()                  // releaseEmbodyAudioFrame: emit THIS frame's audio slice
-          noteSpeechFramePresented(CACurrentMediaTime())
+          noteSpeechFramePresented(now)
         } else {
+          publishBGRToTexture()
           noteIdleFramePresented()
         }
         noteFifo(CACurrentMediaTime(), queuedFrames: backlog, hadFrame: true)
+        break frames
       }
-      return
     }
+    let voiceWaiting = canReleaseSpeechAudio?() ?? false
+    if !voiceWaiting {
+      stallGuard.voiceDry()                         // the next voice waits for its own frame (a reply's onset)
+      if gEnded { stallGuard.reset() }              // the reply is over: nothing it owes carries into the next
+    } else if !releasedVoice, stallGuard.noVoiceReleased(now: CACurrentMediaTime(), voiceWaiting: true) {
+      releasingForGuard = true
+      onSpeechFramePublished?()                      // this tick's 40 ms of voice, without its frame
+      releasingForGuard = false
+      replyMeter?.stallGuard += 1
+      NSLog("[bhvoice] stall-guard: no frame's voice this tick with the reply's voice waiting — released 40 ms of "
+            + "voice without its frame (owed frames=%d, firings=%d)", stallGuard.debt, stallGuard.firings)
+    }
+    if backlog > 0 { return }
     if !pending.isEmpty || lastSpeechPullAt > 0 && CACurrentMediaTime() - lastSpeechPullAt < 1.0 {
       noteFifo(CACurrentMediaTime(), queuedFrames: 0, hadFrame: false)
     }
@@ -1926,7 +1977,8 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     // is actively arriving so it doesn't flicker against speech frames.
     let quietFor = lastAudio > 0 ? (CACurrentMediaTime() - lastAudio)
                                  : Double.greatestFiniteMagnitude
-    if pending.isEmpty, quietFor > 0.2, cap > 0 {
+    // (Not while a reply's voice plays through a stall: the face holds its last frame, it does not go idle.)
+    if pending.isEmpty, quietFor > 0.2, cap > 0, !stallGuard.replyPlaying {
       if rt.idle(into: &bgrBuffer) > 0 { publishBGRToTexture(); noteIdleFramePresented() }   // → be_essence2_idle_frame
     }
   }
@@ -1947,9 +1999,15 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
   private func logSkipAhead(_ rt: any BithumanEngine) {
     let src = DevLevers.e2Clock == 1 || DevLevers.e2Clock == 2 ? "BH_E2_CLOCK=\(DevLevers.e2Clock)"
       : skipAhead != nil ? "load option" : "default"
-    NSLog("[essence2] presenter=%@ cushionMs=%.0f skip-ahead=%@ (%@; the engine %@)",
-          voiceClocked ? "voice-clock" : "voice-gated", Self.voiceCushion * 1000, skipAheadOn ? "on" : "off", src,
-          Essence2Engine.supportsSkipAhead ? "has the calls" : "has no skip-ahead calls")
+    let psrc = DevLevers.e2Presenter.map { "BH_E2_PRESENTER=\($0)" } ?? (voiceClockOption != nil ? "load option" : "default")
+    if voiceClocked {
+      NSLog("[essence2] presenter=voice-clock (%@) cushionMs=%.0f skip-ahead=%@ (%@; the engine %@)", psrc,
+            Self.voiceCushion * 1000, skipAheadOn ? "on" : "off", src,
+            Essence2Engine.supportsSkipAhead ? "has the calls" : "has no skip-ahead calls")
+    } else {
+      NSLog("[essence2] presenter=voice-gated (%@) stall-guard=on afterMs=%.0f skip-ahead=off (it acts with voiceClock: true)",
+            psrc, StallGuard.afterSeconds * 1000)
+    }
   }
 
   /// One render tick of Essence 2 with the voice on its OWN clock (2.6.30; VoiceClock.swift has the
@@ -2174,7 +2232,9 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     // The per-reply voice line (`[bhvoice] REPLY ... mode=x2-gated`, 2.6.31): Expression 2's voice is released
     // per shown frame, so its gaps and A/V offset are measured the same way as Essence 2's.
     followReply(xReply, firstAudioAt: xFirst, barged: xBarged, mode: "x2-gated", engine: rt)
-    if xEnded, xQuiet, !embodySpeaking, replyMeter != nil { closeReplyMeter(rt) }
+    // Closed once the reply has been heard: its turn ended, nothing left to feed or play, and it has played.
+    if xEnded, xQuiet, !embodySpeaking, replyMeter?.hasContent == true,
+       !(canReleaseSpeechAudio?() ?? false) { closeReplyMeter(rt) }
     if !embodySpeaking {
       // Wait for ci=0 + ci=1 (~32+ frames) before starting speech. ci=0 only
       // yields ~21 frames for a 1.6 s chunk, and ci=1 lands ~1.5 s later at

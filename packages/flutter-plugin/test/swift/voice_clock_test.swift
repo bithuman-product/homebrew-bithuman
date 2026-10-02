@@ -1,4 +1,4 @@
-// Essence 2's voice on its own clock on Apple (shared/Classes/VoiceClock.swift, 2.6.30): the heard
+// Essence 2 on Apple (shared/Classes/VoiceClock.swift): the voice on its own clock (2.6.30, opt-in): the heard
 // position, the per-tick verdict on a frame, how much voice goes to the speaker, and the per-reply line.
 // Then a 16 s reply through a SLOW engine (20 fps against a 25 fps reply), presented both ways: the
 // pre-2.6.30 voice-gated presenter (each frame's 40 ms of voice released when it is shown) and the
@@ -63,7 +63,7 @@ check(m.gapCount == 2 && m.over80 == 1, "gaps of 40 ms or more: 2, over 80 ms: 1
 let ln = m.line()
 check(ln.hasPrefix("[bhvoice] REPLY 3 mode=clock cushionMs=200 voiceMs=500 firstSoundMs=500 "), "the line: reply, mode, cushion, voice, first sound")
 check(ln.contains("gaps=2 over80=1 maxGapMs=100 microGaps=1 shown=4"), "the line: gaps, worst, micro gaps, frames shown")
-check(ln.contains("over40=1 barged=no"), "the line: frames shown more than 40 ms off")
+check(ln.contains("over40=1 stallGuard=0 barged=no"), "the line: frames shown more than 40 ms off, stall-guard releases")
 
 // ── a 16 s reply through the engine, both presenters ─────────────────────────────────────────────
 // The reply's audio arrives at once (a burst: the realtime transport). The engine renders frames in
@@ -148,6 +148,69 @@ check(gr.gaps.filter { $0 > 80 }.isEmpty, "voice-gated, real-time engine: no gap
 check(cr.gaps.filter { $0 >= 40 }.isEmpty, "voice on its own clock, real-time engine: no voice gap")
 check(cr.dropped == 0 && cr.late == 0 && cr.off.count == 400, "real-time engine: every frame shown, none late or dropped")
 check(cr.off.allSatisfy { abs($0) <= 40 }, "real-time engine: every frame within 40 ms of its voice (worst \(Int(cr.off.map { abs($0) }.max() ?? 0)) ms)")
+
+// ── the voice-gated default's STALL GUARD (2.6.31) ───────────────────────────────────────────────
+let g = StallGuard()
+check(g.noVoiceReleased(now: 1.0, voiceWaiting: true) == false, "before a reply's first frame the guard never releases (the onset waits for its frame)")
+check(g.speechFrame(now: 1.0, newerReady: false) == .showAndRelease, "a frame: show it and release its voice")
+check(g.noVoiceReleased(now: 1.02, voiceWaiting: true) == false, "less than a tick since the last release: wait")
+check(g.noVoiceReleased(now: 1.04, voiceWaiting: true) == true && g.debt == 1, "a tick without a frame: release the voice, one frame owed")
+check(g.speechFrame(now: 1.08, newerReady: true) == .drop && g.debt == 0, "the owed frame, a newer one ready: drop it")
+check(g.speechFrame(now: 1.08, newerReady: true) == .showAndRelease, "the next frame is in step again")
+check(g.noVoiceReleased(now: 1.12, voiceWaiting: true) && g.speechFrame(now: 1.16, newerReady: false) == .showWithoutVoice,
+      "the owed frame with nothing newer: shown without voice (its voice already went)")
+g.voiceDry()
+check(g.noVoiceReleased(now: 2.0, voiceWaiting: true) == false, "after the voice ran dry the next voice waits for its frame again")
+g.reset(); check(g.debt == 0 && !g.replyPlaying, "reset: nothing owed, nothing playing")
+
+// The release gate (10x Production): through a SLOW engine the guard never holds the voice more than ~40 ms.
+// A 16 s reply, all audio arrived, frames rendered in 8-frame blocks; display ticks every 40 ms with a little
+// jitter; each release = 40 ms of voice heard from max(end of the voice so far, now + 20 ms).
+struct GatedRun { var gaps: [Double] = []; var maxHold = 0.0; var firings = 0; var shown = 0; var dropped = 0
+                  var noVoice = 0; var av: [Double] = [] }
+func gated(block: Double, guardOn: Bool, frames: Int = 400, firstBlockAt: Double = 0.4) -> GatedRun {
+  var r = GatedRun()
+  let sg = StallGuard()
+  var rendered = 0, pulled = 0, nextBlock = firstBlockAt
+  var released = 0, heardEnd = 0.0, lastRelease = -1.0, tick = 0.0, n = 0
+  func release(_ now: Double) {
+    let start = max(heardEnd, now + 0.020)
+    if heardEnd > 0, start - heardEnd > 1e-9 { r.gaps.append((start - heardEnd) * 1000) }
+    if lastRelease >= 0 { r.maxHold = max(r.maxHold, now - lastRelease) }
+    lastRelease = now; heardEnd = start + 0.04; released += 1
+  }
+  while released < frames && tick < 90 {
+    while nextBlock <= tick && rendered < frames { rendered = min(frames, rendered + 8); nextBlock += block }
+    var releasedVoice = false
+    var pulls = 0
+    pull: while rendered > pulled {
+      pulled += 1; pulls += 1
+      if !guardOn { r.shown += 1; release(tick); releasedVoice = true; break pull }
+      switch sg.speechFrame(now: tick, newerReady: pulls < 8 && rendered > pulled) {
+      case .drop: r.dropped += 1; continue pull
+      case .showWithoutVoice: r.shown += 1; r.noVoice += 1
+      case .showAndRelease: r.shown += 1; r.av.append((max(heardEnd, tick + 0.020) - tick) * 1000); release(tick); releasedVoice = true
+      }
+      break pull
+    }
+    let waiting = released < frames
+    if !waiting { sg.voiceDry() }
+    else if guardOn, !releasedVoice, sg.noVoiceReleased(now: tick, voiceWaiting: true) { release(tick); r.firings += 1 }
+    n += 1
+    tick = Double(n) * 0.04 + (n % 3 == 0 ? 0.003 : 0)   // a tick now and then 3 ms late
+  }
+  return r
+}
+let slowOff = gated(block: 0.5, guardOn: false), slowOn = gated(block: 0.5, guardOn: true)
+let slowerOn = gated(block: 1.0, guardOn: true)
+check(slowOff.gaps.filter { $0 > 80 }.count > 10, "voice-gated with NO guard, slow engine (16 fps): the voice is held (\(slowOff.gaps.filter { $0 > 80 }.count) gaps over 80 ms, worst \(Int(slowOff.gaps.max() ?? 0)) ms)")
+check(slowOn.maxHold <= 0.0435, "with the guard, slow engine: the voice is never held more than one tick (longest wait between releases \(Int((slowOn.maxHold * 1000).rounded())) ms)")
+check(slowOn.gaps.filter { $0 >= 40 }.isEmpty, "with the guard, slow engine: no voice gap of 40 ms or more (worst \(Int((slowOn.gaps.max() ?? 0).rounded())) ms, \(slowOn.firings) guard releases)")
+check(slowerOn.maxHold <= 0.0435 && slowerOn.gaps.filter { $0 >= 40 }.isEmpty, "with the guard, an engine at 8 fps: still never held more than one tick (\(Int((slowerOn.maxHold * 1000).rounded())) ms)")
+check(slowOn.dropped > 0 && slowOn.shown > 0, "the frames whose voice went ahead are dropped or shown without voice; the face keeps moving (\(slowOn.shown) shown, \(slowOn.dropped) dropped, \(slowOn.noVoice) without voice, \(slowOn.firings) guard releases)")
+let fastOn = gated(block: 0.32, guardOn: true, firstBlockAt: 0.1), fastOff = gated(block: 0.32, guardOn: false, firstBlockAt: 0.1)
+check(fastOn.firings == 0 && fastOn.dropped == 0 && fastOn.noVoice == 0, "a real-time engine: the guard never fires; every frame releases its own voice")
+check(fastOn.gaps == fastOff.gaps && fastOn.shown == fastOff.shown, "a real-time engine: the guard changes nothing (the same releases and frames as without it)")
 
 print(failures == 0 ? "voice_clock_test: ALL PASS" : "voice_clock_test: \(failures) FAILURE(S)")
 exit(failures == 0 ? 0 : 1)
