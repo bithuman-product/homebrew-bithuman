@@ -29,6 +29,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Directory, File, IOSink;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kReleaseMode;
@@ -40,6 +41,7 @@ import 'src/voice_host.dart';
 import 'src/dev_levers.dart';
 import 'src/echo_profile.dart';
 import 'src/spoken_captions.dart';
+import 'src/barge_gate.dart';
 
 export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout;
 export 'src/spoken_captions.dart' show BithumanSpokenText, SpokenCaptioner;
@@ -59,6 +61,7 @@ class BithumanRealtimeSession {
     this.vadThreshold = 0,
     this.speechReady,
     this.echoOnsetGuard,
+    this.bargeFloorDb,
     this.endOnAudioInterruption = true,
   }) {
     _liveSystemPrompt = systemPrompt;
@@ -117,6 +120,18 @@ class BithumanRealtimeSession {
   /// disables it.
   final Duration? echoOnsetGuard;
 
+  /// ★THE BARGE GATE (2.6.28). While the agent is HEARD — the voice host's playout, not when
+  /// the reply arrived — and for 500 ms after, a microphone chunk reaches the server's turn
+  /// detector only if its level comes within this many dB of the loudest agent voice heard in
+  /// that time, and holds there for 200 ms (held, then sent: the server still sees the onset).
+  /// Quieter chunks are the echo canceller's residual and go up as silence. A person talking
+  /// over the agent cuts it about 100 ms later than without the gate (one more 100 ms
+  /// microphone chunk on Android); the agent's own echo no longer does. Null (the default)
+  /// takes the device's row, `EchoProfile.bargeFloorDb` (Android -11, iPhone and macOS -18),
+  /// which the residual measured during the greeting can raise up to -10. A value under -40
+  /// turns the gate off. See `src/barge_gate.dart`.
+  final double? bargeFloorDb;
+
   /// ★WHEN THE PLATFORM TAKES THE SOUND AWAY, THE SESSION ENDS (2.6.25). A phone call
   /// ringing or answered — also from its banner, with the app still on screen (iOS), or
   /// from its notification (Android) — Siri, an assistant or another app's call takes
@@ -126,6 +141,12 @@ class BithumanRealtimeSession {
   /// emitting it on [interruptionStream]; [endedByInterruption] then says why. False: the
   /// event is only forwarded, and the app decides.
   final bool endOnAudioInterruption;
+
+  double get _bargeFloor => DevLevers.bargeFloorDb != 0
+      ? DevLevers.bargeFloorDb.toDouble()
+      : (bargeFloorDb ?? EchoProfile.current.bargeFloorDb);
+  bool get _gateOn => _bargeFloor >= -40;
+  late final BargeGate _gate = BargeGate(offsetDb: _gateOn ? _bargeFloor : -40, onLog: _log);
 
   static const int _guardPeakFloor = 4096; // ≈ -18 dBFS
   static const Duration _guardTail = Duration(milliseconds: 1500);
@@ -145,8 +166,10 @@ class BithumanRealtimeSession {
   bool get _echoGuardActive {
     final guardMs = _echoGuardMs;
     if (guardMs == 0 || _agentAudioMs == 0 || _guardAudibleMs >= guardMs) return false;
-    // The presenter releases audio with the lip frames, ~1 s after the delta
-    // arrived, so the agent is audible until a tail past the arrival estimate.
+    // ★Heard, by the host's playout, when it reports one (2.6.28): the reply ARRIVES in a
+    // burst ~1.7 s before an Android presenter starts its voice, so an arrival clock lapsed
+    // while the greeting was still playing. Without reports: the arrival estimate plus a tail.
+    if (_captions.hasPlayoutReports) return _gate.agentHeard;
     return _audibleUntil.add(_guardTail).isAfter(DateTime.now());
   }
 
@@ -284,6 +307,10 @@ class BithumanRealtimeSession {
   bool get agentAudible => _audibleUntil.isAfter(DateTime.now());
   int _injectN = 0;
   Timer? _injectTimer;
+  // BH_MIC_INJECT_AT_MS: samples handed to the host this session, where the first reply began.
+  int _fedTotal = 0;
+  int _injectReplyFedStart = -1;
+  bool _injectedOnce = false;
   int _deltaN = 0;   // deltas of the current reply; 0 -> the next one is the reply's first byte
   int _replyFirstDeltaMs = 0, _replyLastDeltaMs = 0, _replyAudioSamples = 0;
   bool _injectArmedThisResponse = false;
@@ -294,6 +321,30 @@ class BithumanRealtimeSession {
     // ignore: avoid_print
     print(line);
     unawaited(avatar.nativeLog(line));
+  }
+
+  // DIAGNOSTICS (dev-only, `--dart-define=BH_AUDIO_DUMP=<dir>`): raw mic + agent audio + index.
+  /// A dev-lever path: absolute, or `tmp:<name>` in the app's temporary directory (iOS: the
+  /// container's tmp/, which devicectl can write; Android: the cache directory).
+  static String _devPath(String v) =>
+      v.startsWith('tmp:') ? '${Directory.systemTemp.path}/${v.substring(4)}' : v;
+  IOSink? _dMic, _dFar, _dIdx;
+  int _dMicN = 0, _dFarN = 0;
+  void _dumpOpen() {
+    if (DevLevers.audioDump.isEmpty) return;
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final d = _devPath(DevLevers.audioDump);
+    _dMic = File('$d/bhdump_${ts}_mic.raw').openWrite();
+    _dFar = File('$d/bhdump_${ts}_far.raw').openWrite();
+    _dIdx = File('$d/bhdump_${ts}_idx.csv').openWrite();
+    _dMicN = 0; _dFarN = 0;
+    _log('[bhdump] open $d/bhdump_$ts');
+  }
+  void _dumpRow(String row) => _dIdx?.writeln('$row,${DateTime.now().millisecondsSinceEpoch}');
+  Future<void> _dumpClose() async {
+    final a = _dMic, b = _dFar, c = _dIdx;
+    _dMic = null; _dFar = null; _dIdx = null;
+    for (final x in [a, b, c]) { if (x != null) { await x.flush(); await x.close(); } }
   }
 
   /// Stress driver (see [_devStress]): request the next long monologue.
@@ -378,7 +429,7 @@ class BithumanRealtimeSession {
 
   // Codes the relay ends a session with (an `error` event, then close 1008) or
   // refuses the handshake with. None of them heals on a retry. `PAYWALL` (2.6.28): the
-  // relay's 402 when the account has no Live minutes left.
+  // relay's plan gate for a session the account's plan does not cover.
   static const Set<String> _terminalCodes = {
     'UNAUTHORIZED', 'INSUFFICIENT_BALANCE', 'PLAN_REQUIRED', 'FORBIDDEN', 'PAYWALL',
     'SESSION_DURATION_LIMIT', 'MODEL_LOCKED', 'BAD_REQUEST',
@@ -531,7 +582,21 @@ class BithumanRealtimeSession {
     _captions.reset();
     final oldPlayout = _playoutSub;
     if (oldPlayout != null) unawaited(oldPlayout.cancel());
+    _dumpOpen();
+    _gate.reset();
+    _fedTotal = 0;
+    _injectReplyFedStart = -1;
+    _injectedOnce = false;
     _playoutSub = avatar.speechPlayout.listen((p) {
+      _dumpRow('P,${p.played},${p.fed}');
+      _gate.playout(p.played, p.fed);
+      // Dev-only (BH_MIC_INJECT_AT_MS): the cut-in, once, at a known point of the HEARD voice.
+      if (_inject != null && DevLevers.micInjectAtMs >= 0 && !_injectedOnce && _injectReplyFedStart >= 0 &&
+          p.played >= _injectReplyFedStart + DevLevers.micInjectAtMs * 24 && p.played < p.fed && _injectPos < 0) {
+        _injectedOnce = true;
+        _injectPos = 0;
+        _log('[barge] INJECT scheduled at heard=${p.played - _injectReplyFedStart} samples of the reply');
+      }
       _captions.playout(p);
       _captionTickIfBusy();
     });
@@ -601,13 +666,24 @@ class BithumanRealtimeSession {
       if (enableMic) {
         _micSub = avatar.micStream.listen(_sendMicBytes);
       }
-      if (_devMicFile.isNotEmpty && _inject == null) {
-        final bd = await rootBundle.load(_devMicFile);
-        final bytes = Uint8List.fromList(bd.buffer.asUint8List(bd.offsetInBytes, bd.lengthInBytes & ~1));
-        _inject = Int16List.view(bytes.buffer);
-        _log('[barge] INJECT asset $_devMicFile: ${_inject!.length} samples '
-            '(${(_inject!.length / 24).round()} ms) mixed into the mic ${_devInjectAfter.inSeconds} s into '
-            'every reply from stress turn $_devInjectFromStressTurn');
+      if (_devMicFile.isNotEmpty && _inject == null &&
+          (!(_devMicFile.startsWith('/') || _devMicFile.startsWith('tmp:')) || File(_devPath(_devMicFile)).existsSync())) {
+        final Uint8List bytes;
+        if (_devMicFile.startsWith('/') || _devMicFile.startsWith('tmp:')) {
+          // A file on the device: present = this run injects, absent = it does not.
+          final b = await File(_devPath(_devMicFile)).readAsBytes();
+          bytes = Uint8List.fromList(b.sublist(0, b.length & ~1));
+        } else {
+          final bd = await rootBundle.load(_devMicFile);
+          bytes = Uint8List.fromList(bd.buffer.asUint8List(bd.offsetInBytes, bd.lengthInBytes & ~1));
+        }
+        // An empty file: no cut-in this run.
+        if (bytes.length >= 2) {
+          _inject = Int16List.view(bytes.buffer);
+          _log('[barge] INJECT asset $_devMicFile: ${_inject!.length} samples '
+              '(${(_inject!.length / 24).round()} ms) mixed into the mic ${_devInjectAfter.inSeconds} s into '
+              'every reply from stress turn $_devInjectFromStressTurn');
+        }
       }
 
       await _connectAndConfigure();
@@ -840,6 +916,11 @@ class BithumanRealtimeSession {
   int _micDbgN = 0;
   void _sendMicBytes(Uint8List pcm24kPcm16le) {
     if (!_open || _ws == null || pcm24kPcm16le.isEmpty) return;
+    if (_dMic != null) {
+      _dMic!.add(pcm24kPcm16le);
+      _dumpRow('M,$_dMicN,${pcm24kPcm16le.length ~/ 2}');
+      _dMicN += pcm24kPcm16le.length ~/ 2;
+    }
     var pcm = pcm24kPcm16le;
     final inj = _inject;
     var injectedOnset = false;
@@ -899,10 +980,15 @@ class BithumanRealtimeSession {
       return;
     }
     final hostMs = DateTime.now().millisecondsSinceEpoch;
-    _send({
-      'type': 'input_audio_buffer.append',
-      'audio': base64Encode(pcm),
-    });
+    // The barge gate: while the agent is heard, the residual goes up as silence and a voice
+    // goes up once it has held (the held chunks first, in order). Off: as captured.
+    final out = _gateOn ? _gate.mic(pcm).chunks : <Uint8List>[pcm];
+    for (final c in out) {
+      _send({
+        'type': 'input_audio_buffer.append',
+        'audio': base64Encode(c),
+      });
+    }
     // One line a second in production (the packet count proves the uplink is
     // continuous: +10/s); every packet during a proof run.
     if (_devMicFile.isNotEmpty || _micDbgN % 10 == 0) {
@@ -936,6 +1022,8 @@ class BithumanRealtimeSession {
     }
     _droppingCancelledAudio = true;
     _resetAudioPacing();
+    _dumpRow('E,text_cut,0');
+    _gate.cut();
     _captions.cut(); // before the interrupt: what was heard up to now, not what is discarded
     try {
       await avatar.interrupt(reason: 'text');
@@ -1011,6 +1099,7 @@ class BithumanRealtimeSession {
     // avatar even after we've torn the session down.
     _droppingCancelledAudio = true;
     _resetAudioPacing(); // release any delta parked in a pacing delay
+    _gate.cut();
     _captions.cut();
     _captionTick?.cancel();
     _captionTick = null;
@@ -1030,6 +1119,7 @@ class BithumanRealtimeSession {
     try { await _ws?.sink.close(); } catch (_) {}
     _ws = null;
     try { await avatar.audioStop(); } catch (_) {}
+    await _dumpClose();
     _live = false;
     if (!closeStreams) {
       _emit(_status, RealtimeStatus.closed);
@@ -1077,6 +1167,8 @@ class BithumanRealtimeSession {
         if (b64 == null) return;
         final pcm24kBytes = base64Decode(b64);
         final arrivedMs = DateTime.now().millisecondsSinceEpoch;
+        if (_deltaN == 0 && _injectReplyFedStart < 0) _injectReplyFedStart = _fedTotal;
+        _fedTotal += pcm24kBytes.length ~/ 2;
         if (_deltaN++ == 0) {
           // t0 of time-to-first-audio: the reply's first byte at the transport. The
           // presenter logs the first speech frame it shows ([bhttfa] first speech frame).
@@ -1086,7 +1178,8 @@ class BithumanRealtimeSession {
         }
         _replyLastDeltaMs = arrivedMs;
         _replyAudioSamples += pcm24kBytes.length ~/ 2;
-        if (_inject != null && !_injectArmedThisResponse && _stressTurn >= _devInjectFromStressTurn) {
+        if (_inject != null && DevLevers.micInjectAtMs < 0 && !_injectArmedThisResponse &&
+            _stressTurn >= _devInjectFromStressTurn) {
           _injectArmedThisResponse = true;
           _injectTimer?.cancel();
           _injectTimer = Timer(_devInjectAfter, () {
@@ -1123,9 +1216,16 @@ class BithumanRealtimeSession {
         // the avatar's lipsync queue from the same chunk in the same
         // instant. A/V cannot drift; VP-IO's AEC means the speaker
         // output never feeds back into the mic.
+        if (_dFar != null) {
+          _dFar!.add(pcm24kBytes);
+          _dumpRow('F,$_dFarN,${pcm24kBytes.length ~/ 2}');
+          _dFarN += pcm24kBytes.length ~/ 2;
+        }
+        _gate.far(pcm24kBytes);
         await avatar.playSpeakerPCM(pcm24kBytes);
         break;
       case 'response.created':
+        _dumpRow('E,response_created,0');
         // OpenAI is starting a NEW response — any post-barge backlog
         // is behind us; resume forwarding audio.delta normally.
         _droppingCancelledAudio = false;
@@ -1235,6 +1335,7 @@ class BithumanRealtimeSession {
         // earpiece-mic path has weak AEC and the server fires false
         // speech_started events on agent-self-leak.
         final ssMs = DateTime.now().millisecondsSinceEpoch;
+        _dumpRow('E,speech_started,${evt['audio_start_ms']}');
         _log('[barge] speech_started hostMs=$ssMs audio_start_ms=${evt['audio_start_ms']} '
             'active=$_haveActiveResponse audible=$agentAudible injecting=${_injectPos >= 0}');
         _stressTimer?.cancel();
@@ -1243,6 +1344,7 @@ class BithumanRealtimeSession {
         }
         _droppingCancelledAudio = true;
         _resetAudioPacing(); // drop any delta parked in a pacing delay
+        _gate.cut(); // the agent is cut: nothing of it is heard any more, the uplink is open
         _captions.cut(); // the words heard before the cut, then the host discards the rest
         await avatar.interrupt(reason: 'speech_started');
         _log('[barge] interrupt returned hostMs=${DateTime.now().millisecondsSinceEpoch} '
@@ -1250,6 +1352,7 @@ class BithumanRealtimeSession {
         _emit(_status, RealtimeStatus.userSpeaking);
         break;
       case 'input_audio_buffer.speech_stopped':
+        _dumpRow('E,speech_stopped,${evt['audio_end_ms']}');
         _log('[barge] speech_stopped hostMs=${DateTime.now().millisecondsSinceEpoch} '
             'audio_end_ms=${evt['audio_end_ms']}');
         _emit(_status, RealtimeStatus.userStopped);

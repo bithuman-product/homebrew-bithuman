@@ -229,7 +229,7 @@ Plus catalog helpers (anonymous, no auth):
 
 | Member | Purpose |
 | --- | --- |
-| `BithumanRealtimeSession({apiKey, avatar, model, systemPrompt, voice, vadThreshold, speechReady, echoOnsetGuard, endOnAudioInterruption})` | Construct. `model` defaults to `gpt-realtime` (OpenAI Realtime GA). |
+| `BithumanRealtimeSession({apiKey, avatar, model, systemPrompt, voice, vadThreshold, speechReady, echoOnsetGuard, bargeFloorDb, endOnAudioInterruption})` | Construct. `model` defaults to `gpt-realtime` (OpenAI Realtime GA). `bargeFloorDb`: while the agent is heard, how close (dB) to its voice the microphone must come, for 200 ms, to cut it in; quieter sound is its echo and goes up as silence. Null = the device's default (Android -11, iPhone and macOS -18); under -40 turns the gate off. |
 | `start()` | Open WS, start VP-IO, begin forwarding mic. |
 | `stop()` | Close WS, tear down audio. Single-use; build a new session for the next conversation. |
 | `commitInputAudio()` | End-of-turn marker for non-VAD push-to-talk flows. |

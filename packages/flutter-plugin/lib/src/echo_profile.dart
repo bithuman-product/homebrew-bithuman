@@ -33,7 +33,10 @@ class EchoProfile {
     required this.falsifierTurns,
     required this.source,
     this.onsetGuard = Duration.zero,
-  })  : assert(serverVadThreshold > 0.0 && serverVadThreshold < 1.0,
+    this.bargeFloorDb = -18,
+  })  : assert(bargeFloorDb < 0 && bargeFloorDb >= -40,
+            'the barge floor is a level UNDER the voice heard, in dB'),
+        assert(serverVadThreshold > 0.0 && serverVadThreshold < 1.0,
             'server_vad threshold is a fraction'),
         assert(residualDbfsMax < 0 && residualDbfsMax > -91,
             'a row without a measured residual (dBFS, worst 1 s) is refused'),
@@ -61,6 +64,26 @@ class EchoProfile {
   /// Off on macOS (≤ −54 dBFS worst second, AGC off, 0 / 354 s): there the guard could only
   /// swallow a quiet voice that talks over the greeting from a desk's distance.
   final Duration onsetGuard;
+
+  /// The barge gate's floor on this device (`BargeGate`, 2.6.28): while the agent is HEARD
+  /// (the host's playout) and for 500 ms after, a microphone chunk reaches the server's turn
+  /// detector only if its RMS comes within this many dB of the loudest agent voice heard in that
+  /// time, held for 200 ms; under it, the chunk is the canceller's residual and goes up as
+  /// silence. Per call, the residual measured during the first 3 s the agent is heard (the
+  /// greeting) can raise it, never above -10 dB. `BithumanRealtimeSession.bargeFloorDb` overrides it.
+  ///  * Android -11: the communication path's AEC lets bursts through 11 dB under a -22 dBFS voice
+  ///    at full call volume (Galaxy Z Flip5 15/15, 2026-10-01). Chosen by replaying the gate on the
+  ///    recorded uplinks of 36 Fold5/Flip5 calls (the replay reproduces the device's gate decisions
+  ///    to the millisecond): every injected cut-in got through within +153 ms (+101 ms median), and
+  ///    the false cut-ins that fired while the voice was heard were kept off as often as at -10,
+  ///    which delayed one cut-in by 0.8 s; -8 with the floor raised to -6 per call (the first
+  ///    build) delayed cut-ins by 0.8-1.2 s.
+  ///  * iPhone -18: VP-IO leaves a steady residual of -70..-90 dBFS, 50 dB and more under the
+  ///    voice, so the gate here only keeps that off the uplink and never stands in the way of a
+  ///    person; the canceller's onset (-23..-28 dBFS peaks, 09-28) stays the onset guard's job.
+  ///    Not re-measured on a device for 2.6.28.
+  ///  * macOS -18: the iMac's worst second is -54 dBFS; the row already runs server_vad at 0.7.
+  final double bargeFloorDb;
 
   /// OpenAI `turn_detection.server_vad.threshold` (0..1) sent by BOTH transports.
   ///
@@ -141,6 +164,7 @@ class EchoProfile {
     serverVadThreshold: 0.5,
     vpioAgc: true,
     onsetGuard: Duration(seconds: 8),
+    bargeFloorDb: -18,
     residualDbfsMax: -31,
     residualDbfsMedian: -71,
     measuredOn: 'iPhone 15, built-in speaker, expression-2, VP-IO on, AGC default',
@@ -158,6 +182,7 @@ class EchoProfile {
     device: EchoDeviceClass.android,
     serverVadThreshold: 0.5,
     onsetGuard: Duration(seconds: 8),
+    bargeFloorDb: -11,
     vpioAgc: false, // n/a: MODE_IN_COMMUNICATION + the platform AEC (MicCapture.kt)
     residualDbfsMax: -31,
     residualDbfsMedian: -90,
@@ -178,6 +203,7 @@ class EchoProfile {
     device: EchoDeviceClass.mac,
     serverVadThreshold: 0.7,
     vpioAgc: false,
+    bargeFloorDb: -18,
     residualDbfsMax: -54,
     residualDbfsMedian: -70,
     measuredOn: 'iMac M4, macOS 26.6.2, built-in speakers at 40 %, expression-2 '
