@@ -1,4 +1,4 @@
-## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.30: waits for engines that refuse them)
+## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.31: waits for engines that refuse them)
 
 The plugin's half is in place since 2.6.29; it acts once the engines refuse such a file, which the pinned ones
 (`essence2-android` 0.9.1, Essence 2 `essence2-v1.15.2`) do not. Every live Essence 2 avatar was re-published with
@@ -12,6 +12,30 @@ the mouth-corner fix on 2026-10-01.
   with the engine's sentence, instead of a bare `rc=-2 — idle only`. Download the file again
   (`GET /v1/agent/{code}/model/download`). (Essence2Kit's `Essence2Download.identity(agentCode:)` +
   `Essence2Engine.create` refresh a downloaded file by themselves.)
+
+## 2.6.31 — 2026-10-02 — iOS / macOS: Essence 2 engine v1.15.3; the voice-gated presenter is the default again, with a stall guard
+
+Tag `flutter-plugin-v2.6.31`. iOS / macOS Essence 2 `essence2-v1.15.2` -> **`essence2-v1.15.3`** (Swift package
+2.20.0); Expression 2 `v2.19.2`, macOS `enginecore-v1.0.2`; Android `essence2-android` 0.9.1, `expression2-android`
+0.5.2 (unchanged).
+
+* **Essence 2 on iOS and macOS: the voice-gated presenter is the default again, with a stall guard.** Each frame's
+  40 ms of voice is released when the frame is shown (2.6.29's presenter); now, when a display tick has no frame
+  while the reply's voice is waiting, that tick's voice is released anyway and the picture catches up (the frames
+  whose voice already played are skipped), so the voice never waits more than one tick (40 ms). Each firing logs
+  `[bhvoice] stall-guard`. **Correction to 2.6.30:** 2.6.30 made the voice on its own clock the default and said
+  that with it a slow engine is "a late face, never a broken voice"; that was not measured on a slow Apple device.
+  Measured on the iPhone 18 Pro, the shipped 2.6.29 voice-gated presenter had no voice gaps (7 Sofia replies, 0 gaps
+  of 40 ms or more, lip-sync about 18 ms), while the voice on its own clock needs a 200 ms cushion there (gaps of
+  160–200 ms after a barge-in without it) and starts the voice later. With this release on that phone (Sofia, 4
+  replies; Wise Pup, 2): 0 voice gaps of 40 ms or more, lip-sync 14–17 ms, and the first sound 189–358 ms after the
+  reply's first audio for Sofia (476–592 ms with the voice on its own clock).
+* **`BithumanAvatar.load(..., voiceClock: true)` (iOS, macOS, Essence 2):** opts in to 2.6.30's presenter: the voice
+  starts 200 ms after the reply's first frame and plays on its own clock, and each frame is shown as its sound is
+  heard. Ignored on Android and by Expression 2.
+* **Skip-ahead on iOS and macOS now links** against `essence2-v1.15.3`. It stays opt-in (`skipAhead: true`) and
+  acts with `voiceClock: true`; on the iPhone 18 Pro it rarely has anything to skip.
+* Expression 2 on iOS and macOS writes the same per-reply `[bhvoice] REPLY` log line (voice gaps, first sound, A/V).
 
 ## 2.6.30 — 2026-10-02 — Essence 2's voice no longer waits for the picture on iPhone and Mac; downloadAgentImx fetches today's catalog
 
