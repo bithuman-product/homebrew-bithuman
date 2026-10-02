@@ -980,8 +980,9 @@ class AvatarPlayer(
     // Nothing that carries voice is ever dropped, every speech unit keeps its own samples, and the
     // picture is still clocked on the DAC, so A/V sync is untouched; the idle (or held) frames of
     // the dropped silence are the only frames not shown. `debug.bh.speechstart.wait=1` (debuggable host only) restores the wait.
+    // ★Not for an engine that needs that silence as its lead ([AvatarEngine.dropsLeadingSilence]: essence-2 waits, 2.6.29).
     private val trackLock = Any()
-    private val speechStartWait: Boolean = debuggable && devInt("debug.bh.speechstart.wait") == 1
+    private val speechStartWait: Boolean = (debuggable && devInt("debug.bh.speechstart.wait") == 1) || !avatar.dropsLeadingSilence
     private var silentWritten = 0
     @Volatile private var nSpeechStarts = 0
     @Volatile private var nSilentSkipped = 0
