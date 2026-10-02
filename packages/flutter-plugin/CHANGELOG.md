@@ -8,6 +8,13 @@ engines now refuse a file published before it.
   from its cache; the load downloads the changed parts (not the whole identity) and opens the current one. If the
   engine still refuses (a check that passed), the load fetches it again once and opens it — a second refusal is the
   load's error.
+* **Android: a reply is heard sooner (about 0.35 s on Expression 2).** A reply's first words no longer
+  wait for the silence already queued for the speaker while the character was idle: when everything
+  the speaker still holds is silence, it is dropped and the reply starts at once, and its first frame
+  goes up when the speaker reports that voice playing, as before. Measured on a Galaxy Z Fold5 with
+  Expression 2 (first voice byte to first heard sample, median): 1.24 s -> 0.91 s with the next
+  `expression2-android` (1.76 s with 0.5.2). Nothing that carries the voice is dropped; only idle
+  frames of the skipped silence are not shown. Essence 2 runs the same path (not yet measured).
 * **iOS / macOS: an out-of-date file is named in the log** (`[essence2] OUT-OF-DATE AVATAR FILE … download it again`)
   with the engine's sentence, instead of a bare `rc=-2 — idle only`. Download the file again
   (`GET /v1/agent/{code}/model/download`). (Essence2Kit's `Essence2Download.identity(agentCode:)` +
