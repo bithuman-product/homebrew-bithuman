@@ -1,4 +1,4 @@
-## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.29: waits for engines that refuse them)
+## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.30: waits for engines that refuse them)
 
 The plugin's half is in place since 2.6.29; it acts once the engines refuse such a file, which the pinned ones
 (`essence2-android` 0.9.1, Essence 2 `essence2-v1.15.2`) do not. Every live Essence 2 avatar was re-published with
@@ -12,6 +12,37 @@ the mouth-corner fix on 2026-10-01.
   with the engine's sentence, instead of a bare `rc=-2 — idle only`. Download the file again
   (`GET /v1/agent/{code}/model/download`). (Essence2Kit's `Essence2Download.identity(agentCode:)` +
   `Essence2Engine.create` refresh a downloaded file by themselves.)
+
+## 2.6.30 — 2026-10-02 — Essence 2's voice no longer waits for the picture on iPhone and Mac; downloadAgentImx fetches today's catalog
+
+Tag `flutter-plugin-v2.6.30`. Engines unchanged: iOS / macOS Expression 2 `v2.19.2`, Essence 2 `essence2-v1.15.2`,
+macOS `enginecore-v1.0.2`; Android `essence2-android` 0.9.1, `expression2-android` 0.5.2.
+
+* **Essence 2's voice plays on its own clock (iOS, macOS).** Until now the Apple presenter released each frame's
+  40 ms of voice only when that frame was shown, so an engine running behind was heard as a choppy voice. The voice
+  now opens a short cushion after a reply's first frame is ready (200 ms) and then plays without waiting; each frame
+  is shown when its audio is heard. A frame whose audio has gone by is dropped while a newer one is ready, and the
+  newest is shown even when late, so a slow engine is a late face, never a broken voice or a frozen face. Measured on
+  an M4 Mac (Sofia, greetings and barge-ins, 9 replies a side): A/V offset within 3 ms (8 ms before), 0 voice gaps,
+  and the ~10 sub-2 ms breaks per reply the per-frame release left are gone; the first word comes the cushion later.
+  One `[bhvoice] REPLY` log line per reply carries the voice gaps, first sound and A/V offset. Expression 2 is
+  unchanged.
+* **Skip-ahead on iOS and macOS, with an Essence 2 engine that has it.** `BithumanAvatar.load(..., skipAhead: true)`
+  (Android's option, off by default) now also reaches Apple: the presenter tells the engine where the voice is and
+  places each frame by the engine's own index. The pinned Essence 2 engine (`essence2-v1.15.2`) has no skip-ahead, so
+  on Apple the option takes effect with the next engine (essence2-apple v1.15.3); the plugin compiles the calls in
+  only when the engine it is built with has them.
+* **`downloadAgentImx` fetches today's catalog.** It follows the door's redirect to the signed file URL (redirects
+  issued by a bitHuman door, or to a host on `allowedHosts`; https only), takes `apiSecret:` (the key goes to the
+  door only, never to the file host), and says what it can download: a gallery Essence 2 character anonymously, and
+  any character the key's account owns; another account's Essence 1 / Expression 1 character is refused with an
+  explanation (401 / 404). A kept file opens at once; whether it is still the published one is checked in the
+  background and a changed file downloaded for the next open; a kept Essence 2 file from before the 2026-10-01
+  re-publish is fetched again once. `BithumanAgent` gains `modelType`; `kBithumanModelHosts` is exported.
+* **Android: skip-ahead stays off by default.** On the Galaxy Z Flip5 (12 runs a side, a cool and a warm phone),
+  skip-ahead showed more of a reply's frames than without it (greetings 83% vs 68%, barge-ins 73% vs 69%) but three
+  of its runs still had a second of frozen face, so it stays opt-in (`skipAhead: true`).
+* `scripts/bootstrap.sh`: `ESSENCE2_XCF_DIR=<dir>` stages a candidate Essence 2 engine.
 
 ## 2.6.29 — 2026-10-02 — Essence 2 keeps moving while it talks (Android); a model the engine refuses ends the call; a faster voice start (Expression 2 only)
 
