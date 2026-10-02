@@ -19,8 +19,16 @@ final class Expression2PluginEngine: BithumanEngine {
 
   var width: Int { engine.width }
   var height: Int { engine.height }
-  func warmUp(warmSpeech: [Float]?) { engine.warmUp(warmSpeech: warmSpeech) }
+  func warmUp(warmSpeech: [Float]?) { engine.warmUp(warmSpeech: warmSpeech); warmed = true }
   var isReady: Bool { engine.isReady }
+  /// warmUp has returned (it cannot throw: a refusal is a warm-up that ended without readiness).
+  private var warmed = false
+  /// MODEL_REJECTED (2.6.29): the warm-up returned without readiness and metering did not refuse
+  /// — the identity's model files would not load (ModelRefusal.swift). nil before warmUp returns.
+  var modelRefusal: BithumanModelRefusal? {
+    BithumanModelRefusal.expression2(warmed: warmed, isReady: engine.isReady,
+                                     meteringRefusal: engine.meteringRefusal, reason: nil)
+  }
   func shutdown() { engine.shutdown() }
   var idle: [UInt8]? { engine.idle }
   func feed(_ samples: [Float]) { engine.feed(samples) }

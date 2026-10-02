@@ -45,6 +45,11 @@
 // in a burst, so only the host knows where the voice is, and captions released
 // on arrival ran seconds ahead of it (src/spoken_captions.dart).
 //
+// ★2.6.29 ADDED ONE: [VoiceHost.modelRejections]. An engine that refuses the model file it
+// was asked to render (an Essence 2 avatar file published before the engine's current format)
+// left a still face and a session that talked on behind it. It is terminal, like a paywall:
+// the session ends with `MODEL_REJECTED` on its errorStream.
+//
 // The engine side of the same line is `src/engine_protocol.dart`; the native
 // side is `Protocol/LipsyncSink.swift` and `Protocol/BithumanEngine.swift`.
 //
@@ -157,6 +162,61 @@ abstract class VoiceHost {
   /// (`BithumanRealtimeSession.spokenTranscriptStream`). A host that cannot tell
   /// may never emit; the session then estimates from the handover.
   Stream<BithumanPlayout> get speechPlayout;
+
+  // ── the engine refusing the model ──────────────────────────────────────────
+
+  /// The engine refused to create from the model file it was given (see
+  /// [BithumanModelRejected]). Terminal for this host: a
+  /// `BithumanRealtimeSession` on it ends with `MODEL_REJECTED` on its
+  /// errorStream, the same teardown as a paywall. A host that has already
+  /// refused replays the refusal to every new listener; a host whose engine
+  /// opened never emits.
+  Stream<BithumanModelRejected> get modelRejections;
+}
+
+/// The on-device engine refused to create from the model file (`MODEL_REJECTED`).
+///
+/// - **Essence 2:** the avatar file was published before the engine's current
+///   format (`be_essence2_create` -4 on Apple; the same refusal by its sentence on
+///   Android, after the plugin fetched the file again once), or the engine could
+///   not open it (-2).
+/// - **Expression 2:** the engine refused the model's files at create (Android)
+///   or its warm-up could not load them (Apple).
+///
+/// Download the avatar again (or update the app) — retrying the same file
+/// cannot heal it. Thrown by `BithumanAvatar.load` when the refusal comes
+/// while it runs; otherwise reported on [VoiceHost.modelRejections].
+class BithumanModelRejected implements Exception {
+  const BithumanModelRejected({required this.engine, this.nativeCode, required this.message});
+
+  /// The error code, the same one a realtime session reports (`RealtimeSessionError.code`).
+  static const String errorCode = 'MODEL_REJECTED';
+  String get code => errorCode;
+
+  /// `essence2` or `expression2`.
+  final String engine;
+
+  /// The engine's own number for the refusal (`be_essence2_create`'s return
+  /// code; -4 = out-of-date avatar file), or null when the engine has none.
+  final int? nativeCode;
+
+  /// What refused, with the native code and the engine's own sentence.
+  final String message;
+
+  /// The native push / error details `{engine, nativeCode, message}`; null when it is not one.
+  static BithumanModelRejected? fromMap(Map<dynamic, dynamic>? m) {
+    final msg = m?['message'];
+    if (msg is! String || msg.isEmpty) return null;
+    final e = m?['engine'], c = m?['nativeCode'];
+    return BithumanModelRejected(
+      engine: e is String && e.isNotEmpty ? e : 'unknown',
+      nativeCode: c is int ? c : null,
+      message: msg,
+    );
+  }
+
+  @override
+  String toString() => '$errorCode: $message';
 }
 
 /// How much of the agent's audio has been heard, as the voice host reports it

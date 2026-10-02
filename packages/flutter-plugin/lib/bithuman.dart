@@ -14,7 +14,7 @@ import 'package:flutter/services.dart';
 
 import 'src/voice_host.dart';
 
-export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout;
+export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout, BithumanModelRejected;
 
 const _channel = MethodChannel('ai.bithuman.avatar');
 
@@ -83,6 +83,11 @@ class BithumanAvatar implements VoiceHost {
           if (args?['micGen'] != avatar._micGen) return null;
           final p = BithumanPlayout.fromMap(args);
           if (p != null && !avatar._playoutController.isClosed) avatar._playoutController.add(p);
+        case 'modelRejected':
+          // The engine refused the model after load returned (Apple Expression 2: its warm-up
+          // could not load the files). Terminal: see [modelRejections].
+          final r = BithumanModelRejected.fromMap(args);
+          if (r != null) avatar._rejected(r);
       }
       return null;
     });
@@ -128,13 +133,25 @@ class BithumanAvatar implements VoiceHost {
     // The agent dir set just before (setExpression2AgentDir) is in place first.
     final pendingDir = _agentDirPending;
     if (pendingDir != null) await pendingDir;
-    final id = await _channel.invokeMethod<int>('load', {
-      'path': imxPath,
-      if (apiSecret != null && apiSecret.isNotEmpty) 'apiSecret': apiSecret,
-      'engine': engine,
-      'motionDir': ?motionDir,
-      'chunk': chunk,
-    });
+    final int? id;
+    try {
+      id = await _channel.invokeMethod<int>('load', {
+        'path': imxPath,
+        if (apiSecret != null && apiSecret.isNotEmpty) 'apiSecret': apiSecret,
+        'engine': engine,
+        'motionDir': ?motionDir,
+        'chunk': chunk,
+      });
+    } on PlatformException catch (e) {
+      // The engine refused the model file (2.6.29): a typed, terminal error carrying the native
+      // code, not a generic load failure — retrying the same file cannot heal it.
+      if (e.code == BithumanModelRejected.errorCode) {
+        final d = e.details is Map ? e.details as Map : const {};
+        throw BithumanModelRejected.fromMap({...d, 'message': e.message ?? d['message']}) ??
+            BithumanModelRejected(engine: engine, message: e.message ?? 'the engine refused the model file');
+      }
+      rethrow;
+    }
     if (id == null) throw const BithumanAvatarException('load returned null');
     final avatar = BithumanAvatar._(id);
     _instances[id] = avatar;
@@ -666,6 +683,34 @@ class BithumanAvatar implements VoiceHost {
     return _playoutController.stream;
   }
 
+  final StreamController<BithumanModelRejected> _rejectionController =
+      StreamController<BithumanModelRejected>.broadcast();
+  BithumanModelRejected? _modelRejection;
+
+  /// The engine's refusal of this avatar's model, once it refused; null while it has not.
+  BithumanModelRejected? get modelRejection => _modelRejection;
+
+  /// The engine refused this avatar's model file after [load] returned (see
+  /// [BithumanModelRejected]; a refusal while [load] runs is thrown by it instead). A
+  /// listener that subscribes after the refusal receives it at once. [ready] completes
+  /// when it comes ([isReady] stays false), so nothing waits on an engine that will not
+  /// start. `BithumanRealtimeSession` ends itself with `MODEL_REJECTED` on its errorStream.
+  @override
+  Stream<BithumanModelRejected> get modelRejections {
+    final r = _modelRejection;
+    if (r != null) return Stream<BithumanModelRejected>.value(r);
+    return _rejectionController.stream;
+  }
+
+  void _rejected(BithumanModelRejected r) {
+    if (_modelRejection != null || _disposed) return;
+    _modelRejection = r;
+    _readyPoll?.cancel();
+    _readyPoll = null;
+    if (!_readyCompleter.isCompleted) _readyCompleter.complete();
+    if (!_rejectionController.isClosed) _rejectionController.add(r);
+  }
+
   /// Drop the underlying native runtime. Idempotent.
   Future<void> dispose() async {
     if (_disposed) return;
@@ -678,6 +723,7 @@ class BithumanAvatar implements VoiceHost {
     unawaited(_pipController.close());
     unawaited(_interruptionController.close());
     unawaited(_playoutController.close());
+    unawaited(_rejectionController.close());
     await _channel.invokeMethod('dispose', {'textureId': textureId});
   }
 }

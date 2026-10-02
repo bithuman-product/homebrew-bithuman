@@ -228,7 +228,27 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
           ])
         }
       }
+      // MODEL_REJECTED after load returned (Expression 2: its warm-up could not load the files):
+      // pushed to Dart, which ends the session on it (2.6.29). Installed BEFORE startRendering.
+      texture.onModelRejected = { [weak self] r in
+        DispatchQueue.main.async {
+          var args = r.details
+          args["textureId"] = textureId
+          self?.channel?.invokeMethod("modelRejected", arguments: args)
+        }
+      }
       texture.startRendering()
+      // ★MODEL_REJECTED (2.6.29): the engine refused its file while this load created it (Essence 2:
+      // be_essence2_create -2 / -4). Until now the texture stayed up with a gray still face and the
+      // app waited on a readiness that never came; now the load fails with the engine's code.
+      if let refusal = texture.modelRefusal {
+        NSLog("[BithumanAvatar] load id=%lld engine=%@ MODEL_REJECTED: %@", textureId, texture.engineKind, refusal.message)
+        textures.removeValue(forKey: textureId)
+        texture.shutdown()
+        textureRegistry.unregisterTexture(textureId)
+        result(FlutterError(code: BithumanModelRefusal.code, message: refusal.message, details: refusal.details))
+        return
+      }
       NSLog("[BithumanAvatar] load id=%lld engine=%@ path=%@", textureId, texture.engineKind, path)
       result(textureId)
 
@@ -1124,7 +1144,8 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     loadFixtureAndRuntime()
     var ready = false
     #if os(macOS) || os(iOS)
-    ready = avatar != nil
+    // An engine that refused its file at create is not started (the load answers MODEL_REJECTED).
+    ready = avatar != nil && avatar?.modelRefusal == nil
     #endif
     if ready {
       renderQueue.async { [weak self] in self?.startTimer() }
@@ -1276,6 +1297,16 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
   /// plugin forwards it to Dart ("frameDimsChanged") so the canvas lays out
   /// with the stream. Called on renderQueue; the plugin hops to main itself.
   var onFrameDimsChanged: ((Int, Int) -> Void)?
+  /// The engine refused its model after load returned (Expression 2's warm-up): MODEL_REJECTED.
+  var onModelRejected: ((BithumanModelRefusal) -> Void)?
+  /// The engine's refusal of its model file, known at create (Essence 2) — see ModelRefusal.swift.
+  var modelRefusal: BithumanModelRefusal? {
+    #if os(macOS) || os(iOS)
+    return avatar?.modelRefusal
+    #else
+    return nil
+    #endif
+  }
   #if os(iOS)
   /// System-PiP tee: when set (AvatarPiP active), every published pixel
   /// buffer is also handed here (on renderQueue) for the sample-buffer
@@ -1476,10 +1507,16 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
     DispatchQueue.global(qos: .userInitiated).async { [weak self, warmGroup] in
       rt.warmUp(warmSpeech: warmSpeech)
       let idleFrame = rt.idle
+      let refusal = rt.modelRefusal   // read before the engine may be released (below)
       // Out of the engine: a dispose that came during the warm-up releases it now (shutdown()).
       // Nothing below touches the engine except the dev levers.
       warmGroup.leave()
       guard let self = self, !self.isShutdown else { return }   // disposed while warming
+      if let r = refusal {
+        // MODEL_REJECTED (2.6.29): the files would not load. Dart ends the session on it.
+        NSLog("[embody] MODEL_REJECTED — %@", r.message)
+        self.onModelRejected?(r)
+      }
       guard let idle = idleFrame else {
         NSLog("[embody] warmUp produced no idle frame"); return
       }

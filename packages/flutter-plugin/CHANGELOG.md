@@ -1,4 +1,30 @@
-## Unreleased — avatar files published before the mouth-corner fix
+## Unreleased — Essence 2 keeps its face moving on a slow phone (Android); an engine that refuses its model file ends the call
+
+Ships with `essence2-android` 0.9.1 (maven.bithuman.ai).
+
+* **Sofia and every Essence 2 character no longer freeze while talking on a slow phone (Android).** On a phone that
+  rendered below the 25 frames a second the voice needs (a Galaxy Z Flip5 / Z Fold5 under load), every late frame was
+  dropped and the face froze behind the voice. `essence2-android` 0.9.1 keeps its threads on the fast cores, and the
+  plugin now tells the engine where the voice is (`Essence2Avatar.setPlayoutPosition`, on every audio unit the player
+  commits): a frame whose audio has already been heard is not rendered, and the newest one is. Each frame shown is
+  placed on its own audio (`lastFrameIndex`), so the lips stay in step when frames are skipped, and the driver video
+  steps over a skipped frame too, so idle resumes where the picture is. The skipped count is in the player's `PROD`
+  log line (`skipped=`) and the engine's `[le-skip]` line.
+* **New error code `MODEL_REJECTED` (iOS, macOS, Android).** When the on-device engine refuses to create from the
+  model file — an Essence 2 avatar file published before the engine's current format (`be_essence2_create` -4), a
+  file it cannot open (-2), or an Expression 2 model whose files it refuses — `BithumanAvatar.load` throws
+  `BithumanModelRejected` (`code`, `engine`, `nativeCode`, and a `message` with the engine's own sentence), and a
+  `BithumanRealtimeSession` on that avatar ends with `MODEL_REJECTED` on `errorStream`, torn down exactly like a
+  `PAYWALL`. Until now iOS and macOS showed a still face and never became ready, and Android failed the load as
+  `load_failed`. Expression 2 on iOS / macOS reports its refusal after `load` (its warm-up runs later) through
+  `BithumanAvatar.modelRejections`; `ready` completes then. **Source change for custom voice hosts:** `VoiceHost`
+  gains `modelRejections` (a host without an engine may return an empty stream).
+* **The coverage log counts what the viewer sees (Android).** `COVERAGE … cov=` is now unique speech frames shown ÷
+  frames due for the audio played; it used to count a held frame shown again under its audio, and read 86-93% on a
+  frozen face. One `bhcov UTT` line per utterance, and a `bhcov FROZEN` line when a second of voice showed fewer than
+  half its frames.
+
+## Unreleased (earlier) — avatar files published before the mouth-corner fix
 
 Ships with `essence2-android` > 0.9.0 and Essence 2 > `essence2-v1.15.2` (both carry the refusal and the
 refresh). Every live Essence 2 avatar was re-published with the mouth-corner fix on 2026-10-01; the
