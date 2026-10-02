@@ -82,6 +82,18 @@ class PlayoutClock(
             return if (nt > 0 && n > nt) (n % nt).toInt() else n.toInt()
         }
 
+        /**
+         * Whether the player's clock reaches the engine for this session. A debuggable host's lever
+         * `debug.bh.e2.clock` decides first (1 on, 2 off: one APK, both arms of an A/B), then the
+         * app's load option (`BithumanAvatar.load(skipAhead:)`), then [default]. Off = the engine never
+         * hears a position and renders every frame in order, exactly as before 2.6.29.
+         */
+        fun enabled(lever: Int, option: Boolean?, default: Boolean): Boolean = when (lever) {
+            1 -> true
+            2 -> false
+            else -> option ?: default
+        }
+
         /** The ordinal the NEXT frame would have without skipping: one past the frame just delivered. */
         fun nextDelivered(sdkIndex: Long, delivered: Long): Long = if (sdkIndex >= 0) sdkIndex + 1 else delivered + 1
     }

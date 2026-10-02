@@ -164,7 +164,12 @@ class Expression2Engine(private val avatar: Expression2Avatar) : AvatarEngine {
  * SDK call itself runs outside it (the SDK serialises feed / pull / reset on locks of
  * its own), so a [reset] waits for at most the render in flight, as it did before.
  */
-class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = true) : AvatarEngine {
+class Essence2Engine(
+    private val avatar: Essence2Avatar,
+    zeroCopy: Boolean = true,
+    /** Skip-ahead: the player's clock reaches the engine (see [PlayoutClock.enabled]); false = in-order rendering. */
+    val playoutClock: Boolean = SKIP_AHEAD_DEFAULT,
+) : AvatarEngine {
     override val name = "essence2-android"
     /**
      * ★ZERO-COPY DELIVERY (plugin 2.6.19, essence2-android 0.8.0). The copy path moves every frame
@@ -404,7 +409,7 @@ class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = tru
     override val queuedFrames get() = queued + ready.size
     override val pendingAudioSlices get() = -1
     override fun stats(): EngineStats = EngineStats(pullNanos / 1e6, utterances, framesTotal)
-    override fun setPlayout(samples16k: Long) = clock.set(samples16k)
+    override fun setPlayout(samples16k: Long) { if (playoutClock) clock.set(samples16k) }
     override val skippedFrames: Long get() = runCatching { avatar.skippedFrames }.getOrDefault(-1L)
     override val idle: IdleClip? = if (nt > 0) idleClip else null
     override fun close() {
@@ -440,6 +445,12 @@ class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = tru
     }
 
     companion object {
+        /**
+         * Skip-ahead's default when neither the app (`BithumanAvatar.load(skipAhead:)`) nor a debug lever
+         * says. OFF in 2.6.29: essence2-android 0.9.1's placement and forward-only idle walk ship to
+         * everyone; the clock is opt-in until the on/off pairs on both foldables are clean.
+         */
+        const val SKIP_AHEAD_DEFAULT = false
         /** essence-2's rate: one motion frame per 640 samples at 16 kHz (`le_a2x` HOP). */
         const val FPS = 25
         const val HOP = 640L

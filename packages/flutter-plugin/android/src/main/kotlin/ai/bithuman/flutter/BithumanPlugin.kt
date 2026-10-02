@@ -347,6 +347,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val code = call.argument<String>("path")
         val engine = call.argument<String>("engine") ?: "expression2"
         val secret = call.argument<String>("apiSecret")
+        val skipAhead = call.argument<Boolean>("skipAhead")
         val essence2 = engine == "essence2" || engine == "elevate"
         if (code.isNullOrBlank() || !(essence2 || engine == "expression2" || engine == "embody")) {
             return result.error("unsupported",
@@ -368,7 +369,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val t0 = handle.t0
         Thread({
             try {
-                val avatar: AvatarEngine = if (essence2) loadEssence2(code, secret, t0, handle) else loadExpression2(code, secret, t0, handle)
+                val avatar: AvatarEngine = if (essence2) loadEssence2(code, secret, t0, handle, skipAhead) else loadExpression2(code, secret, t0, handle)
                 // A cancel that came while the engine was being created: close it, start no player.
                 if (!handle.finish()) {
                     runCatching { avatar.close() }
@@ -453,7 +454,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
      * the SDK's store — the shared audio frontend among them — and the credential also
      * arms the engine's own meter, which refuses every frame without one (0.5.7).
      */
-    private fun loadEssence2(code: String, secret: String?, t0: Long, handle: LoadHandle): AvatarEngine {
+    private fun loadEssence2(code: String, secret: String?, t0: Long, handle: LoadHandle, skipAhead: Boolean? = null): AvatarEngine {
         if (secret.isNullOrBlank()) throw IllegalArgumentException(
             "essence-2 on Android needs the app's credential: members are served through the metered door and every frame is metered")
         Essence2Credential.set(secret)   // 0.5.15: the one setter for the door and the meter
@@ -509,10 +510,16 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         // same-bytes A/B, and only a DEBUGGABLE host app honours it (see AvatarPlayer.debuggable).
         val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         val forceCopy = debuggable && AvatarPlayer.devInt("debug.bh.e2.copy") == 1
-        val e = Essence2Engine(avatar, zeroCopy = !forceCopy)
+        // Skip-ahead (2.6.29): the player's clock reaches the engine unless switched off — a debug lever
+        // first (debug.bh.e2.clock 1/2, debuggable hosts only), then the app's load option, then the default.
+        val clockLever = if (debuggable) AvatarPlayer.devInt("debug.bh.e2.clock") else 0
+        val clockOn = PlayoutClock.enabled(clockLever, skipAhead, Essence2Engine.SKIP_AHEAD_DEFAULT)
+        val e = Essence2Engine(avatar, zeroCopy = !forceCopy, playoutClock = clockOn)
         Log.i(TAG, "avatar ready ${avatar.width}x${avatar.height} (essence-2, ${e.fps} fps, driver ${avatar.targetFrames} frames" +
             " in place, delivery ${if (e.hardwareFrames) "zero-copy (${Essence2Engine.HW_SLOTS} hardware buffers)" else "copy"}" +
-            "${if (forceCopy) ", debug.bh.e2.copy=1" else ""}) +${(System.nanoTime() - t0) / 1_000_000} ms")
+            "${if (forceCopy) ", debug.bh.e2.copy=1" else ""}, skip-ahead clock ${if (clockOn) "on" else "off"}" +
+            " (${when { clockLever == 1 || clockLever == 2 -> "debug.bh.e2.clock=$clockLever"; skipAhead != null -> "load option"; else -> "default" }})" +
+            ") +${(System.nanoTime() - t0) / 1_000_000} ms")
         if (hit != null) revalidateLater(store, code)
         return e
     }
