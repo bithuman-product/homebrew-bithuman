@@ -271,6 +271,93 @@ void main() {
     expect(r.events.where((e) => e.reply == 1 && e.text.contains('eight')), isEmpty);
   });
 
+  // ★2.6.28: a reply that stopped part-way (response.done cancelled/incomplete, or superseded by
+  // the next reply after a reconnect) has ALL its transcript but only some of its audio. The
+  // proportional mapping used to release the whole transcript once the received audio was heard.
+  /// Hands [frac] of [s]'s audio and ALL of its text (the transcript runs ahead), then stops.
+  void partialBurst(Rig r, Script s, double frac, {String? id}) {
+    r.cap.replyStarted(id);
+    final chunk = kRate ~/ 10;
+    final total = (s.samples * frac).round();
+    var handed = 0;
+    final ws = s.text.split(' ');
+    for (var i = 0; i < ws.length; i++) {
+      r.cap.text(i == 0 ? ws[i] : ' ${ws[i]}', id);
+    }
+    while (handed < total) {
+      final n = (total - handed).clamp(0, chunk);
+      r.hand(n, id);
+      handed += n;
+      r.step();
+    }
+  }
+
+  Script calib() => Script('Calibration words spoken whole at the voice rate.');
+  final partialText = Script('Alpha bravo charlie delta echo foxtrot golf hotel india juliet '
+      'kilo lima mike november oscar papa quebec romeo sierra tango.');
+
+  void calibrate(Rig r) {
+    burst(r, calib(), id: 'c');
+    for (var i = 0; i < 600; i++) {
+      r.step();
+    }
+    expect(r.events.last.isFinal, isTrue);
+  }
+
+  test('a reply cancelled part-way releases only the words its audio carried', () {
+    final r = Rig();
+    calibrate(r);
+    final heardFrac = 0.4;
+    partialBurst(r, partialText, heardFrac, id: 'p');
+    r.cap.replyDone('p', false); // response.done status=cancelled
+    for (var i = 0; i < 800; i++) {
+      r.step();
+    }
+    final fin = r.events.lastWhere((e) => e.reply == 2);
+    expect(fin.isFinal, isTrue);
+    expect(fin.interrupted, isTrue, reason: 'it ended short of its transcript');
+    final voiced = partialText.wordsHeard((partialText.samples * heardFrac).round());
+    expect(words(fin.text), lessThanOrEqualTo(voiced),
+        reason: 'never a word whose audio did not arrive (${fin.text})');
+    expect(words(fin.text), greaterThanOrEqualTo(voiced - 2), reason: 'and not far behind it');
+  });
+
+  test('a reply superseded mid-way (a reconnect lost its done) is capped the same way', () {
+    final r = Rig();
+    calibrate(r);
+    partialBurst(r, partialText, 0.5, id: 'p');
+    r.cap.replyStarted('next'); // the server's next reply: no done for 'p' ever comes
+    for (var i = 0; i < 800; i++) {
+      r.step();
+    }
+    final fin = r.events.lastWhere((e) => e.reply == 2);
+    expect(fin.isFinal, isTrue);
+    expect(words(fin.text), lessThanOrEqualTo(partialText.wordsHeard((partialText.samples * 0.5).round())));
+    expect(fin.text.contains('tango'), isFalse);
+  });
+
+  test('a cancelled reply with no audio at all releases nothing; a whole one superseded stays whole',
+      () {
+    final r = Rig();
+    r.cap.replyStarted('a');
+    r.cap.text('Words that were never voiced.', 'a');
+    r.cap.replyDone('a', false);
+    expect(r.events.last.reply, 1);
+    expect(r.events.last.text, '');
+    expect(r.events.last.isFinal, isTrue);
+    // A reply whose text and audio both completed is whole even if its done event was lost.
+    final b = Script('Complete before the next one started.');
+    burst(r, b, id: 'b', done: false);
+    r.cap.textDone('b');
+    r.cap.replyStarted('c');
+    for (var i = 0; i < 600; i++) {
+      r.step();
+    }
+    final fin = r.events.lastWhere((e) => e.reply == 2);
+    expect(fin.text, b.text);
+    expect(fin.interrupted, isFalse);
+  });
+
   test('BithumanPlayout.fromMap: played is clamped to fed; malformed pushes are refused', () {
     expect(BithumanPlayout.fromMap({'played': 10, 'fed': 5})!.played, 5);
     expect(BithumanPlayout.fromMap({'played': 3, 'fed': 5})!.caughtUp, isFalse);

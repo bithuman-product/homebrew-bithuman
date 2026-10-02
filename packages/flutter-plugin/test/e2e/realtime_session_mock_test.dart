@@ -347,6 +347,52 @@ void main() {
     await sub.cancel();
   });
 
+  // ★2.6.28. A terminal error used to clear `_open` and nothing else, and stop() returns early
+  // on `!_open`: the native microphone and speaker stayed on, the captions were never cut, the
+  // playout subscription and the 50 ms caption tick ran on, and no controller was closed.
+  test('relay: PAYWALL is terminal and tears the session down whole (audio, captions, streams)',
+      () async {
+    final conn = await connect();
+    final errors = <RealtimeSessionError>[];
+    session.errorStream.listen(errors.add);
+    var statusDone = false, spokenDone = false, levelDone = false;
+    session.statusStream.listen((_) {}, onDone: () => statusDone = true);
+    final spoken = <BithumanSpokenText>[];
+    session.spokenTranscriptStream.listen(spoken.add, onDone: () => spokenDone = true);
+    session.botLevelStream.listen((_) {}, onDone: () => levelDone = true);
+    // A reply in flight: its captions are open when the relay ends the session.
+    await conn.sendResponse(transcript: 'one two three four five', chunks: 5, done: false);
+    await _waitFor(() => fake.callCount('playSpeakerPCM') >= 5);
+    final stopsBefore = fake.callCount('audioStop');
+    conn.send({
+      'type': 'error',
+      'error': {'code': 'PAYWALL', 'message': 'no Live minutes left'},
+    });
+    await conn.close(1008);
+    await _waitFor(() => statusDone && spokenDone && levelDone);
+    expect(errors.map((e) => e.code), ['PAYWALL']);
+    expect(statuses.last, RealtimeStatus.error, reason: 'the error is the last status');
+    expect(fake.callCount('audioStop'), stopsBefore + 1, reason: 'the microphone and speaker are off');
+    expect(fake.callCount('interrupt'), greaterThanOrEqualTo(1), reason: 'the reply in flight is cut');
+    expect(spoken.isNotEmpty && spoken.last.isFinal, isTrue, reason: 'the open caption ended');
+    // stop() afterwards is a no-op that returns, and the session cannot be started again.
+    await session.stop();
+    expect(fake.callCount('audioStop'), stopsBefore + 1);
+    expect(() => session.start(), throwsStateError);
+  });
+
+  test('relay: a stop() racing a terminal error waits for the one teardown', () async {
+    final conn = await connect();
+    final stopsBefore = fake.callCount('audioStop');
+    conn.send({
+      'type': 'error',
+      'error': {'code': 'SESSION_DURATION_LIMIT', 'message': 'time limit'},
+    });
+    await _waitFor(() => session.lastError != null);
+    await session.stop();
+    expect(fake.callCount('audioStop'), stopsBefore + 1, reason: 'one teardown, not two');
+  });
+
   test('relay: a bitHuman secret dials the relay; an OpenAI key dials OpenAI', () {
     BithumanRealtimeSession.debugEndpointOverride = null;
     BithumanRealtimeSession mk(String key) => BithumanRealtimeSession(

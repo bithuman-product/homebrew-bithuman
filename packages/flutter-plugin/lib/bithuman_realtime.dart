@@ -344,7 +344,7 @@ class BithumanRealtimeSession {
       // here would leak the audio engine (socket dead, mic still hot). This
       // mirrors the reconnect-budget give-up in _scheduleReconnect. Cancelling
       // _wsSub before closing means _handleDone never fires → no reconnect.
-      _status.add(RealtimeStatus.error);
+      _emit(_status, RealtimeStatus.error);
       _wsSub?.cancel();
       _wsSub = null;
       try {
@@ -377,25 +377,35 @@ class BithumanRealtimeSession {
   RealtimeSessionError? get lastError => _terminalError;
 
   // Codes the relay ends a session with (an `error` event, then close 1008) or
-  // refuses the handshake with. None of them heals on a retry.
+  // refuses the handshake with. None of them heals on a retry. `PAYWALL` (2.6.28): the
+  // relay's 402 when the account has no Live minutes left.
   static const Set<String> _terminalCodes = {
-    'UNAUTHORIZED', 'INSUFFICIENT_BALANCE', 'PLAN_REQUIRED', 'FORBIDDEN',
+    'UNAUTHORIZED', 'INSUFFICIENT_BALANCE', 'PLAN_REQUIRED', 'FORBIDDEN', 'PAYWALL',
     'SESSION_DURATION_LIMIT', 'MODEL_LOCKED', 'BAD_REQUEST',
   };
 
+  /// ★A TERMINAL ERROR ENDS THE SESSION WHOLE (2.6.28). Until 2.6.27 this only closed the
+  /// socket and cleared `_open` — and [stop] returns early on `!_open`, so after a relay
+  /// `PAYWALL` / `INSUFFICIENT_BALANCE` / time limit nothing else was ever torn down: the
+  /// native microphone and speaker stayed on, the captions were never cut (their 50 ms tick
+  /// ran on), the playout, microphone and interruption subscriptions stayed attached to the
+  /// host, and no stream controller was closed. Now the error and [RealtimeStatus.error] are
+  /// emitted first, then the same teardown as [stop] runs, and the session's streams close: a
+  /// session that ended this way cannot be started again (create a new one).
   void _terminal(String code, String message) {
     if (_terminalError != null) return;
     _terminalError = RealtimeSessionError(code, message);
     // ignore: avoid_print
     print('[realtime] stopped: $code — $message');
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
     _open = false;
-    _errors.add(_terminalError!);
-    _status.add(RealtimeStatus.error);
-    try {
-      _ws?.sink.close();
-    } catch (_) {}
+    _emit(_errors, _terminalError!);
+    _emit(_status, RealtimeStatus.error);
+    unawaited(_end(reason: 'terminal', closeStreams: true));
+  }
+
+  /// Adds [v] unless [c] was closed (a session that ended on a terminal error).
+  static void _emit<T>(StreamController<T> c, T v) {
+    if (!c.isClosed) c.add(v);
   }
 
   /// Streaming text of what the bot is saying — emitted from
@@ -482,7 +492,7 @@ class BithumanRealtimeSession {
     _log('[bhinterrupt] ${e.began ? 'BEGAN' : 'ENDED'} reason=${e.reason}'
         '${e.began ? '' : ' shouldResume=${e.shouldResume}'} open=$_open'
         '${e.began && endOnAudioInterruption && _open ? ' — ending the session (nothing more is billed)' : ''}');
-    if (!_interruptions.isClosed) _interruptions.add(e);
+    _emit(_interruptions, e);
     if (e.began && endOnAudioInterruption && _open) {
       _endedBy = e;
       unawaited(stop());
@@ -495,15 +505,23 @@ class BithumanRealtimeSession {
   /// mic-permission prompt) and no mic→OpenAI forwarding. The agent still replies
   /// with voice + avatar; the user drives it by typing.
   Future<void> start({bool enableMic = true}) async {
+    if (_streamsClosed) {
+      throw StateError('this realtime session ended (${_terminalError?.code}); create a new one');
+    }
     if (_open) return;
+    // A stop() still tearing down: the new start begins after it.
+    final ending = _ending;
+    if (ending != null) await ending;
+    if (_open || _streamsClosed) return;
     _open = true;
+    _live = true;
     final gen = ++_startGen;
     // A new audio unit: its echo canceller converges from scratch, so the guard re-arms.
     _agentAudioMs = 0;
     _guardAudibleMs = 0;
     _guardedChunks = 0;
     _endedBy = null;
-    _status.add(RealtimeStatus.connecting);
+    _emit(_status, RealtimeStatus.connecting);
     // Before audioStart: a call already holding the audio is reported the moment the unit starts.
     // (No await here: nothing may yield between `_open` and the dial's own checks.)
     final oldSub = _interruptionSub;
@@ -593,12 +611,12 @@ class BithumanRealtimeSession {
       }
 
       await _connectAndConfigure();
-      if (_terminalError == null && _open) _status.add(RealtimeStatus.open);
+      if (_terminalError == null && _open) _emit(_status, RealtimeStatus.open);
     } catch (e) {
       // A call that already held the audio refused the audio unit (iOS) after reporting itself:
       // the session has ended on that interruption, which is not an error.
       if (_endedBy != null && gen == _startGen) return;
-      _status.add(RealtimeStatus.error);
+      _emit(_status, RealtimeStatus.error);
       rethrow;
     }
   }
@@ -732,7 +750,7 @@ class BithumanRealtimeSession {
       // UI doesn't blink "Disconnected" between attempts.
       _scheduleReconnect();
     } else {
-      _status.add(RealtimeStatus.closed);
+      _emit(_status, RealtimeStatus.closed);
     }
   }
 
@@ -742,7 +760,7 @@ class BithumanRealtimeSession {
     if (_reconnectAttempt >= _maxReconnectAttempts) {
       // ignore: avoid_print
       print('[realtime] giving up after $_reconnectAttempt reconnect attempts');
-      _status.add(RealtimeStatus.error);
+      _emit(_status, RealtimeStatus.error);
       return;
     }
     // 1, 2, 4, 8, 16, 30, 30, 30 …
@@ -757,7 +775,7 @@ class BithumanRealtimeSession {
     _wsSub?.cancel();
     _wsSub = null;
     _ws = null;
-    _status.add(RealtimeStatus.connecting);
+    _emit(_status, RealtimeStatus.connecting);
     _reconnectTimer = Timer(Duration(seconds: delaySec), _reconnect);
   }
 
@@ -773,7 +791,7 @@ class BithumanRealtimeSession {
       // a beat later). Resetting on TCP-success masked that as an infinite
       // `connecting` loop. The reset now lives in `_handleMessage` on the
       // first inbound event, which proves the server actually accepted us.
-      if (_terminalError == null && _open && _reconnectTimer == null) _status.add(RealtimeStatus.open);
+      if (_terminalError == null && _open && _reconnectTimer == null) _emit(_status, RealtimeStatus.open);
     } catch (e) {
       // ignore: avoid_print
       print('[realtime] reconnect failed: $e');
@@ -859,7 +877,7 @@ class BithumanRealtimeSession {
       final v = s < 0 ? -s : s;
       if (v > peak) peak = v;
     }
-    _micLevel.add(peak / 32768.0);
+    _emit(_micLevel, peak / 32768.0);
     _micDbgN++;
     if (_echoGuardActive) {
       // Every chunk captured while the agent is audible counts toward the window, loud
@@ -937,12 +955,42 @@ class BithumanRealtimeSession {
     // Typed input is a committed user turn with no speech_stopped event — emit
     // userStopped (→ TransportStatus.thinking) so the neon "thinking" rim shows
     // immediately, exactly like a spoken turn, until response.done.
-    _status.add(RealtimeStatus.userStopped);
+    _emit(_status, RealtimeStatus.userStopped);
   }
 
-  Future<void> stop() async {
-    if (!_open) return;
+  /// End the session: the socket, the microphone and the speaker, the captions (the reply in
+  /// flight ends on the words heard), then [RealtimeStatus.closed]. Idempotent; after a
+  /// terminal error (see [errorStream]) the session has already ended itself and this
+  /// returns once that teardown is done.
+  Future<void> stop() {
+    final ending = _ending;
+    if (ending != null) return ending;
+    if (!_live) return Future<void>.value();
     _open = false;
+    return _end(reason: 'stop', closeStreams: false);
+  }
+
+  /// start() .. the end of the teardown: the session holds the host's audio, its microphone
+  /// stream and its playout subscription.
+  bool _live = false;
+
+  /// The teardown in flight ([stop], or a terminal error).
+  Future<void>? _ending;
+
+  /// A terminal error ended the session and its streams are closed: it cannot start again.
+  bool _streamsClosed = false;
+
+  /// The one teardown. [closeStreams]: a terminal error — no [RealtimeStatus.closed] (the
+  /// error was the last status), and every stream of this session closes afterwards.
+  Future<void> _end({required String reason, required bool closeStreams}) {
+    final f = _tearDown(reason, closeStreams);
+    _ending = f;
+    return f.whenComplete(() {
+      if (identical(_ending, f)) _ending = null;
+    });
+  }
+
+  Future<void> _tearDown(String reason, bool closeStreams) async {
     // Cancel any pending reconnect — must come BEFORE clearing _open's
     // effects so a timer firing mid-stop sees `!_open` and bails. The
     // guard inside `_reconnect()` already double-checks this.
@@ -970,7 +1018,7 @@ class BithumanRealtimeSession {
     // Wipe the lipsync queue + stop the speaker player IMMEDIATELY.
     // Without this, the avatar keeps animating the agent's last
     // buffered audio for ~1-2 s after the user hangs up.
-    try { await avatar.interrupt(reason: 'stop'); } catch (_) {}
+    try { await avatar.interrupt(reason: reason); } catch (_) {}
     await _micSub?.cancel();
     _micSub = null;
     await _interruptionSub?.cancel();
@@ -978,10 +1026,22 @@ class BithumanRealtimeSession {
     await _playoutSub?.cancel();
     _playoutSub = null;
     await _wsSub?.cancel();
-    await _ws?.sink.close();
+    _wsSub = null;
+    try { await _ws?.sink.close(); } catch (_) {}
     _ws = null;
     try { await avatar.audioStop(); } catch (_) {}
-    _status.add(RealtimeStatus.closed);
+    _live = false;
+    if (!closeStreams) {
+      _emit(_status, RealtimeStatus.closed);
+      return;
+    }
+    _streamsClosed = true;
+    await Future.wait<void>([
+      for (final c in <StreamController<dynamic>>[
+        _status, _errors, _botTranscript, _spoken, _userTranscript, _micLevel, _botLevel, _interruptions,
+      ])
+        c.close(),
+    ]);
   }
 
   // -------- internals --------
@@ -1046,7 +1106,7 @@ class BithumanRealtimeSession {
           final v = s < 0 ? -s : s;
           if (v > bpeak) bpeak = v;
         }
-        _botLevel.add(bpeak / 32768.0);
+        _emit(_botLevel, bpeak / 32768.0);
         // `_audibleUntil` tracks when the audio handed over so far finishes — used
         // by the injection proof and the stress driver to know the agent is talking.
         final chunkDur = Duration(
@@ -1085,14 +1145,15 @@ class BithumanRealtimeSession {
         // (Mirrors the WebRTC openai_webrtc_session response.cancelled fix.)
         _droppingCancelledAudio = true;
         _resetAudioPacing(); // invalidate any delta still parked in a pacing delay
-        // What was handed over still plays (no interrupt here); no more of it comes.
-        _captions.replyDone(_responseId(evt));
+        // What was handed over still plays (no interrupt here); no more of it comes, and the
+        // reply stopped part-way: only the text its audio carried is released.
+        _captions.replyDone(_responseId(evt), false);
         _captionTickIfBusy();
         break;
       case 'response.output_audio_transcript.delta':
         final delta = evt['delta'] as String?;
         if (delta != null && delta.isNotEmpty) {
-          _botTranscript.add(delta);
+          _emit(_botTranscript, delta);
           // A cancelled reply's late text belongs to no caption.
           if (!_droppingCancelledAudio) {
             _captions.text(delta, _responseId(evt));
@@ -1108,7 +1169,7 @@ class BithumanRealtimeSession {
         break;
       case 'conversation.item.input_audio_transcription.completed':
         final t = evt['transcript'] as String?;
-        if (t != null && t.isNotEmpty) _userTranscript.add(t);
+        if (t != null && t.isNotEmpty) _emit(_userTranscript, t);
         // AEC probe (mirrors openai_webrtc_session): what the server heard
         // on the user-mic leg. If these come back with the BOT's words, the
         // speaker is leaking into the mic past the AEC; room voices show up
@@ -1122,11 +1183,13 @@ class BithumanRealtimeSession {
         break;
       case 'response.done':
         _haveActiveResponse = false;
-        _status.add(RealtimeStatus.responseDone);
-        // The reply's text and audio are complete; what was handed over still plays out.
-        _captions.replyDone(_responseId(evt));
-        _captionTickIfBusy();
+        _emit(_status, RealtimeStatus.responseDone);
         final doneStatus = ((evt['response'] as Map<String, dynamic>?)?['status'] as String?) ?? '';
+        // No more text or audio comes for the reply; what was handed over still plays out. A
+        // reply that did not complete (cancelled, incomplete, failed) releases only the text
+        // its received audio carried. (A relay that omits the status: treated as completed.)
+        _captions.replyDone(_responseId(evt), doneStatus.isEmpty || doneStatus == 'completed');
+        _captionTickIfBusy();
         if (doneStatus != 'completed') {
           _log('[barge] response.done status=$doneStatus hostMs=${DateTime.now().millisecondsSinceEpoch}');
         }
@@ -1184,12 +1247,12 @@ class BithumanRealtimeSession {
         await avatar.interrupt(reason: 'speech_started');
         _log('[barge] interrupt returned hostMs=${DateTime.now().millisecondsSinceEpoch} '
             '(+${DateTime.now().millisecondsSinceEpoch - ssMs} ms after speech_started)');
-        _status.add(RealtimeStatus.userSpeaking);
+        _emit(_status, RealtimeStatus.userSpeaking);
         break;
       case 'input_audio_buffer.speech_stopped':
         _log('[barge] speech_stopped hostMs=${DateTime.now().millisecondsSinceEpoch} '
             'audio_end_ms=${evt['audio_end_ms']}');
-        _status.add(RealtimeStatus.userStopped);
+        _emit(_status, RealtimeStatus.userStopped);
         break;
       case 'error':
         final err = evt['error'] as Map<String, dynamic>?;
@@ -1214,7 +1277,7 @@ class BithumanRealtimeSession {
         print('[realtime] server ${soft ? "warning" : "error"}: '
             '${code.isEmpty ? msg : "$code — $msg"}');
         if (!soft) {
-          _status.add(RealtimeStatus.error);
+          _emit(_status, RealtimeStatus.error);
         }
         break;
       // Other event types (session.created, session.updated, response.created,
@@ -1244,7 +1307,7 @@ class BithumanRealtimeSession {
       // exhaust. Spurious .error here would make the UI strobe.
       _scheduleReconnect();
     } else {
-      _status.add(RealtimeStatus.error);
+      _emit(_status, RealtimeStatus.error);
     }
   }
 

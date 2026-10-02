@@ -110,6 +110,11 @@ class SpokenCaptioner {
   _Reply? _current;
   int _replyN = 0;
 
+  // The voice's measured speaking rate: characters and audio samples of the replies that
+  // completed whole this session (kept across [reset]: the voice does not change).
+  int _rateChars = 0;
+  int _rateSamples = 0;
+
   /// Whether a reply still has words to release: the owner keeps calling [tick].
   bool get busy => _open.isNotEmpty;
 
@@ -133,8 +138,11 @@ class SpokenCaptioner {
   /// A new reply begins (`response.created`). [id] keys later events when they carry one.
   void replyStarted([String? id]) {
     // The server generates one reply at a time: an earlier reply still open (its done event
-    // was lost to a reconnect) has all the text and audio it will get, and plays out.
+    // was lost to a reconnect) has all the text and audio it will get, and plays out. ★It may
+    // have stopped part-way (2.6.28): unless both its text and its audio had completed, only
+    // the text its received audio can have voiced is released (see [_voicedChars]).
     for (final o in _open) {
+      if (!(o.textDone && o.audioDone)) o.partial = true;
       o.textDone = true;
       o.audioDone = true;
     }
@@ -184,11 +192,21 @@ class SpokenCaptioner {
     _evaluate();
   }
 
-  /// The reply is over at the server (`response.done`, any status): its text and audio are
-  /// complete. What was handed over still plays; only [cut] ends a reply early.
-  void replyDone([String? id]) {
+  /// The reply is over at the server (`response.done`, any status): no more text or audio
+  /// comes for it. What was handed over still plays; only [cut] ends a reply early.
+  /// [completed] false (status `cancelled` / `incomplete` / `failed`, or `response.cancelled`):
+  /// the reply stopped part-way, and its transcript can hold words whose audio never came —
+  /// only the text its received audio can have voiced is released (2.6.28).
+  void replyDone([String? id, bool completed = true]) {
     final r = _find(id);
     if (r == null) return;
+    if (!completed) {
+      r.partial = true;
+    } else if (!r.partial && r.text.isNotEmpty && r.audioLen > 0) {
+      // A whole reply: its voice's speaking rate, for the partial ones.
+      _rateChars += r.text.length;
+      _rateSamples += r.audioLen;
+    }
     r.textDone = true;
     r.audioDone = true;
     if (identical(r, _current)) _current = null;
@@ -274,6 +292,22 @@ class SpokenCaptioner {
     }
   }
 
+  /// Of a reply that stopped part-way ([_Reply.partial]), the characters its received audio
+  /// can have voiced: the audio's length at this voice's speaking rate (the replies completed
+  /// whole this session; before the first, the conservative [charsPerSecond]), a little under
+  /// so the caption errs behind. A whole reply: all of its text.
+  int _voicedChars(_Reply r) {
+    if (!r.partial) return r.text.length;
+    if (r.audioLen <= 0) return 0;
+    final double cps;
+    if (_rateSamples >= rate && _rateChars > 0) {
+      cps = 0.95 * _rateChars * rate / _rateSamples;
+    } else {
+      cps = _cjk.hasMatch(r.text) ? charsPerSecondCjk : charsPerSecond;
+    }
+    return math.min(r.text.length, (r.audioLen * cps / rate).floor());
+  }
+
   /// Releases what [heard] allows for [r]; true when [r] is final.
   bool _release(_Reply r, int heard, {bool cutting = false}) {
     final text = r.text;
@@ -283,9 +317,12 @@ class SpokenCaptioner {
     final noAudio = r.audioDone && start == null;
     int target;
     if (r.textDone && r.audioDone) {
+      // ★Only text matched to received audio (2.6.28): a reply that stopped part-way maps its
+      // heard share onto the words its audio can have carried, never onto the whole transcript.
+      final voiced = _voicedChars(r);
       target = (noAudio || heardAll || r.audioLen == 0)
-          ? text.length
-          : text.length * inReply ~/ r.audioLen;
+          ? voiced
+          : voiced * inReply ~/ r.audioLen;
     } else {
       final cjk = _cjk.hasMatch(text);
       final cps = cjk ? charsPerSecondCjk : charsPerSecond;
@@ -300,16 +337,22 @@ class SpokenCaptioner {
     final whole = target >= text.length && r.textDone;
     final cutAt = whole ? text.length : _wordBoundary(text, target);
     if (cutAt > r.released) r.released = cutAt;
-    final isFinal = cutting || (r.textDone && r.audioDone && (heardAll || noAudio) && r.released >= text.length);
+    // Text and audio complete and every sound heard: nothing more will be released.
+    final isFinal = cutting || (r.textDone && r.audioDone && (heardAll || noAudio));
     if (r.released > r.emitted || isFinal) {
       r.emitted = r.released;
       final shown = text.substring(0, r.released).trimRight();
+      // A reply that stopped part-way and ends on fewer words than its transcript was cut short.
+      final shortened = r.partial && shown.length < text.trimRight().length;
       onCaption(BithumanSpokenText(
-          reply: r.n, text: shown, isFinal: isFinal, interrupted: cutting && !(heardAll || noAudio && r.textDone)));
+          reply: r.n,
+          text: shown,
+          isFinal: isFinal,
+          interrupted: (cutting && !(heardAll || noAudio && r.textDone)) || (isFinal && shortened)));
       final log = onLog;
       if (log != null) {
         log('[bhcaption] reply=${r.n} heard=$inReply/${r.audioLen}${r.audioDone ? '' : '+'} '
-            'chars=${shown.length}/${text.length}${r.textDone ? '' : '+'}'
+            'chars=${shown.length}/${text.length}${r.textDone ? '' : '+'}${r.partial ? ' partial' : ''}'
             '${isFinal ? (cutting ? ' final interrupted' : ' final') : ''} '
             'src=${_haveReports ? 'playout' : 'estimate'} hostMs=${_clock().millisecondsSinceEpoch}');
       }
@@ -341,6 +384,8 @@ class _Reply {
   String text = '';
   bool textDone = false;
   bool audioDone = false;
+  /// The reply stopped part-way (cancelled, incomplete, or superseded before it completed).
+  bool partial = false;
   int? audioStart;
   int audioLen = 0;
   int released = 0;
