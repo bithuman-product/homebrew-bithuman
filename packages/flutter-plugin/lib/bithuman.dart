@@ -123,10 +123,11 @@ class BithumanAvatar implements VoiceHost {
   /// where [imxPath] is the agent CODE and [apiSecret] is required: the members
   /// come through the metered door and every frame is metered).
   ///
-  /// [skipAhead] (Android, Essence 2; 2.6.29): the player tells the engine where the voice is, and a
-  /// phone that renders below real time shows fewer frames in step with the voice instead of a
-  /// frozen face. null = the plugin's default (OFF in 2.6.29); false = every frame rendered in order.
-  /// Ignored by Expression 2 and on iOS / macOS.
+  /// [skipAhead] (Essence 2): the player tells the engine where the voice is, and a device that
+  /// renders below real time shows fewer frames in step with the voice instead of a frozen face.
+  /// null = the plugin's default (OFF); false = every frame rendered in order. Android since 2.6.29;
+  /// iOS / macOS since 2.6.30, with an Essence 2 engine that has the skip-ahead calls
+  /// (essence2-apple v1.15.3+; an earlier engine ignores it). Ignored by Expression 2.
   static Future<BithumanAvatar> load(
     String imxPath, {
     String? apiSecret,

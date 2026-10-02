@@ -387,9 +387,10 @@ each after Dart's answer, so an app with no handler on it gets nothing queued an
 ### The one edge the voice unit has on render
 
 `RealtimeAudioIO` reaches render through **one `weak var lipsyncSink: LipsyncSink?`**
-and nothing else. `Protocol/LipsyncSink.swift` names the twelve members it uses — four
-pacing reads, three A/V-lock hooks, and five calls — and `AvatarTexture` conforms with
-no new code. **`nil` is a supported state**, not a degraded one: a voice session with
+and nothing else. `Protocol/LipsyncSink.swift` names the members it uses — four
+pacing reads, three A/V-lock hooks, five calls, and (2.6.30) the five of Essence 2's voice
+on its own clock (`voiceClocked`, `enqueueVoice`, `scheduleVoice`, `voiceQueued24k`,
+`noteVoiceScheduled`; see `VoiceClock.swift`) — and `AvatarTexture` conforms. **`nil` is a supported state**, not a degraded one: a voice session with
 no avatar schedules bot audio straight to the speaker and does no lipsync work at all.
 `scripts/check_voice_render_edge.sh` holds the edge (run by *plugin platform guards*,
 with a four-way mutation control); `scripts/prove_lipsync_sink_headless.sh` compiles
@@ -414,7 +415,7 @@ depends on nothing.
 
 | | Swift | Dart |
 |---|---|---|
-| protocol | `Protocol/LipsyncSink.swift` (12) | `lib/src/voice_host.dart` (14) |
+| protocol | `Protocol/LipsyncSink.swift` (17) | `lib/src/voice_host.dart` (14) |
 | conformer | `AvatarTexture` | `BithumanAvatar` |
 | source gate | `scripts/check_voice_render_edge.sh` | `scripts/check_voice_render_edge_dart.sh` |
 | compiled gate | `scripts/prove_lipsync_sink_headless.sh` | `test/e2e/headless_voice_host_test.dart` |
