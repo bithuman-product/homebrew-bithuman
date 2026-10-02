@@ -12,9 +12,11 @@ import 'dart:typed_data' show Int16List, Uint8List;
 
 import 'package:flutter/services.dart';
 
+import 'src/agent_imx.dart';
 import 'src/voice_host.dart';
 
 export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout, BithumanModelRejected;
+export 'src/agent_imx.dart' show kBithumanModelHosts;
 
 const _channel = MethodChannel('ai.bithuman.avatar');
 
@@ -754,6 +756,7 @@ class BithumanAgent {
     required this.modelUrl,
     required this.systemPrompt,
     required this.voiceId,
+    this.modelType = '',
   });
 
   final String id;
@@ -765,6 +768,9 @@ class BithumanAgent {
   final String systemPrompt;
   final String voiceId;
 
+  /// The catalog's `model_type` (`essence-2`, `expression-1`, ...); '' when the row has none.
+  final String modelType;
+
   factory BithumanAgent.fromJson(Map<String, dynamic> j) => BithumanAgent(
         id: j['id'] as String,
         name: j['name'] as String? ?? '',
@@ -774,6 +780,7 @@ class BithumanAgent {
         modelUrl: (j['model_url'] ?? '') as String,
         systemPrompt: (j['system_prompt'] ?? j['prompt'] ?? '') as String,
         voiceId: (j['voice_id'] ?? '') as String,
+        modelType: (j['model_type'] ?? '') as String,
       );
 }
 
@@ -1025,99 +1032,43 @@ Future<List<BithumanAgent>> fetchPublicAgents({int limit = 60, String? category}
   }
 }
 
-/// Download `agent.modelUrl` into `<cacheDir>/<id>.imx`. Cached by id so
-/// re-tapping the same avatar doesn't re-download. Creates the cache
-/// directory if it doesn't exist (some platforms — especially macOS
-/// sandbox — return a tmp path that hasn't been mkdir'd yet).
+/// Download a character's `.imx` into `<cacheDir>/<id>.imx` and return its path.
+///
+/// **What it can download** (2.6.30):
+///  * a GALLERY (showcase) Essence 2 character, anonymously — its door redirects to a signed file
+///    URL, which is followed;
+///  * any character the account of [apiSecret] OWNS — the platform door
+///    (`GET https://api.bithuman.ai/v1/agent/<code>/model/download`) is asked with the key, which
+///    goes to that door only, never to the file host it redirects to.
+///
+/// It cannot download another account's Essence 1 / Expression 1 character (most rows
+/// [fetchPublicAgents] lists): 401 without a key, 404 with a key that does not own it. An
+/// Expression 2 character is an `.avatar`: use [downloadExpression2Avatar].
+///
+/// Redirects are followed only when trusted — issued by one of bitHuman's doors
+/// ([kBithumanModelHosts]: the door mints the signed URL it points at), or pointing at a host on
+/// [allowedHosts] — https only, at most five; with [allowedHosts] the first URL must also be on it
+/// (or be a bitHuman door). Anything else fails the download, because the bytes feed the native
+/// parser.
+///
+/// Cached by id. A kept file is returned AT ONCE, with no network before it; whether it is still
+/// the published one (its length) is asked in the background afterwards, and a different file is
+/// downloaded then for the NEXT call. The one exception: a kept Essence 2 file older than
+/// 2026-10-02T00:00Z (before every Essence 2 character was re-published with the mouth-corner fix,
+/// which the engine requires) is downloaded again once before it is returned — the old file stays
+/// until the new one is complete, and is returned if that download fails. Creates [cacheDir] if it
+/// does not exist (some platforms — especially the macOS sandbox — return a tmp path that has not
+/// been made yet).
 Future<String> downloadAgentImx(
   BithumanAgent agent,
   String cacheDir, {
   Set<String>? allowedHosts,
   void Function(int received, int? total)? onProgress,
-}) async {
-  final dir = Directory(cacheDir);
-  if (!await dir.exists()) {
-    await dir.create(recursive: true);
-  }
-  // The catalog `id` comes from a public / MITM-able JSON feed, so never use
-  // it raw in a filesystem path — a crafted '../' would escape cacheDir. Real
-  // ids are alphanumeric, so this is a no-op for legit data (cache stays warm).
-  final safeId = agent.id.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
-  final local = File('$cacheDir/$safeId.imx');
-  if (await local.exists() && (await local.length()) > 1024 * 1024) {
-    return local.path;
-  }
-  // Refuse a non-https model_url: dart:io's HttpClient is NOT subject to App
-  // Transport Security, so a catalog-supplied http:// (or loopback/LAN) URL
-  // would otherwise be fetched in cleartext on macOS and fed to the native
-  // .imx parser. Require TLS before opening the connection.
-  final modelUri = Uri.parse(agent.modelUrl);
-  if (modelUri.scheme != 'https') {
-    throw BithumanAvatarException(
-        'refusing non-https model_url: ${agent.modelUrl}');
-  }
-  // A poisoned/MITM'd catalog could point model_url at an attacker host whose
-  // bytes then reach the closed-source native .imx parser. When the caller
-  // supplies an allow-list, require the model to come from one of those hosts.
-  if (allowedHosts != null &&
-      allowedHosts.isNotEmpty &&
-      !allowedHosts.contains(modelUri.host)) {
-    throw BithumanAvatarException(
-        'model_url host not allowed: ${modelUri.host}');
-  }
-  final client = HttpClient();
-  try {
-    final req = await client.getUrl(modelUri);
-    // Don't follow redirects: legit catalog models are a direct 200 from the
-    // allowlisted host, so a 30x can only be an attempt to bounce the download
-    // off-allowlist (the scheme/host checks above validate the initial URL
-    // only). A redirect therefore fails the status check below.
-    req.followRedirects = false;
-    final res = await req.close();
-    if (res.statusCode != 200) {
-      throw BithumanAvatarException(
-          '.imx download HTTP ${res.statusCode} from ${agent.modelUrl}');
-    }
-    // Stream to a `.partial` file then rename, so a cancelled / failed
-    // download doesn't leave a half-baked file that passes the "size > 1 MB"
-    // cache check next time.
-    final tmp = File('${local.path}.partial');
-    final sink = tmp.openWrite();
-    final total = res.contentLength <= 0 ? null : res.contentLength;
-    var received = 0;
-    try {
-      await for (final chunk in res) {
-        sink.add(chunk);
-        received += chunk.length;
-        onProgress?.call(received, total);
-      }
-      await sink.flush();
-      await sink.close();
-    } catch (e) {
-      try { await sink.close(); } catch (_) {}
-      try { await tmp.delete(); } catch (_) {}
-      rethrow;
-    }
-    await tmp.rename(local.path);
-    // Validate the downloaded file before returning: at least a few MB, and —
-    // where the native engine can tell — one of bitHuman's containers. The
-    // engine owns the format; this package asks it rather than knowing it.
-    final size = await local.length();
-    if (size < 1024 * 1024) {
-      await local.delete();
-      throw BithumanAvatarException(
-          'downloaded .imx is suspiciously small: $size bytes');
-    }
-    if (await _isModelContainer(local.path) == false) {
-      await local.delete();
-      throw BithumanAvatarException(
-          'downloaded .imx is not a bitHuman container');
-    }
-    return local.path;
-  } finally {
-    client.close();
-  }
-}
+  String? apiSecret,
+}) =>
+    _agentImx.download(agent, cacheDir, allowedHosts: allowedHosts, onProgress: onProgress, apiSecret: apiSecret);
+
+final AgentImxDownloader _agentImx = AgentImxDownloader(isContainer: _isModelContainer);
 
 // ── Essence 2 (on-device Elevate) `.elevatedir` delivery ─────────────────────
 // The Essence-2 on-device engine (`engine: 'essence2'` / the frozen `elevate`
