@@ -22,8 +22,11 @@ import Foundation
 enum VoiceClockPolicy {
   /// ★SET BY DATA, NOT BY TASTE (the release gate's rule, 2026-10-02): the SMALLEST cushion that grades
   /// 0 voice gaps over 80 ms on the iPhone 18 Pro across a cold greeting, a barge-in and a burst
-  /// arrival. PROVISIONAL until that phone's run: on an M4 Mac both 200 and 400 ms graded 0 gaps
-  /// (no cushion: 1–2 gaps of 160–200 ms per reply), so 200 ms is the value until the phone says.
+  /// arrival. Measured on that phone (2.6.31): 200 ms grades 0 on all three; with no cushion a
+  /// barge-in's reply had gaps of 160–200 ms. The cause is the 320 ms cadence of the engine's motion
+  /// blocks, not the engine's speed — so the number of frames ready at a reply's start does not
+  /// predict the gap, and the cushion is a constant, the same on iOS and macOS. (Android plays the
+  /// voice with no cushion: 0 gaps and 0 underruns on the Galaxy Z Flip5 with essence2-android 0.9.1.)
   static let cushionSeconds: Double = 0.200
   /// A/V offset (when a frame's audio starts being heard minus when the frame is shown): a frame whose
   /// audio started more than this before it could be shown is LATE (the lip-sync bound, ±40 ms).

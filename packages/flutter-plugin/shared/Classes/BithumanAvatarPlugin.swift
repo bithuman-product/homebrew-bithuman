@@ -1215,12 +1215,43 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
   }
 
   private func closeReplyMeterAtExit() {
+    closeReplyMeter(skipped: engineSkippedFrames - skippedAtReplyStart)
+  }
+
+  /// Speech frames the engine's skip-ahead skipped so far (0 without an Essence 2 engine that has it).
+  private var engineSkippedFrames: Int64 {
     #if ESSENCE2_AVAILABLE
-    closeReplyMeter(skipped: (e2Engine?.skippedFrames ?? 0) - skippedAtReplyStart)
+    return (avatar as? Essence2Engine)?.skippedFrames ?? 0
     #else
-    closeReplyMeter(skipped: 0)
+    return 0
     #endif
   }
+
+  /// The per-reply meter follows the reply the arriving audio belongs to. renderQueue.
+  private func followReply(_ reply: Int, firstAudioAt: CFTimeInterval, barged: Int, mode: String, engine rt: any BithumanEngine) {
+    if let m = replyMeter, barged == m.reply { m.bargedIn = true }
+    guard reply != meterReply else {
+      // While a reply plays, its line so far every 2 s: a session that ends mid-reply keeps its numbers.
+      let now = CACurrentMediaTime()
+      if let m = replyMeter, m.hasContent, now - replyLineAt >= 2.0 {
+        replyLineAt = now
+        m.skipped = engineSkippedFrames - skippedAtReplyStart
+        NSLog("%@ so-far", m.line())
+      }
+      return
+    }
+    closeReplyMeter(rt)
+    meterReply = reply
+    skippedAtReplyStart = engineSkippedFrames
+    let m = VoiceReplyMeter(reply: reply, mode: mode, cushionMs: mode == "clock" ? Int((Self.voiceCushion * 1000).rounded()) : 0)
+    m.firstAudioAt = firstAudioAt
+    replyMeter = m
+  }
+
+  private func closeReplyMeter(_ rt: any BithumanEngine) {
+    closeReplyMeter(skipped: engineSkippedFrames - skippedAtReplyStart)
+  }
+
 
   #if os(iOS)
   /// Push an already-decoded 16 kHz mono Float32 chunk into the SAME
@@ -1921,31 +1952,6 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
           Essence2Engine.supportsSkipAhead ? "has the calls" : "has no skip-ahead calls")
   }
 
-  /// The per-reply meter follows the reply the arriving audio belongs to. renderQueue.
-  private func followReply(_ reply: Int, firstAudioAt: CFTimeInterval, barged: Int, mode: String, engine rt: any BithumanEngine) {
-    if let m = replyMeter, barged == m.reply { m.bargedIn = true }
-    guard reply != meterReply else {
-      // While a reply plays, its line so far every 2 s: a session that ends mid-reply keeps its numbers.
-      let now = CACurrentMediaTime()
-      if let m = replyMeter, m.hasContent, now - replyLineAt >= 2.0 {
-        replyLineAt = now
-        m.skipped = (e2Engine?.skippedFrames ?? 0) - skippedAtReplyStart
-        NSLog("%@ so-far", m.line())
-      }
-      return
-    }
-    closeReplyMeter(rt)
-    meterReply = reply
-    skippedAtReplyStart = e2Engine?.skippedFrames ?? 0
-    let m = VoiceReplyMeter(reply: reply, mode: mode, cushionMs: mode == "clock" ? Int((Self.voiceCushion * 1000).rounded()) : 0)
-    m.firstAudioAt = firstAudioAt
-    replyMeter = m
-  }
-
-  private func closeReplyMeter(_ rt: any BithumanEngine) {
-    closeReplyMeter(skipped: (e2Engine?.skippedFrames ?? 0) - skippedAtReplyStart)
-  }
-
   /// One render tick of Essence 2 with the voice on its OWN clock (2.6.30; VoiceClock.swift has the
   /// why). The voice is scheduled a short lead ahead of the speaker from a reply's first frame (plus the
   /// cushion) on, whatever the picture does; each tick shows the frame whose audio is being heard,
@@ -2161,7 +2167,14 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
       return
     }
     let now = CACurrentMediaTime()
-    audioLock.lock(); let epochAtTop = bargeEpoch; audioLock.unlock()
+    audioLock.lock(); let epochAtTop = bargeEpoch
+    let xReply = replySeq, xFirst = replyFirstAudioAt, xEnded = turnEndedForReply, xBarged = bargedReply
+    let xQuiet = audioQueue.isEmpty
+    audioLock.unlock()
+    // The per-reply voice line (`[bhvoice] REPLY ... mode=x2-gated`, 2.6.31): Expression 2's voice is released
+    // per shown frame, so its gaps and A/V offset are measured the same way as Essence 2's.
+    followReply(xReply, firstAudioAt: xFirst, barged: xBarged, mode: "x2-gated", engine: rt)
+    if xEnded, xQuiet, !embodySpeaking, replyMeter != nil { closeReplyMeter(rt) }
     if !embodySpeaking {
       // Wait for ci=0 + ci=1 (~32+ frames) before starting speech. ci=0 only
       // yields ~21 frames for a 1.6 s chunk, and ci=1 lands ~1.5 s later at
