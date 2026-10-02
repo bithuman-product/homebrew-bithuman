@@ -1,3 +1,31 @@
+## 2.6.28 — 2026-10-01 — the character's own voice no longer cuts it off; Sofia opens without waiting on the network; a paywall ends the call cleanly
+
+Tag `flutter-plugin-v2.6.28`. Engines unchanged: iOS/macOS Expression 2 `v2.19.2`, Essence 2
+`essence2-v1.15.2`, macOS `enginecore-v1.0.2` (Swift package 2.19.4); Android `essence2-android`
+0.9.0, `expression2-android` 0.5.2.
+
+* **The character's echo no longer interrupts it (iOS, macOS, Android).** On a loudspeaker, the
+  echo canceller lets short bursts of the character's own voice reach the microphone, and the
+  realtime service could take them for the person talking over it. While the character is heard,
+  and for half a second after, the session now passes the microphone to the service only when it
+  is close in level to the voice heard (within `BithumanRealtimeSession.bargeFloorDb`: by default
+  11 dB on Android, 18 dB on iPhone and macOS) and stays there for 200 ms. Quieter sound, the
+  echo, goes up as silence. A person talking over the character still cuts in, about 100 ms
+  later than before. The opening-seconds guard now follows the voice as it is heard, not when
+  the reply arrived. A sound in the room while the character is silent still counts as speech.
+* **Sofia and every Essence 2 character open without waiting on the network (Android).** A
+  character already on the phone opens from its verified local copy at once; the check for an
+  updated version runs after it is live, and an update is used from the next open. On a Galaxy
+  Z Fold5 and Z Flip5, Sofia's launch to live went from 5.9 s / 9.2 s to 4.2 s / 4.5 s (medians).
+* **A paywall ends the call, and any session that ends on an error releases everything
+  (iOS, macOS, Android).** The relay's `PAYWALL` (no Live minutes left) is now a terminal error
+  on `errorStream`, like `INSUFFICIENT_BALANCE`. After a terminal error the session also turns
+  the microphone and speaker off, ends the captions and closes its streams; until now it only
+  closed the connection. Such a session cannot be started again: build a new one.
+* **Captions of a reply cut short show only what was said (iOS, macOS, Android).** When a reply
+  is cancelled part-way, or a reconnect loses its end, `spokenTranscriptStream` no longer
+  releases its whole transcript: it stops at the words its received audio can have carried.
+
 ## 2.6.27 — 2026-10-01 — captions in step with the voice; no crash when the app closes on Android; privacy manifest shipped
 
 Tag `flutter-plugin-v2.6.27`. Engines unchanged: iOS/macOS Expression 2 `v2.19.2`, Essence 2
