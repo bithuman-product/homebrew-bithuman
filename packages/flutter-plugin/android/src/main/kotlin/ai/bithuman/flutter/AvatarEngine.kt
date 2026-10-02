@@ -188,9 +188,18 @@ class Essence2Engine(
      * pixel crosses the CPU. Same bytes (the SDK proves its buffers equal [pull]'s, plus alpha 255).
      * A device without the OpenCL body refuses, and this adapter keeps the copy path, logged.
      */
-    override val hardwareFrames: Boolean = zeroCopy && runCatching { avatar.useHardwareBuffers(HW_SLOTS) }
-        .onFailure { Log.w("bhav", "essence-2 zero-copy delivery unavailable, copy path kept: ${it.message}") }
-        .isSuccess
+    override val hardwareFrames: Boolean = zeroCopy && runCatching {
+        // ★THIS PRESENTER SCALES (2.6.32): BithumanPlugin draws a frame smaller than
+        // the surface scaled to fill it, so the engine may deliver the identity's 720 output as it is while
+        // the phone is throttled, instead of upscaling it to the full size itself. Set before the first
+        // frame (later sets are ignored), and only for zero-copy delivery: each hardware frame carries its
+        // own size. A plugin that never sets it keeps full-size frames.
+        avatar.presenterScalesFrames = true
+        avatar.useHardwareBuffers(HW_SLOTS)
+    }.onFailure {
+        runCatching { avatar.presenterScalesFrames = false }       // the copy path: full-size frames
+        Log.w("bhav", "essence-2 zero-copy delivery unavailable, copy path kept: ${it.message}")
+    }.isSuccess
     override val width get() = avatar.width
     override val height get() = avatar.height
     override val fps = FPS

@@ -22,6 +22,21 @@ class FrameFitTest {
         assertFalse(FrameFit.oneToOne(720, 1280, 1080, 1920))
         assertArrayEquals(intArrayOf(0, 0, 1080, 1920), FrameFit.scaledDst(720, 1280, 1080, 1920))
         assertArrayEquals(intArrayOf(0, 0, 1920, 1080), FrameFit.scaledDst(1280, 720, 1920, 1080))
+        // Sofia: 720x1280 on 1080x1920 is the same 9:16, to the pixel.
+        assertTrue(FrameFit.sameAspect(720, 1280, 1080, 1920))
+    }
+
+    @Test
+    fun a_different_aspect_is_letterboxed_never_stretched() {
+        assertFalse(FrameFit.sameAspect(720, 720, 1080, 1920))
+        // A square frame on a portrait surface: full width, centred vertically.
+        assertArrayEquals(intArrayOf(0, 420, 1080, 1500), FrameFit.scaledDst(720, 720, 1080, 1920))
+        // A 16:9 frame on a 4:3 surface: full width, letterboxed.
+        assertArrayEquals(intArrayOf(0, 135, 1440, 945), FrameFit.scaledDst(1280, 720, 1440, 1080))
+        // A frame narrower than the surface's aspect: full height, pillarboxed.
+        assertArrayEquals(intArrayOf(360, 0, 720, 1080), FrameFit.scaledDst(360, 1080, 1080, 1080))
+        assertTrue(FrameFit.fills(intArrayOf(0, 0, 1080, 1920), 1080, 1920))
+        assertFalse(FrameFit.fills(intArrayOf(0, 420, 1080, 1500), 1080, 1920))
     }
 
     @Test

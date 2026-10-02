@@ -38,6 +38,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.os.Handler
@@ -120,9 +121,9 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         var framesDrawn = 0L
         /** Frames drawn scaled to the surface (smaller than it: the engine's throttled step-down), 2.6.32. */
         var framesScaled = 0L
-        /** Bilinear filtering for a scaled frame (FrameFit.kt); a 1:1 frame keeps the unfiltered call. */
-        private val scalePaint = Paint(Paint.FILTER_BITMAP_FLAG)
         private val scaleDst = Rect()
+        /** The frame's aspect differed from the surface's once (letterboxed; logged once). */
+        private var aspectWarned = false
 
         // Captions (2.6.27): `speechPlayout` {played, fed}, 24 kHz samples since audioStart.
         // Platform thread only.
@@ -174,8 +175,13 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 val dst = FrameFit.scaledDst(bmp.width, bmp.height, cw, ch)
                 if (dst == null) canvas.drawBitmap(bmp, 0f, 0f, null)
                 else {
+                    if (!FrameFit.fills(dst, cw, ch)) {
+                        // Never stretched: a frame of another aspect is letterboxed, the bars cleared.
+                        canvas.drawColor(Color.BLACK)
+                        if (!aspectWarned) { aspectWarned = true; Log.w(TAG, "frame ${bmp.width}x${bmp.height} is not the surface's aspect (${cw}x$ch): letterboxed") }
+                    }
                     scaleDst.set(dst[0], dst[1], dst[2], dst[3])
-                    canvas.drawBitmap(bmp, null, scaleDst, scalePaint)
+                    canvas.drawBitmap(bmp, null, scaleDst, SCALE_PAINT)
                     if (framesScaled++ == 0L) Log.i(TAG, "first scaled frame: ${bmp.width}x${bmp.height} -> ${cw}x$ch")
                 }
             } finally {
@@ -769,3 +775,6 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         return true
     }
 }
+
+/** Bilinear filtering for a frame drawn scaled to the surface (FrameFit.kt); a 1:1 frame keeps the unfiltered call. */
+private val SCALE_PAINT = Paint(Paint.FILTER_BITMAP_FLAG)
