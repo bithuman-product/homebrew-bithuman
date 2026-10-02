@@ -1,7 +1,7 @@
-## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.31: waits for engines that refuse them)
+## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.32: waits for engines that refuse them)
 
 The plugin's half is in place since 2.6.29; it acts once the engines refuse such a file, which the pinned ones
-(`essence2-android` 0.9.1, Essence 2 `essence2-v1.15.2`) do not. Every live Essence 2 avatar was re-published with
+(`essence2-android` 0.9.2, Essence 2 on Apple) do not. Every live Essence 2 avatar was re-published with
 the mouth-corner fix on 2026-10-01.
 
 * **Android: an identity installed before the re-publish refreshes itself.** The store no longer opens such an install
@@ -12,6 +12,18 @@ the mouth-corner fix on 2026-10-01.
   with the engine's sentence, instead of a bare `rc=-2 — idle only`. Download the file again
   (`GET /v1/agent/{code}/model/download`). (Essence2Kit's `Essence2Download.identity(agentCode:)` +
   `Essence2Engine.create` refresh a downloaded file by themselves.)
+
+## 2.6.32 — 2026-10-02 — Android: Essence 2 keeps moving more smoothly on a heat-throttled phone (engine 0.9.2)
+
+Tag `flutter-plugin-v2.6.32`. Android `essence2-android` 0.9.1 -> **0.9.2** (maven.bithuman.ai); `expression2-android`
+0.5.2. iOS / macOS unchanged from 2.6.31. No plugin code change.
+
+* **Android Essence 2 engine 0.9.2: on a heat-throttled phone, Essence 2 characters keep moving more smoothly.** When
+  the phone has been busy for a while and caps its GPU, the engine renders the character's 720p output and scales it
+  up to the full-size frame, then returns to full resolution once the phone cools. The 720p file (~4.8 MB) is fetched
+  after the first session on 0.9.2, so the step-down is available from the next session. Measured by bitHuman on a
+  Galaxy Z Flip5 at its deepest throttle: about 75% of the frames the voice needs reached the screen (median), against
+  37% with 0.9.1.
 
 ## 2.6.31 — 2026-10-02 — iOS / macOS: Essence 2 engine v1.15.3; the voice-gated presenter is the default again, with a stall guard
 

@@ -197,7 +197,13 @@ dependencies {
     // skipped frame no longer sends the cursor back past its decoded history). `idle(ByteBuffer)` is
     // legal again in zero-copy mode (the cursor step after every speech frame). Additive API; the
     // plugin needs it from 2.6.29. Same store behaviour as 0.9.0.
-    implementation 'ai.bithuman:essence2-android:0.9.1'
+    // 0.9.2 (2026-10-02, maven.bithuman.ai only): ADAPTIVE 720p WHILE THROTTLED. On a phone that caps its GPU
+    // after a while in calls, the engine renders the identity's published 720p output and scales it into the same
+    // full-size frame (Sofia: 1080x1920), then returns to full resolution once the phone cools; the store fetches
+    // that ~4.8 MB member after the first session on 0.9.2 and the step-down arms from the next. The frames the
+    // plugin receives keep their size, so the presenter is unchanged. Galaxy Z Flip5 at the deepest throttle
+    // (10x Efficiency): shown/due median ~75%, 37% on 0.9.1. AAR sha256 92c1fde5b38a07f9… (as served).
+    implementation 'ai.bithuman:essence2-android:0.9.2'
 
     // Plain-JVM unit tests of the platform-free parts (src/test/kotlin: EngineUsersTest — dispose
     // closes an engine only after its threads returned). Test scope only: nothing ships in the AAR.
