@@ -447,10 +447,21 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         Essence2Credential.set(secret)   // 0.5.15: the one setter for the door and the meter
         val store = Essence2ModelStore(context, java.io.File(context.filesDir, "essence2"),
             3L * 1024 * 1024 * 1024, Essence2ModelStore.MeteredDoorResolver(secret))
-        val bundle = store.fetch(code, false, handle.storeCancel) { member, done, total ->
+        // ★THE CACHED COPY OPENS FIRST; THE DOOR IS ASKED AFTER (2.6.28). Since essence2-android
+        // 0.5.6 a cache hit in `fetch` asks the door whether a member changed before it returns
+        // (one short attempt, up to 8 s), so every cold open of a character already on the phone
+        // waited on the network: 1.5-5.8 s, median ~3 s, of Sofia's ~8 s launch on a Galaxy Z
+        // Fold5 / Flip5 (2026-10-01). `cached` is the same verified bundle with no request
+        // (member lengths and recorded digests checked on disk); the engine opens on it now,
+        // and the door's answer is applied in the background once the engine is up — a changed
+        // member is downloaded, verified and swapped in under the store's journal, so the NEXT
+        // open uses it. Nothing on the phone (or a swap left half-done): the full fetch as before.
+        val hit = runCatching { store.cached(code) }.getOrNull()
+        val bundle = hit ?: store.fetch(code, false, handle.storeCancel) { member, done, total ->
             if (total > 0 && done == total) Log.i(TAG, "fetched $member")
             loadEvents.fetchProgress(handle, done, total)
         }
+        if (hit != null) Log.i(TAG, "$code: the cached copy opens now (+${(System.nanoTime() - t0) / 1_000_000} ms); the door is asked after the load")
         loadEvents.fetched(handle)
         handle.throwIfCancelled()
         loadEvents.stage(handle, LoadHandle.STAGE_PREPARE)
@@ -465,7 +476,24 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         Log.i(TAG, "avatar ready ${avatar.width}x${avatar.height} (essence-2, ${e.fps} fps, driver ${avatar.targetFrames} frames" +
             " in place, delivery ${if (e.hardwareFrames) "zero-copy (${Essence2Engine.HW_SLOTS} hardware buffers)" else "copy"}" +
             "${if (forceCopy) ", debug.bh.e2.copy=1" else ""}) +${(System.nanoTime() - t0) / 1_000_000} ms")
+        if (hit != null) revalidateLater(store, code)
         return e
+    }
+
+    /**
+     * The door check a cached open skipped, off every thread that matters: `fetch` on a cache
+     * hit asks the door once and, if it changed a member, downloads, verifies and swaps it in
+     * (under the store's per-identity lock and swap journal) — for the next open. Started only
+     * once the engine is open, so a swap never lands while the engine reads the bundle; the
+     * open engine keeps the files it opened. Never throws, never fails the load.
+     */
+    private fun revalidateLater(store: Essence2ModelStore, code: String) {
+        Thread({
+            val t = System.nanoTime()
+            val r = runCatching { store.fetch(code, false, null, null) }
+            Log.i(TAG, "$code: door check after a cached open ${if (r.isSuccess) "done" else "failed (${r.exceptionOrNull()?.message})"} " +
+                "in ${(System.nanoTime() - t) / 1_000_000} ms (a changed member is used from the next open)")
+        }, "bh-revalidate").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }.start()
     }
 
     /** A player on [s]'s engine; its threads are registered with [AvatarSession.users]. */
