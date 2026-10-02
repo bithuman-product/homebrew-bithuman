@@ -1,3 +1,12 @@
+## Unreleased — Essence 2 stays smooth on a hot phone (Android)
+
+* **A throttled phone shows Essence 2 at 720 instead of freezing (Android).** The next `essence2-android` can deliver
+  the identity's 720 output as it is while the phone is throttled, instead of upscaling it to the full 1080 itself.
+  The plugin now draws a frame smaller than the avatar's surface scaled to fill it, filtered, on both delivery
+  paths (the zero-copy hardware buffers Sofia uses, and the copy path), and tells the engine so
+  (`Essence2Avatar.presenterScalesFrames`). A full-size frame is drawn exactly as before. A frame of another aspect
+  would be letterboxed, never stretched. The texture log line counts `scaled=` frames.
+
 ## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.31: waits for engines that refuse them)
 
 The plugin's half is in place since 2.6.29; it acts once the engines refuse such a file, which the pinned ones
