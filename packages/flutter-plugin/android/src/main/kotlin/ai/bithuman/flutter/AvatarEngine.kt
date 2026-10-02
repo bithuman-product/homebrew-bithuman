@@ -112,6 +112,13 @@ interface AvatarEngine : AutoCloseable {
     fun setPlayout(samples16k: Long) {}
     /** Frames the engine did not render because their audio had already gone out; -1 where it cannot say. */
     val skippedFrames: Long get() = -1L
+    /**
+     * The player may drop the silence queued ahead of a reply's first unit and start the voice at once
+     * (AvatarPlayer, "SPEECH START DOES NOT WAIT BEHIND SILENCE"). True by default (expression-2: a reply
+     * is heard ~0.35 s sooner). An engine that renders barely at real time needs that silence as its
+     * lead and answers false — see [Essence2Engine.dropsLeadingSilence].
+     */
+    val dropsLeadingSilence: Boolean get() = true
     val idle: IdleClip?
 }
 
@@ -410,6 +417,15 @@ class Essence2Engine(
     override val pendingAudioSlices get() = -1
     override fun stats(): EngineStats = EngineStats(pullNanos / 1e6, utterances, framesTotal)
     override fun setPlayout(samples16k: Long) { if (playoutClock) clock.set(samples16k) }
+    /**
+     * ★FALSE: A REPLY WAITS BEHIND THE QUEUED SILENCE (2.6.29). That silence (~0.5 s) is the engine's lead:
+     * with it dropped the voice starts at once, the frames — rendered barely at real time — all reach the
+     * player after their audio, and without the playout clock every one is dropped stale. Measured on a
+     * Galaxy Z Fold5, essence2-android 0.9.1 (RC3 bytes), Sofia, clock off, n=2: the barge-in reply showed
+     * 20 of 350 unique frames due (6%) with the drop, 252 of 411 (61%) waiting; the cold greeting 82% vs
+     * 99%. With the clock on the wait was still better (94% vs 71% greeting).
+     */
+    override val dropsLeadingSilence: Boolean get() = false
     override val skippedFrames: Long get() = runCatching { avatar.skippedFrames }.getOrDefault(-1L)
     override val idle: IdleClip? = if (nt > 0) idleClip else null
     override fun close() {
