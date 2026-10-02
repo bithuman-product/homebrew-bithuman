@@ -1,9 +1,20 @@
-// VoiceClock.swift — Essence 2's presenter on Apple plays the voice on its own clock (2.6.30).
+// VoiceClock.swift — Essence 2's two presenters on Apple: the voice-gated default with its stall guard
+// (2.6.31), and the voice on its own clock (2.6.30, opt-in since 2.6.31: `BithumanAvatar.load(voiceClock: true)`).
 //
-// Until 2.6.29 the Apple presenter released each frame's 40 ms of voice only when that frame was
-// shown ("voice-gated"). The voice could never lead the picture, so a slow or bursty engine was
-// HEARD: on an M4 Mac, 2–4 gaps per 16 s reply, the worst 160 ms. Android has played the voice on
-// its own clock and shown frames against it since 2.6.x; Apple now does the same:
+// ★THE DEFAULT IS VOICE-GATED (2.6.31), BY DATA. The shipped Live app on 2.6.29's voice-gated presenter, on the
+// iPhone 18 Pro (7 Sofia replies, 27.4 s voiced, 3 after barge-ins): 0 voice gaps of 40 ms or more (the largest
+// shortfall 16 ms, at cut boundaries only), a frame on every one of 689 display ticks in speech, lip-sync ~18 ms,
+// onset 161–503 ms. The voice on its own clock needs a 200 ms cushion there (no cushion: 160–200 ms gaps after a
+// barge-in, from the 320 ms cadence of the engine's motion blocks), so on a fast device it only adds latency.
+// The voice-gated presenter gets a STALL GUARD instead (StallGuard below): a tick with no frame while the
+// reply's voice is waiting releases that tick's voice anyway, so the voice never waits more than one tick; the
+// frames whose voice went ahead are then dropped (or shown without voice) until the picture is back in step.
+// On a fast phone it never fires.
+//
+// THE VOICE ON ITS OWN CLOCK (opt-in). The voice-gated presenter releases each frame's 40 ms of voice
+// only when that frame is shown, so it cannot lead the picture (in the engine's own 1x-arrival test on an
+// M4: 2–4 gaps per 16 s reply without the guard, the worst 160 ms). Android plays the voice on its own clock
+// and shows frames against it; with `voiceClock: true` Apple does the same:
 //
 //   - A reply's voice opens a CUSHION after its first speech frame is ready. Essence 2's motion
 //     arrives in 8-frame blocks of ~320 ms, so the engine gets a head start before the voice runs.
@@ -157,6 +168,56 @@ enum VoiceClockedPresenter {
   }
 }
 
+/// The voice-gated presenter's STALL GUARD (2.6.31). The voice-gated presenter releases a speech frame's
+/// 40 ms of voice when the frame is shown, so an engine that falls behind would hold the voice. Each display
+/// tick asks this guard:
+///  - a speech frame was pulled: `speechFrame` says show it and release its voice (the normal case), or —
+///    when the guard already released that frame's voice — drop it while a newer frame is ready, else show it
+///    without voice (the picture catches up, the voice is never released twice);
+///  - no voice released this tick (no speech frame, or only one whose voice the guard already released):
+///    `noVoiceReleased` says release one tick of voice anyway when the reply's voice is playing (a frame was
+///    shown since the voice last ran dry), voice is waiting, and a tick has passed since the last release. So the voice waits at most one tick (40 ms), and only after a reply has begun: the
+///    reply's first frame still opens its voice, as before.
+///  - the voice ran dry (nothing waiting): `voiceDry` — the next voice waits for its own frame again.
+/// Platform-free, tested on its own (test/swift/voice_clock_test.swift: a slow fake engine).
+final class StallGuard {
+  /// A tick without a frame releases the voice once this long has passed since the last release (the tick
+  /// is 40 ms; a little under it so a tick that runs a few ms early still counts).
+  static let afterSeconds: Double = 0.035
+  enum Verdict: Equatable { case showAndRelease, showWithoutVoice, drop }
+  /// Ticks of voice released ahead of their frames, not yet matched by a frame.
+  private(set) var debt = 0
+  /// A frame of the current reply has been shown since the voice last ran dry.
+  private(set) var replyPlaying = false
+  private(set) var firings = 0
+  private var lastReleaseAt: Double = 0
+
+  /// A new stream (an engine reset, a barge-in): nothing owed, nothing playing.
+  func reset() { debt = 0; replyPlaying = false; lastReleaseAt = 0 }
+
+  func speechFrame(now: Double, newerReady: Bool) -> Verdict {
+    if debt > 0 {
+      debt -= 1
+      return newerReady ? .drop : .showWithoutVoice
+    }
+    replyPlaying = true
+    lastReleaseAt = now
+    return .showAndRelease
+  }
+
+  /// This tick released no voice. True = release one tick of voice now (the caller does, and logs it).
+  func noVoiceReleased(now: Double, voiceWaiting: Bool) -> Bool {
+    guard replyPlaying, voiceWaiting, now - lastReleaseAt >= Self.afterSeconds else { return false }
+    debt += 1
+    firings += 1
+    lastReleaseAt = now
+    return true
+  }
+
+  /// Nothing of the voice is waiting: the next voice waits for its own frame (a reply's onset, as before).
+  func voiceDry() { replyPlaying = false }
+}
+
 /// One reply's voice and picture, summarised in ONE log line per reply (`[bhvoice] REPLY ...`, which
 /// the release gate reads): the voice's dry spells (count of 40 ms or more, how many over 80 ms, the
 /// worst), first sound (the reply's first audio in -> its first sample heard), and the A/V offset of
@@ -173,7 +234,7 @@ final class VoiceReplyMeter {
   private(set) var gapsMs: [Double] = []
   private(set) var offsetsMs: [Double] = []
   private(set) var voiceSeconds: Double = 0
-  var dropped = 0, lateShown = 0, beyond = 0, skipped: Int64 = 0
+  var dropped = 0, lateShown = 0, beyond = 0, skipped: Int64 = 0, stallGuard = 0
   var bargedIn = false
 
   init(reply: Int, mode: String, cushionMs: Int) {
@@ -208,11 +269,11 @@ final class VoiceReplyMeter {
     let frame = firstAudioAt > 0 && firstFrameAt > 0 ? Int(((firstFrameAt - firstAudioAt) * 1000).rounded()) : -1
     return String(format: "[bhvoice] REPLY %ld mode=%@ cushionMs=%ld voiceMs=%ld firstSoundMs=%ld firstFrameMs=%ld "
                   + "gaps=%ld over80=%ld maxGapMs=%ld microGaps=%ld shown=%ld dropped=%ld lateShown=%ld beyond=%ld skipped=%lld "
-                  + "avMs p50=%+.0f p95|%.0f| max|%.0f| over40=%ld barged=%@",
+                  + "avMs p50=%+.0f p95|%.0f| max|%.0f| over40=%ld stallGuard=%ld barged=%@",
                   reply, mode, cushionMs, Int((voiceSeconds * 1000).rounded()), first, frame,
                   gapCount, over80, Int((gapsMs.max() ?? 0).rounded()), gapsMs.filter { $0 < 40 }.count,
                   offsetsMs.count, dropped, lateShown, beyond, skipped,
                   pct(offsetsMs, 0.5), pct(absOff, 0.95), absOff.max() ?? 0,
-                  absOff.filter { $0 > VoiceClockPolicy.lateMs }.count, bargedIn ? "yes" : "no")
+                  absOff.filter { $0 > VoiceClockPolicy.lateMs }.count, stallGuard, bargedIn ? "yes" : "no")
   }
 }
