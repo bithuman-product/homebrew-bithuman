@@ -1279,9 +1279,11 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     var extra = ""
     #if os(iOS)
     let session = AVAudioSession.sharedInstance()
-    extra = String(format: " category=%@ mode=%@ route=%@",
+    // outputVolume (2.6.28): the hardware volume the echo is played at (0..1), beside the route.
+    extra = String(format: " category=%@ mode=%@ route=%@ volume=%.2f",
                    session.category.rawValue, session.mode.rawValue,
-                   session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: "+"))
+                   session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: "+"),
+                   session.outputVolume)
     #endif
     NSLog("[bhaec] vpioIn=%d vpioOut=%d agc=%d mic=on at=%@ platform=%@ inSr=%.0f outSr=%.0f inCh=%d%@",
           input.isVoiceProcessingEnabled ? 1 : 0,

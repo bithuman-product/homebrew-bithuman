@@ -33,6 +33,10 @@ int peakOf(String b64) {
   return p;
 }
 
+/// The onset guard alone: the barge gate (2.6.28) is off in these arms (test/barge_gate_test.dart
+/// and the gate arms in realtime_session_mock_test.dart cover it).
+const double _gateOff = -100;
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -81,7 +85,7 @@ void main() {
   test('while the agent is first audible, echo-level mic chunks go up as silence, '
       'a voice-level chunk goes up intact', () async {
     final s = BithumanRealtimeSession(
-        apiKey: 'k', avatar: host, model: 'm', echoOnsetGuard: const Duration(seconds: 8));
+        apiKey: 'k', avatar: host, model: 'm', bargeFloorDb: _gateOff, echoOnsetGuard: const Duration(seconds: 8));
     final conn = await dial(s);
     await conn.sendResponse(chunks: 10, chunkMs: 100, done: false); // 1 s of agent audio
     await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -96,7 +100,7 @@ void main() {
   test('before the agent has spoken, and with the guard off, the uplink is untouched',
       () async {
     final s = BithumanRealtimeSession(
-        apiKey: 'k', avatar: host, model: 'm', echoOnsetGuard: Duration.zero);
+        apiKey: 'k', avatar: host, model: 'm', bargeFloorDb: _gateOff, echoOnsetGuard: Duration.zero);
     final conn = await dial(s);
     expect(await sendAndReadPeaks(conn, [pcmAt(1400)]), [1400]);
     await conn.sendResponse(chunks: 10, chunkMs: 100, done: false);
@@ -111,7 +115,7 @@ void main() {
     // it arrives). The window is the canceller's clock — audible time — so the first seconds
     // of PLAYBACK are guarded; a window counted in delivered audio had closed already.
     final s = BithumanRealtimeSession(
-        apiKey: 'k', avatar: host, model: 'm', echoOnsetGuard: const Duration(seconds: 8));
+        apiKey: 'k', avatar: host, model: 'm', bargeFloorDb: _gateOff, echoOnsetGuard: const Duration(seconds: 8));
     final conn = await dial(s);
     await conn.sendResponse(chunks: 200, chunkMs: 100, done: false);
     await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -121,7 +125,7 @@ void main() {
 
   test('the guard ends after echoOnsetGuard of audible time', () async {
     final s = BithumanRealtimeSession(
-        apiKey: 'k', avatar: host, model: 'm', echoOnsetGuard: const Duration(milliseconds: 500));
+        apiKey: 'k', avatar: host, model: 'm', bargeFloorDb: _gateOff, echoOnsetGuard: const Duration(milliseconds: 500));
     final conn = await dial(s);
     await conn.sendResponse(chunks: 30, chunkMs: 100, done: false); // 3 s of agent audio
     await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -138,7 +142,8 @@ void main() {
     expect(EchoProfile.iphone.onsetGuard, const Duration(seconds: 8));
     expect(EchoProfile.android.onsetGuard, const Duration(seconds: 8));
     expect(EchoProfile.mac.onsetGuard, Duration.zero);
-    final s = BithumanRealtimeSession(apiKey: 'k', avatar: host, model: 'm');
+    final s = BithumanRealtimeSession(
+        apiKey: 'k', avatar: host, model: 'm', bargeFloorDb: _gateOff);
     final conn = await dial(s);
     await conn.sendResponse(chunks: 10, chunkMs: 100, done: false);
     await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -147,11 +152,43 @@ void main() {
     await s.stop();
   });
 
+  // ★THE BARGE GATE (2.6.28), end to end on the mock relay with a host that plays out at 1x.
+  test('barge gate: while the reply is HEARD the residual goes up as silence, a voice is held '
+      '200 ms then sent whole; before it is heard nothing is touched', () async {
+    host.playsOut = true;
+    final s = BithumanRealtimeSession(
+        apiKey: 'k', avatar: host, model: 'm', echoOnsetGuard: Duration.zero, bargeFloorDb: -8);
+    final conn = await dial(s);
+    expect(await sendAndReadPeaks(conn, [pcmAt(1400)]), [1400], reason: 'no agent voice yet');
+    await conn.sendResponse(chunks: 50, chunkMs: 100, done: false); // 5 s, in a burst
+    await Future<void>.delayed(const Duration(milliseconds: 400)); // heard after 100 ms latency
+    expect(await sendAndReadPeaks(conn, [pcmAt(1400)]), [0],
+        reason: '-27 dBFS under a ~-11 dBFS voice is its echo');
+    expect(await sendAndReadPeaks(conn, [pcmAt(12000), pcmAt(12000)]), [12000, 12000],
+        reason: 'a voice: held for the sustain, then both chunks go up, onset first');
+    expect(host.log.any((l) => l.startsWith('[bhgate] OPEN')), isTrue);
+    await s.stop();
+  });
+
+  test('barge gate: after a cut the uplink is open at once (the discarded voice is never heard)',
+      () async {
+    host.playsOut = true;
+    final s = BithumanRealtimeSession(
+        apiKey: 'k', avatar: host, model: 'm', echoOnsetGuard: Duration.zero, bargeFloorDb: -8);
+    final conn = await dial(s);
+    await conn.sendResponse(chunks: 50, chunkMs: 100, done: false);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    conn.sendSpeechStarted(); // the server heard the person: the reply is cut
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(await sendAndReadPeaks(conn, [pcmAt(1400)]), [1400]);
+    await s.stop();
+  });
+
   test('a start() still waiting for speechReady does not dial after a stop and restart',
       () async {
     final ready = Completer<void>();
     final s = BithumanRealtimeSession(
-        apiKey: 'k', avatar: host, model: 'm', speechReady: ready.future);
+        apiKey: 'k', avatar: host, model: 'm', bargeFloorDb: _gateOff, speechReady: ready.future);
     final first = s.start();
     await Future<void>.delayed(const Duration(milliseconds: 50));
     await s.stop();
@@ -170,7 +207,7 @@ void main() {
   test('speechReady holds the dial (and so the greeting) until it completes', () async {
     final ready = Completer<void>();
     final s = BithumanRealtimeSession(
-        apiKey: 'k', avatar: host, model: 'm', speechReady: ready.future);
+        apiKey: 'k', avatar: host, model: 'm', bargeFloorDb: _gateOff, speechReady: ready.future);
     final started = s.start();
     await Future<void>.delayed(const Duration(milliseconds: 400));
     expect(host.count('audioStart'), 0, reason: 'nothing starts before the mouth can move');

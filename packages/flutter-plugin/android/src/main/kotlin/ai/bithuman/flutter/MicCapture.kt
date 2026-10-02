@@ -11,6 +11,9 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
+import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -61,6 +64,8 @@ class MicCapture(
     @Volatile private var stopped = false
     private var record: AudioRecord? = null
     private var aec: AcousticEchoCanceler? = null
+    private var agc: AutomaticGainControl? = null
+    private var ns: NoiseSuppressor? = null
     private var thread: Thread? = null
     private var modeBefore = AudioManager.MODE_NORMAL
     /** This session's turn on the shared audio mode ([modeTurn] when it started). */
@@ -109,6 +114,22 @@ class MicCapture(
         if (AcousticEchoCanceler.isAvailable()) {
             aec = AcousticEchoCanceler.create(r.audioSessionId)?.apply { enabled = true }
         }
+        // The platform's other two pre-processors on this session, READ BACK for the `[bhaec]`
+        // line (the line said `agc=0` as a constant until 2.6.28). A debuggable host may set them
+        // for an A/B: `debug.bh.mic.agc` 1 = off, 2 = on; `debug.bh.mic.ns` 1 = on, 2 = off.
+        val debuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        val agcWant = if (debuggable) AvatarPlayer.devInt("debug.bh.mic.agc") else 0
+        val nsWant = if (debuggable) AvatarPlayer.devInt("debug.bh.mic.ns") else 0
+        if (AutomaticGainControl.isAvailable()) runCatching {
+            agc = AutomaticGainControl.create(r.audioSessionId)?.apply {
+                if (agcWant == 1) enabled = false else if (agcWant == 2) enabled = true
+            }
+        }
+        if (NoiseSuppressor.isAvailable()) runCatching {
+            ns = NoiseSuppressor.create(r.audioSessionId)?.apply {
+                if (nsWant == 1) enabled = true else if (nsWant == 2) enabled = false
+            }
+        }
         r.startRecording()
         live = true
         // Earbuds put in or taken out mid-call re-route it (the callback also lists what is there now).
@@ -132,8 +153,10 @@ class MicCapture(
         // and before this line the log said so only in an unnamed shape nothing graded.
         Log.i("bhaec", "[bhaec] vpioIn=${if (aec?.enabled == true) 1 else 0} " +
             "vpioOut=${if (am.mode == AudioManager.MODE_IN_COMMUNICATION) 1 else 0} " +
-            "agc=0 mic=on at=start platform=android " +
-            "mode=${am.mode} device=${r.routedDevice?.type} inSr=$RATE_IN")
+            "agc=${effectState(AutomaticGainControl.isAvailable(), agc?.enabled)} " +
+            "ns=${effectState(NoiseSuppressor.isAvailable(), ns?.enabled)} mic=on at=start platform=android " +
+            "mode=${am.mode} device=${r.routedDevice?.type} inSr=$RATE_IN " +
+            "volume=${am.getStreamVolume(AudioManager.STREAM_VOICE_CALL)}/${am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)}")
         thread = Thread({ loop(r) }, "bh-mic").also { it.start() }
         // Stopped while it opened: close now, on this thread, before any later start runs.
         if (stopped) { release(am); return false }
@@ -158,11 +181,15 @@ class MicCapture(
         live = false
         val r = record; record = null
         val a = aec; aec = null
+        val g = agc; agc = null
+        val n = ns; ns = null
         thread = null
         if (turn == 0) return   // never opened: nothing of the mode is ours
         val t0 = System.nanoTime()
         runCatching { r?.stop(); r?.release() }
         runCatching { a?.release() }
+        runCatching { g?.release() }
+        runCatching { n?.release() }
         restoreMode(am, owned = modeTurn.get() == turn)
         turn = 0
         Log.i("bhmic", "CLOSED in ${(System.nanoTime() - t0) / 1_000_000} ms, off the UI thread (mode=${am.mode})")
@@ -311,6 +338,10 @@ class MicCapture(
             }
         }
     }
+
+    /** `1`/`0` read back from the effect, `na` when the device has none. */
+    private fun effectState(available: Boolean, enabled: Boolean?): String =
+        if (!available) "na" else if (enabled == true) "1" else "0"
 
     companion object {
         private const val TAG = "BithumanAvatar"
