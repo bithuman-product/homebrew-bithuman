@@ -21,6 +21,11 @@ keywords: avatar, talking-avatar, lip-sync, digital-human, swift, swiftpm, ios, 
   Made by <a href="https://www.bithuman.ai">bitHuman</a>.
 </p>
 
+<p align="center">
+  <a href="https://discord.gg/x3tMhJvX4X"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white"></a><br>
+  Questions, demos and challenges: <a href="https://discord.gg/x3tMhJvX4X">join the bitHuman Discord</a>.
+</p>
+
 ---
 
 ## Apple SDK (Swift Package Manager)
