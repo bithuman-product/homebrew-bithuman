@@ -103,6 +103,15 @@ interface AvatarEngine : AutoCloseable {
     /** Audio slices the engine holds unrendered, where it can say; -1 where it cannot. */
     val pendingAudioSlices: Int
     fun stats(): EngineStats?
+    /**
+     * Skip-ahead (essence-2, essence2-android 0.9.1): the stream audio already committed to the
+     * device, in 16 kHz samples since the last [reset] — the player's admitted head. Called on
+     * every admitted unit that carries audio, from the producer; it must never wait on a render.
+     * Default: ignored (expression-2 renders in real time and has no such clock).
+     */
+    fun setPlayout(samples16k: Long) {}
+    /** Frames the engine did not render because their audio had already gone out; -1 where it cannot say. */
+    val skippedFrames: Long get() = -1L
     val idle: IdleClip?
 }
 
@@ -243,6 +252,15 @@ class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = tru
      */
     @Volatile private var leadPending = false
     @Volatile private var shut = false
+    /**
+     * ★SKIP-AHEAD (2.6.29, essence2-android 0.9.1). The player's committed position goes to the SDK
+     * ([setPlayout]) mapped onto the open utterance, and a delivered frame's stream position is
+     * the utterance base plus the ordinal the SDK names ([Essence2Avatar.lastFrameIndex]) — a slow
+     * phone shows fewer frames, each on its own audio, instead of a face frozen behind the voice
+     * (Galaxy Z Flip5, bitHuman Live: 10-20 fps rendered against the 25 the voice needs).
+     * [PlayoutClock] has its own lock: the producer never waits on this monitor.
+     */
+    private val clock = PlayoutClock({ avatar.setPlayoutPosition(it) }, { open })
     private val renderer = Thread(::renderLoop, "e2-render").apply { isDaemon = true; start() }
 
     override fun newFrameBitmap(): Bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -250,7 +268,7 @@ class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = tru
     /** Caller holds the monitor. The driver walk starts where the idle cursor stands. */
     private fun startUtterance() {
         uttBase += uttFed; uttFed = 0; delivered = 0; closed = false
-        avatar.resetAudio(startFrame = synchronized(idleLock) { cursor })
+        clock.reset(uttBase) { avatar.resetAudio(startFrame = synchronized(idleLock) { cursor }) }
         utterances++
         leadPending = true
     }
@@ -273,7 +291,7 @@ class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = tru
     @Synchronized override fun reset() {
         gen++
         pending.clear(); pendingN = 0; pendingClose = false
-        avatar.resetAudio(startFrame = synchronized(idleLock) { cursor })
+        clock.reset(0L) { avatar.resetAudio(startFrame = synchronized(idleLock) { cursor }) }
         uttBase = 0; uttFed = 0; delivered = 0; open = false; closed = false
         queued = 0
         // Finished frames of the cancelled reply go back to the pool (or to the engine); the
@@ -299,6 +317,9 @@ class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = tru
             // be showing — exactly as a failed copy-path render does. HW_SLOTS is sized so it cannot.
             val hf: Essence2HardwareFrame? = if (hardwareFrames) avatar.pullHardwareBuffer() else null
             val got = if (hardwareFrames) hf != null else avatar.pull(buf!!)
+            // The frame's ordinal in the utterance, read on this thread right after the pull (the
+            // SDK's rule); -1 before an utterance's first frame.
+            val k = if (got) avatar.lastFrameIndex else -1L
             pullNanos += System.nanoTime() - t0
             val at = synchronized(this) {
                 queued = avatar.available()
@@ -306,11 +327,15 @@ class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = tru
                     g != gen -> -1L                    // rendered across a reset: belongs to the old reply
                     !got -> { onNoFrame(); -1L }
                     else -> {
-                        val a = uttBase + delivered * HOP
-                        delivered++; framesTotal++
-                        // The driver walk advanced one frame; keep the idle cursor beside it so
-                        // the footage runs on when the reply ends, rather than jumping back.
-                        stepIdle()
+                        // Skip-ahead: the SDK names the frame's ordinal; the frames it skipped (their
+                        // audio had gone out) are missing, and their audio plays under the frame before.
+                        val a = PlayoutClock.frameAt(uttBase, k, delivered, HOP)
+                        // The driver walk advanced one frame per ORDINAL — the SDK's walk steps over a
+                        // skipped frame too — so the idle cursor steps as many, and the footage runs
+                        // on from where the picture is when the reply ends, rather than jumping back
+                        // by every frame that was skipped.
+                        repeat(PlayoutClock.idleSteps(k, delivered, nt)) { stepIdle() }
+                        delivered = PlayoutClock.nextDelivered(k, delivered); framesTotal++
                         a
                     }
                 }
@@ -379,6 +404,8 @@ class Essence2Engine(private val avatar: Essence2Avatar, zeroCopy: Boolean = tru
     override val queuedFrames get() = queued + ready.size
     override val pendingAudioSlices get() = -1
     override fun stats(): EngineStats = EngineStats(pullNanos / 1e6, utterances, framesTotal)
+    override fun setPlayout(samples16k: Long) = clock.set(samples16k)
+    override val skippedFrames: Long get() = runCatching { avatar.skippedFrames }.getOrDefault(-1L)
     override val idle: IdleClip? = if (nt > 0) idleClip else null
     override fun close() {
         shut = true

@@ -246,6 +246,12 @@ class AvatarPlayer(
     @Volatile private var presentedSeq = 0L
     private var admittedSeq = 0L
     private val silence = ByteArray(BYTES_PER_FRAME)
+    /**
+     * Speech coverage as a viewer sees it (2.6.29): unique speech frames shown ÷ frames due for the
+     * audio played, per utterance (`bhcov UTT`), with a `FROZEN` line when a second of voice showed
+     * under half its frames. See SpeechCoverage.kt. Presenter thread only.
+     */
+    private val coverage = SpeechCoverage(avatar.fps, log = { Log.i("bhcov", it) })
 
     /**
      * SYNC MARKER — a dev lever, off unless `adb shell setprop debug.bh.marker.every N`.
@@ -744,6 +750,10 @@ class AvatarPlayer(
 
     private fun admitSpeech(frame: Bitmap, slot: Int, body: ByteArray, kind: Char, e: Int,
                             fedEnd: Long = -1L, fedGen: Int = -1) {
+        // Skip-ahead (essence-2): this unit's audio is committed — it plays whatever the picture
+        // does — so the engine learns where the voice is on every unit that carries audio (25 a
+        // second while speaking, catch-up units included). `head` is past this unit's body.
+        if (body !== silence) avatar.setPlayout(synchronized(audioLock) { head } / BYTES_PER_SAMPLE16)
         if (resetPending && e == epoch) nLeak++      // a unit of the new epoch admitted before the reset landed
         val seq = ++admittedSeq
         if (slot >= 0) slotSeq[slot] = seq
@@ -757,6 +767,9 @@ class AvatarPlayer(
         admit(AvUnit(sessionSamples, f, e, true, stats.turnGen, body, seq, kind, fedEnd, fedGen))
         sessionSamples += (body.size / 2).toLong()
     }
+
+    /** A unit that plays reply audio (a new frame, a catch-up, a tail) — one frame DUE; a held frame over silence is not. */
+    private fun carriesAudio(u: AvUnit): Boolean = u.kind == 'S' || u.kind == 'C' || u.kind == 'T'
 
     /** 12 ms Hann-windowed 2 kHz tone at -6 dBFS, mixed into the head of [body] in place. */
     private fun mixClick(body: ByteArray) {
@@ -903,9 +916,12 @@ class AvatarPlayer(
     @Volatile private var farPeak = 0
 
     /** created -> handed to write() -> presented. If they disagree, units are being lost. */
+    // ★cov (2.6.29) is UNIQUE speech frames shown ÷ frames DUE for the audio played (SpeechCoverage):
+    // speechPresented counts a held frame re-shown under its audio, so it read 86-93% on a frozen face.
     fun census(): String = "created=$nCreated written=$nWritten presented=$nPresented " +
         "| COVERAGE speechWritten=$nWriteSpeech speechPresented=$nPresSpeech " +
-        "cov=${if (nWriteSpeech > 0) (100 * nPresSpeech / nWriteSpeech) else 0}% " +
+        "uniqueShown=${coverage.uniqueTotal} due=${coverage.dueTotal} cov=${coverage.coveragePct}% " +
+        "frozen=${coverage.frozenUnitsTotal * 1000 / avatar.fps}ms/${coverage.frozenEpisodes} " +
         "presDropStale=$nPresDropStale presDropLate=$nPresDropLate"
 
     private fun admit(u: AvUnit) {
@@ -1145,7 +1161,8 @@ class AvatarPlayer(
             Log.i("bhav", "PROD where=$where idle=$nIdle speech=$nSpeech tailUnits=$nTailUnits " +
                 "catchUp=$nCatchUp await=$nAwait hold=$nHold stale=$nStale back=$nBackwards ringOverrun=$nRingOverrun starve=$nStarve barges=$nBarge leaks=$nLeak " +
                 "idleStall=$nIdleStall idleAt=${idleLoop?.lastIndex ?: -1}/${idleLoop?.frameCount ?: 0} idleWraps=${idleLoop?.wraps ?: 0} " +
-                "coalesced=$nCoalesced markers=$nMarkers q=${avatar.queuedFrames} inFlight=${toPresent.size} | " +
+                "coalesced=$nCoalesced markers=$nMarkers q=${avatar.queuedFrames} inFlight=${toPresent.size} " +
+                "${avatar.skippedFrames.let { if (it >= 0) "skipped=$it " else "" }}| " +
                 String.format("pull avg %.1fms max %dms over50=%d null=%d calls=%d", avg, pullMaxMs, pullOver50, nullPulls, pullCalls) +
                 " | " + stats.line().replace("\n", " "))
         }
@@ -1161,10 +1178,16 @@ class AvatarPlayer(
             }
             if (pos < c.ptsSamples) break
             toPresent.poll()
-            if (u != null) nCoalesced++
+            if (u != null) {
+                nCoalesced++
+                // Coalesced: its audio plays, its frame never reaches the glass — due, not shown.
+                if (u.speech) coverage.onSpeechUnit(u.turnGen, carriesAudio(u), newFrame = false)
+            }
             u = c
         }
         if (u == null) return
+        if (u.speech) coverage.onSpeechUnit(u.turnGen, carriesAudio(u), newFrame = u.kind == 'S')
+        else coverage.endUtterance()
         presentedSeq = maxOf(presentedSeq, u.seq)
         if (u.fedGen == playGen && u.fedEnd > playedFed) playedFed = minOf(u.fedEnd, fedOffered)
         onPlayout?.invoke(playedFed)

@@ -185,7 +185,16 @@ dependencies {
     // with a wider, feathered edge, so no step shows at the mouth corners. Measured against 0.8.1
     // on a Galaxy Z Flip5, interleaved: frame rate +1.1 % / -0.1 % (older / current avatar files),
     // memory within 4 MiB. No API change.
-    implementation 'ai.bithuman:essence2-android:0.9.0'
+    // 0.9.1 (2026-10-02, maven.bithuman.ai only): SISTER-CORE PLACEMENT + SKIP-AHEAD. 0.9.0 pinned
+    // the engine's pool into the app's whole cpuset (on a Galaxy Z Flip5: 3 little + 3 big cores), and
+    // a phone that rendered below real time showed a face frozen behind the voice — bitHuman Live,
+    // Sofia: 10-20 fps rendered against the 25 the voice needs, the presenter dropping every late
+    // frame. 0.9.1 places its threads on the non-little cores and adds `setPlayoutPosition` /
+    // `lastFrameIndex` / `skippedFrames`: told where the voice is (AvatarEngine.kt, PlayoutClock.kt),
+    // it skips the render of a frame whose audio has already gone out, so a slow phone shows fewer
+    // frames, each on its own audio. `idle(ByteBuffer)` is legal again in zero-copy mode (the
+    // cursor step after every speech frame). Additive API; the plugin needs it from 2.6.29.
+    implementation 'ai.bithuman:essence2-android:0.9.1'
 
     // Plain-JVM unit tests of the platform-free parts (src/test/kotlin: EngineUsersTest — dispose
     // closes an engine only after its threads returned). Test scope only: nothing ships in the AAR.
