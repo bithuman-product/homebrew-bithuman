@@ -1,13 +1,4 @@
-## Unreleased — Expression 2 characters published without an idle clip no longer stay blank (Android)
-
-* **Expression 2 characters published without an idle clip no longer stay blank (Android).** When a character's files
-  do not include its idle clip, `expression2-android` installs none (`Expression2Avatar.idleLoopUnavailableReason`
-  says why, and the plugin logs it once). The player waited for an idle frame before showing anything, so the first
-  frame never came, the avatar never became ready and the screen stayed blank. Now the plugin renders one frame from a
-  moment of silence and shows it until the first reply: the character appears and can talk. iOS and macOS were not
-  affected (the engine shows its rest frame there).
-
-## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.32: waits for engines that refuse them)
+## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.33: waits for engines that refuse them)
 
 The plugin's half is in place since 2.6.29; it acts once the engines refuse such a file, which the pinned ones
 (`essence2-android` 0.9.2, Essence 2 on Apple) do not. Every live Essence 2 avatar was re-published with
@@ -21,6 +12,18 @@ the mouth-corner fix on 2026-10-01.
   with the engine's sentence, instead of a bare `rc=-2 — idle only`. Download the file again
   (`GET /v1/agent/{code}/model/download`). (Essence2Kit's `Essence2Download.identity(agentCode:)` +
   `Essence2Engine.create` refresh a downloaded file by themselves.)
+
+## 2.6.33 — 2026-10-02 — Expression 2 characters published without an idle clip no longer stay blank (Android)
+
+Tag `flutter-plugin-v2.6.33`. Engines unchanged from 2.6.32: Android `essence2-android` 0.9.2, `expression2-android`
+0.5.2; iOS / macOS as in 2.6.31.
+
+* **Expression 2 characters published without an idle clip no longer stay blank (Android).** When a character's files
+  do not include its idle clip, `expression2-android` installs none (`Expression2Avatar.idleLoopUnavailableReason`
+  says why, and the plugin logs it once). The player waited for an idle frame before showing anything, so the first
+  frame never came, the avatar never became ready and the screen stayed blank. Now the plugin renders one frame from a
+  moment of silence and shows it until the first reply: the character appears and can talk. iOS and macOS were not
+  affected (the engine shows its rest frame there).
 
 ## 2.6.32 — 2026-10-02 — Android: Essence 2 keeps moving more smoothly on a heat-throttled phone (engine 0.9.2)
 
