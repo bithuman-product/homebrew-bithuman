@@ -47,7 +47,7 @@ let expression2Tag = "v2.19.2"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 // The Essence 2 archives. Essence2Kit fetches its runtime files from this release too.
-let essence2Tag = "essence2-v1.15.2"
+let essence2Tag = "essence2-v1.15.3"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 // EngineCore (macOS engine core) ships on its OWN tap tag: essence2-v1.15.0's EngineCore had
@@ -116,7 +116,7 @@ let package = Package(
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "a7e7b7f3e7cebd5e43bd576f618e83bdccba554aa653a819c611ba86d0ac3d99"
+            checksum: "564b9fa2c8b74c48d8b637ff347df23fbe674b8f057f77cceb747b78f98a5a05"
         ),
         // The Apple libraries libessence2.a calls, passed to the app's final link.
         .target(

@@ -76,8 +76,8 @@ public enum Essence2KitError: Error, CustomStringConvertible, Sendable {
     /// The engine never became ready within the timeout.
     case notReady(seconds: Double)
     /// The identity file is OUT OF DATE: published before the renderer this engine carries,
-    /// which refuses it (-4 from `be_essence2_create`: the essence2 engines after essence2-v1.15.2,
-    /// which this package pins and which still opens such a file). A file
+    /// which refuses it (-4 from `be_essence2_create`: the essence2 engines that carry the refusal;
+    /// essence2-v1.15.3, which this package pins, still opens such a file). A file
     /// `Essence2Download` fetched is fetched again by `create` itself; this is thrown for a
     /// file your app keeps. Download it again (`Essence2Download.identity(agentCode:)`, or
     /// "Download model" in the agent's studio at bithuman.ai) — retrying the same file never
@@ -818,7 +818,7 @@ public enum Essence2Download {
 /// never against a checksum served beside the file.
 public enum Essence2Resources {
     /// Must equal `essence2Tag` in Package.swift (the tap's check-apple-engine-pin.sh grades it).
-    public static let releaseTag = "essence2-v1.15.2"
+    public static let releaseTag = "essence2-v1.15.3"
     static let base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/"
     static let files: [(name: String, sha256: String)] = [
         ("w2v_ess_fp16_v1.onnx", "7340a0350c340e059f0931d7381fad1ed8aa579cc4440fcc3223f136d9aaa8e5"),

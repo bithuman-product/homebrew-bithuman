@@ -23,7 +23,7 @@ final class Essence2KitHealTests: XCTestCase {
 
     /// The engines this package has pinned that predate the refusal (bithuman-models #1763/#1766):
     /// they open an out-of-date file on their older renderer instead of answering -4.
-    static let enginesBeforeTheRefusal: Set<String> = ["essence2-v1.15.0", "essence2-v1.15.1", "essence2-v1.15.2"]
+    static let enginesBeforeTheRefusal: Set<String> = ["essence2-v1.15.0", "essence2-v1.15.1", "essence2-v1.15.2", "essence2-v1.15.3"]
 
     let refusal = "LEGACY REFUSED for identity 'A23KSG5258' (b1_fp32): this bundle carries no "
         + "lip_template.v1.json"

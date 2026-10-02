@@ -1,9 +1,10 @@
 // Essence2KitOutdatedIdentityTests — an identity file published before the renderer this SDK
 // carries (2026-10-02).
 //
-// ★WHY. The essence2 engine after essence2-v1.15.2 refuses an avatar file published before the
-// mouth-corner fix (2026-10-01): `be_essence2_create` answers -4 with a sentence naming the agent
-// (bithuman-models #1763/#1766). essence2-v1.15.2, the engine this package pins, predates that:
+// ★WHY. The essence2 engines that carry the out-of-date-file refusal refuse an avatar file published
+// before the mouth-corner fix (2026-10-01): `be_essence2_create` answers -4 with a sentence naming
+// the agent (bithuman-models #1763/#1766). essence2-v1.15.2, and essence2-v1.15.3 (the hotfix this
+// package pins since 2.20.0, cut from the 1.15.2 source WITHOUT #1763), predate that:
 // it still OPENS such a file on its older renderer (measured 2026-10-02 on an M4 with house avatar
 // A23KSG5258: two such files, one with a lip template and one without, both open and render
 // speech; neither answers -2 or -4). Once the pin moves, Essence2Kit fetches
