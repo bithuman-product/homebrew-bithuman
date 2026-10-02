@@ -1,3 +1,12 @@
+## Unreleased — Expression 2 characters published without an idle clip no longer stay blank (Android)
+
+* **Expression 2 characters published without an idle clip no longer stay blank (Android).** When a character's files
+  do not include its idle clip, `expression2-android` installs none (`Expression2Avatar.idleLoopUnavailableReason`
+  says why, and the plugin logs it once). The player waited for an idle frame before showing anything, so the first
+  frame never came, the avatar never became ready and the screen stayed blank. Now the plugin renders one frame from a
+  moment of silence and shows it until the first reply: the character appears and can talk. iOS and macOS were not
+  affected (the engine shows its rest frame there).
+
 ## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.32: waits for engines that refuse them)
 
 The plugin's half is in place since 2.6.29; it acts once the engines refuse such a file, which the pinned ones
