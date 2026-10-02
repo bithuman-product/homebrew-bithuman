@@ -21,6 +21,9 @@ final class Essence2Engine: BithumanEngine {
   static var motionDir: String? = nil
   /// The engine's sentence for the last identity it refused as OUT OF DATE (-4), else nil.
   static var lastCreateRefusal: String? = nil
+  /// MODEL_REJECTED (2.6.29): be_essence2_create refused the file (-2 / -4 / unknown), else nil.
+  /// The plugin's load answers it as the Flutter error MODEL_REJECTED — no more silent still face.
+  private(set) var modelRefusal: BithumanModelRefusal? = nil
 
   private var handle: UnsafeMutableRawPointer?
   let width: Int
@@ -42,8 +45,16 @@ final class Essence2Engine: BithumanEngine {
         NSLog("[essence2] OUT-OF-DATE AVATAR FILE %@ — download it again (GET /v1/agent/<code>/model/download); engine: %@",
               path, why.isEmpty ? "(no sentence)" : why)
         Self.lastCreateRefusal = why.isEmpty ? "out-of-date avatar file: \(path)" : why
+        modelRefusal = BithumanModelRefusal.essence2(rc: rc, sentence: why, path: path)
         h = nil
-      } else if rc != 0 { NSLog("[essence2] be_essence2_create failed rc=%d — idle only", rc); h = nil }
+      } else if rc != 0 {
+        var buf = [CChar](repeating: 0, count: 2048)
+        _ = be_essence2_last_refusal(&buf, Int32(buf.count))
+        let why = String(cString: buf)
+        NSLog("[essence2] be_essence2_create failed rc=%d — %@", rc, why.isEmpty ? "(no sentence)" : why)
+        modelRefusal = BithumanModelRefusal.essence2(rc: rc, sentence: why, path: path)
+        h = nil
+      }
     }
     handle = h
     var w: Int32 = 0, ht: Int32 = 0

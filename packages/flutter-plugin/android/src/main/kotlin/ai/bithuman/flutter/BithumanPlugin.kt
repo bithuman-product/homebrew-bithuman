@@ -401,7 +401,17 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 // was all a failed fetch ever logged.
                 if (cancelled) Log.i(TAG, "load of $code cancelled +${(System.nanoTime() - t0) / 1_000_000} ms: $e")
                 else Log.e(TAG, "load failed: $e${e.cause?.let { " (cause: $it)" } ?: ""}", e)
-                main.post { textures.loadFailed(texture); runCatching { result.error(if (cancelled) "load_cancelled" else "load_failed", e.message ?: e.toString(), null) } }
+                // ★MODEL_REJECTED (2.6.29): the engine refused the model file. Its own code, with the
+                // engine's native code and sentence — a terminal error the app can name, where
+                // `load_failed` read as a network failure worth retrying.
+                val rejected = (e as? ModelRejectedException)?.rejection
+                main.post {
+                    textures.loadFailed(texture)
+                    runCatching {
+                        if (rejected != null && !cancelled) result.error(ModelRejection.CODE, rejected.message, rejected.details())
+                        else result.error(if (cancelled) "load_cancelled" else "load_failed", e.message ?: e.toString(), null)
+                    }
+                }
             } finally {
                 loadEvents.end(handle)
             }
@@ -424,7 +434,9 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         // to create one without an API secret. 0.4.10's one setter arms the meter (and any
         // store resolver built without a credential), exactly as the essence-2 path does.
         if (!secret.isNullOrBlank()) ai.bithuman.expression2.Expression2Credential.set(secret)
-        val avatar = Expression2Avatar.create(context, model)
+        val avatar = try { Expression2Avatar.create(context, model) } catch (e: Exception) {
+            throw ModelRejection.expression2(e)?.let { ModelRejectedException(it, e) } ?: e
+        }
         loadEvents.stage(handle, LoadHandle.STAGE_PREPARED)
         // The idle loop the agent plays between turns is the SDK's: the identity's own
         // clip from the same store as the weights, decoded in place, every frame of it.
@@ -468,19 +480,29 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val avatar = try {
             Essence2Avatar.create(bundle.dir, java.io.File(bundle.dir, Essence2Avatar.W2V_MEMBER), 0)
         } catch (e: IllegalStateException) {
+            if (e.message?.contains("REFUSED for identity '") != true) {
+                throw ModelRejection.essence2(e)?.let { ModelRejectedException(it, e) } ?: e
+            }
             // ★AN INSTALL PUBLISHED BEFORE THE MOUTH-CORNER FIX IS FETCHED AGAIN, ONCE (2026-10-02). The
             // engine refuses it ("... REFUSED for identity '<code>'"); the door serves every live identity's
             // current bundle. essence2-android's store already skips such an install in
             // `cached`, so this is the belt for a check that passed and an engine that still
             // refused: a forced fetch (only the changed members) and one more open. A second
-            // refusal is the load's error, as any other.
-            if (e.message?.contains("REFUSED for identity '") != true) throw e
+            // refusal is MODEL_REJECTED (2.6.29), as is any other refusal the engine names.
             Log.i(TAG, "$code: the installed bundle is out of date; fetching it again (once)")
             val fresh = store.fetch(code, true, handle.storeCancel) { _, done, total ->
                 loadEvents.fetchProgress(handle, done, total)
             }
             handle.throwIfCancelled()
-            Essence2Avatar.create(fresh.dir, java.io.File(fresh.dir, Essence2Avatar.W2V_MEMBER), 0)
+            // The door served a file this engine cannot open: the app or the engine is out of date.
+            try {
+                Essence2Avatar.create(fresh.dir, java.io.File(fresh.dir, Essence2Avatar.W2V_MEMBER), 0)
+            } catch (e2: Exception) {
+                throw ModelRejection.essence2(e2)?.let { ModelRejectedException(it, e2) } ?: e2
+            }
+        } catch (e: RuntimeException) {
+            // The store's audio-frontend refusal (not an IllegalStateException).
+            throw ModelRejection.essence2(e)?.let { ModelRejectedException(it, e) } ?: e
         }
         loadEvents.stage(handle, LoadHandle.STAGE_PREPARED)
         // Zero-copy delivery by default (2.6.19). `debug.bh.e2.copy=1` keeps the copy path for a

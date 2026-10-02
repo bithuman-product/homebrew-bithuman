@@ -43,7 +43,7 @@ import 'src/echo_profile.dart';
 import 'src/spoken_captions.dart';
 import 'src/barge_gate.dart';
 
-export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout;
+export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout, BithumanModelRejected;
 export 'src/spoken_captions.dart' show BithumanSpokenText, SpokenCaptioner;
 
 /// One Realtime session over a single WebSocket.
@@ -196,6 +196,7 @@ class BithumanRealtimeSession {
   StreamSubscription? _wsSub;
   StreamSubscription<Uint8List>? _micSub;
   StreamSubscription<BithumanAudioInterruption>? _interruptionSub;
+  StreamSubscription<BithumanModelRejected>? _rejectionSub;
   bool _open = false;
 
   // Reconnect-with-backoff state. Active only while `_open == true` —
@@ -420,8 +421,10 @@ class BithumanRealtimeSession {
   /// the relay refused the credential (`UNAUTHORIZED`, HTTP 401), the account has
   /// no credits (`INSUFFICIENT_BALANCE`, 402), the plan does not include it
   /// (`PLAN_REQUIRED` / `FORBIDDEN`, 403), or the session reached its time limit
-  /// (`SESSION_DURATION_LIMIT`). Emitted once, right before [RealtimeStatus.error];
-  /// the session does NOT reconnect after it.
+  /// (`SESSION_DURATION_LIMIT`), or — on the device — the avatar's engine refused its
+  /// model file (`MODEL_REJECTED`, 2.6.29: [VoiceHost.modelRejections]; the message
+  /// carries the engine's native code). Emitted once, right before [RealtimeStatus.error];
+  /// the session does NOT reconnect after it, and it is torn down whole.
   final _errors = StreamController<RealtimeSessionError>.broadcast();
   Stream<RealtimeSessionError> get errorStream => _errors.stream;
   RealtimeSessionError? _terminalError;
@@ -429,10 +432,11 @@ class BithumanRealtimeSession {
 
   // Codes the relay ends a session with (an `error` event, then close 1008) or
   // refuses the handshake with. None of them heals on a retry. `PAYWALL` (2.6.28): the
-  // relay's plan gate for a session the account's plan does not cover.
+  // relay's plan gate for a session the account's plan does not cover. `MODEL_REJECTED`
+  // (2.6.29): the on-device engine refused the avatar's model file ([VoiceHost.modelRejections]).
   static const Set<String> _terminalCodes = {
     'UNAUTHORIZED', 'INSUFFICIENT_BALANCE', 'PLAN_REQUIRED', 'FORBIDDEN', 'PAYWALL',
-    'SESSION_DURATION_LIMIT', 'MODEL_LOCKED', 'BAD_REQUEST',
+    'SESSION_DURATION_LIMIT', 'MODEL_LOCKED', 'BAD_REQUEST', 'MODEL_REJECTED',
   };
 
   /// ★A TERMINAL ERROR ENDS THE SESSION WHOLE (2.6.28). Until 2.6.27 this only closed the
@@ -578,6 +582,11 @@ class BithumanRealtimeSession {
     final oldSub = _interruptionSub;
     if (oldSub != null) unawaited(oldSub.cancel());
     _interruptionSub = avatar.audioInterruptions.listen(_onAudioInterruption);
+    // The engine refused the avatar's model (2.6.29): terminal, the paywall's teardown. A host
+    // that already refused replays it, so a session started on it ends at once.
+    final oldRejection = _rejectionSub;
+    if (oldRejection != null) unawaited(oldRejection.cancel());
+    _rejectionSub = avatar.modelRejections.listen((r) => _terminal(r.code, r.message));
     // A new audio unit: the host's playout counts restart at zero, and so do the captions'.
     _captions.reset();
     final oldPlayout = _playoutSub;
@@ -1112,6 +1121,8 @@ class BithumanRealtimeSession {
     _micSub = null;
     await _interruptionSub?.cancel();
     _interruptionSub = null;
+    await _rejectionSub?.cancel();
+    _rejectionSub = null;
     await _playoutSub?.cancel();
     _playoutSub = null;
     await _wsSub?.cancel();

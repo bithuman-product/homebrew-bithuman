@@ -21,7 +21,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:bithuman/realtime_transport.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout;
+import 'package:bithuman/realtime_transport.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout, BithumanModelRejected;
 
 class RecordingVoiceHost implements VoiceHost {
   /// Every call, in order, as `name` or `name:arg` — the assertion surface.
@@ -41,6 +41,14 @@ class RecordingVoiceHost implements VoiceHost {
   final _converse = StreamController<Map<dynamic, dynamic>>.broadcast();
   final _interruptions = StreamController<BithumanAudioInterruption>.broadcast();
   final _playout = StreamController<BithumanPlayout>.broadcast();
+  final _rejections = StreamController<BithumanModelRejected>.broadcast();
+  BithumanModelRejected? _rejection;
+
+  /// The engine refuses the model, as a native host reports it (2.6.29); replayed to later listeners.
+  void rejectModel(BithumanModelRejected r) {
+    _rejection = r;
+    _rejections.add(r);
+  }
 
   /// Push a playout report at the session, as the host would while the voice is heard.
   void emitPlayout(BithumanPlayout p) => _playout.add(p);
@@ -97,6 +105,7 @@ class RecordingVoiceHost implements VoiceHost {
     await _interruptions.close();
     _player?.cancel();
     await _playout.close();
+    await _rejections.close();
   }
 
   @override
@@ -201,5 +210,12 @@ class RecordingVoiceHost implements VoiceHost {
   Stream<BithumanPlayout> get speechPlayout {
     calls.add('speechPlayout');
     return _playout.stream;
+  }
+
+  @override
+  Stream<BithumanModelRejected> get modelRejections {
+    calls.add('modelRejections');
+    final r = _rejection;
+    return r != null ? Stream<BithumanModelRejected>.value(r) : _rejections.stream;
   }
 }

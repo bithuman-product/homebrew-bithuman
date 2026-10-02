@@ -160,6 +160,9 @@ public protocol BithumanEngine: AnyObject {
     // ---- lifecycle ----
     func warmUp(warmSpeech: [Float]?)                   // heavy load+compile; flips isReady
     var isReady: Bool { get }                           // speech path live (gates mic/connect)
+    /// The engine refused to create from its model file (MODEL_REJECTED, 2.6.29), else nil.
+    /// Essence 2 knows at init; Expression 2 once `warmUp` returned. See ModelRefusal.swift.
+    var modelRefusal: BithumanModelRefusal? { get }
     func shutdown()                                     // drain native worker before host exit
 
     // ---- idle ----
@@ -239,6 +242,9 @@ public extension BithumanEngine {
     /// ~0-3, never reaching 32). A protocol requirement (not extension-only) so
     /// an existential call dynamically dispatches to that override.
     var speechCushion: Int { 32 }
+    /// Default: no engine-side refusal to report (a protocol requirement, so an existential call
+    /// reaches each adapter's own answer).
+    var modelRefusal: BithumanModelRefusal? { nil }
     /// Default teardown is a no-op (expression2 relies on ARC/deinit); the
     /// essence2 adapter OVERRIDES this to drain the MLX/ANE worker before host
     /// exit. A protocol requirement so an existential call reaches that override.
