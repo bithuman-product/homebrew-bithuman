@@ -119,10 +119,10 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # Must equal `essence2Tag` in Package.swift; the digests must equal that file's
 # `libessence2.xcframework.zip` binaryTarget checksum and the release's own
 # resources sidecar. Passed to the engine SDK bootstrap explicitly below.
-LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.15.2}"
-LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-a7e7b7f3e7cebd5e43bd576f618e83bdccba554aa653a819c611ba86d0ac3d99}"
-LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.15.2}"
-LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-c059a62066dd25deb3588bb6be59c15fa84ec91def50073d035b49f4f4ef3e10}"
+LIBESSENCE2_RELEASE="${LIBESSENCE2_RELEASE:-essence2-v1.15.3}"
+LIBESSENCE2_SHA256="${LIBESSENCE2_SHA256:-564b9fa2c8b74c48d8b637ff347df23fbe674b8f057f77cceb747b78f98a5a05}"
+LIBESSENCE2_RESOURCES_RELEASE="${LIBESSENCE2_RESOURCES_RELEASE:-essence2-v1.15.3}"
+LIBESSENCE2_RESOURCES_SHA256="${LIBESSENCE2_RESOURCES_SHA256:-a1e25d9f30f7e2a4e59226636e4de965eca5c3be4c56edb3bdc46001ff6a1f7b}"
 
 # ★ENGINECORE (macOS only, from essence2-v1.15.0 / Expression2 v2.19.0). On macOS the Essence 2
 # archive and the Expression 2 framework no longer carry the engine's licensing and metering
