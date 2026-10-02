@@ -1,6 +1,23 @@
-## Unreleased — Essence 2 keeps its face moving on a slow phone (Android); an engine that refuses its model file ends the call
+## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.29: waits for engines that refuse them)
 
-Ships with `essence2-android` 0.9.1 (maven.bithuman.ai).
+The plugin's half is in place since 2.6.29; it acts once the engines refuse such a file, which the pinned ones
+(`essence2-android` 0.9.1, Essence 2 `essence2-v1.15.2`) do not. Every live Essence 2 avatar was re-published with
+the mouth-corner fix on 2026-10-01.
+
+* **Android: an identity installed before the re-publish refreshes itself.** The store no longer opens such an install
+  from its cache; the load downloads the changed parts (not the whole identity) and opens the current one. If the
+  engine still refuses (a check that passed), the load fetches it again once and opens it — a second refusal is the
+  load's error.
+* **iOS / macOS: an out-of-date file is named in the log** (`[essence2] OUT-OF-DATE AVATAR FILE … download it again`)
+  with the engine's sentence, instead of a bare `rc=-2 — idle only`. Download the file again
+  (`GET /v1/agent/{code}/model/download`). (Essence2Kit's `Essence2Download.identity(agentCode:)` +
+  `Essence2Engine.create` refresh a downloaded file by themselves.)
+
+## 2.6.29 — 2026-10-02 — Essence 2 keeps moving while it talks (Android); a model the engine refuses ends the call; a faster voice start (Expression 2 only)
+
+Tag `flutter-plugin-v2.6.29`. Android `essence2-android` 0.9.0 -> **0.9.1** (maven.bithuman.ai), `expression2-android`
+0.5.2. iOS / macOS engines unchanged: Expression 2 `v2.19.2`, Essence 2 `essence2-v1.15.2`, macOS
+`enginecore-v1.0.2` (Swift package 2.19.4).
 
 * **Sofia and every Essence 2 character keep moving while they talk (Android).** On the Galaxy Z Fold5 and Z Flip5
   `essence2-android` 0.9.0 rendered well below the 25 frames a second the voice needs, and the face froze behind the
@@ -19,30 +36,14 @@ Ships with `essence2-android` 0.9.1 (maven.bithuman.ai).
   custom voice hosts:** `VoiceHost` gains `modelRejections` (a host without an engine may return an empty stream).
 * **The coverage log counts what the viewer sees (Android).** `COVERAGE … cov=` is now unique speech frames shown ÷
   frames due for the audio played; it used to count a held frame shown again under its audio, and read 86-93% on a
-  frozen face. One `bhcov UTT` line per utterance, and a `bhcov FROZEN` line when a second of voice showed fewer than
-  half its frames.
-
-## Unreleased (earlier) — avatar files published before the mouth-corner fix
-
-Ships with `essence2-android` > 0.9.0 and Essence 2 > `essence2-v1.15.2` (both carry the refusal and the
-refresh). Every live Essence 2 avatar was re-published with the mouth-corner fix on 2026-10-01; the
-engines now refuse a file published before it.
-
-* **Android: an identity installed before the re-publish refreshes itself.** The store no longer opens such an install
-  from its cache; the load downloads the changed parts (not the whole identity) and opens the current one. If the
-  engine still refuses (a check that passed), the load fetches it again once and opens it — a second refusal is the
-  load's error.
-* **Android: a reply is heard sooner (about 0.35 s on Expression 2).** A reply's first words no longer
-  wait for the silence already queued for the speaker while the character was idle: when everything
-  the speaker still holds is silence, it is dropped and the reply starts at once, and its first frame
-  goes up when the speaker reports that voice playing, as before. Measured on a Galaxy Z Fold5 with
-  Expression 2 (first voice byte to first heard sample, median): 1.24 s -> 0.91 s with the next
-  `expression2-android` (1.76 s with 0.5.2). Nothing that carries the voice is dropped; only idle
-  frames of the skipped silence are not shown. Essence 2 runs the same path (not yet measured).
-* **iOS / macOS: an out-of-date file is named in the log** (`[essence2] OUT-OF-DATE AVATAR FILE … download it again`)
-  with the engine's sentence, instead of a bare `rc=-2 — idle only`. Download the file again
-  (`GET /v1/agent/{code}/model/download`). (Essence2Kit's `Essence2Download.identity(agentCode:)` +
-  `Essence2Engine.create` refresh a downloaded file by themselves.)
+  frozen face. One `bhcov UTT` line per utterance, and a `bhcov FROZEN` line when, for more than a second, the last
+  second of voice showed fewer than half its frames.
+* **Faster voice start, Expression 2 only (Android).** A reply's first words no longer wait for the silence
+  already queued for the speaker while the character was idle: when everything the speaker still holds is silence,
+  it is dropped and the reply starts at once, and its first frame goes up when the speaker reports that voice
+  playing. Measured on a Galaxy Z Fold5 with Expression 2 (first voice byte to first heard sample, median):
+  1.24 s -> 0.91 s with the next `expression2-android` (1.76 s with 0.5.2). Essence 2 keeps the previous start:
+  that silence is the lead its frames need, and without it the face froze behind the voice.
 
 ## 2.6.28 — 2026-10-01 — the character's own voice no longer cuts it off; Sofia opens without waiting on the network; a paywall ends the call cleanly
 
