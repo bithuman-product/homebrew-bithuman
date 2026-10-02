@@ -38,6 +38,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Paint
+import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -116,6 +118,11 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         var micSink: EventChannel.EventSink? = null
         var micChannel: EventChannel? = null
         var framesDrawn = 0L
+        /** Frames drawn scaled to the surface (smaller than it: the engine's throttled step-down), 2.6.32. */
+        var framesScaled = 0L
+        /** Bilinear filtering for a scaled frame (FrameFit.kt); a 1:1 frame keeps the unfiltered call. */
+        private val scalePaint = Paint(Paint.FILTER_BITMAP_FLAG)
+        private val scaleDst = Rect()
 
         // Captions (2.6.27): `speechPlayout` {played, fed}, 24 kHz samples since audioStart.
         // Platform thread only.
@@ -155,7 +162,23 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 if (!stopped.get()) Log.w(TAG, "lock${if (hwCanvas) "Hardware" else ""}Canvas: ${e.message}"); return
             }
             var posted = false
-            try { canvas.drawBitmap(bmp, 0f, 0f, null) } finally {
+            try {
+                // ★A FRAME SMALLER THAN THE SURFACE FILLS IT (2.6.32). The surface is sized at load to
+                // the engine's full frame; essence2-android may deliver 720p while the phone is
+                // throttled (the presenter told it it scales — Essence2Engine), and the GPU stretches
+                // it here, filtered, instead of the engine upscaling 720 -> 1080 itself. A full-size
+                // frame keeps the old call: 1:1 at (0, 0), pixel-identical to 2.6.31. Both deliveries
+                // come through here: a hardware bitmap over the engine's buffer on a hardware canvas,
+                // or the copy path's bitmap on a software one.
+                val cw = canvas.width; val ch = canvas.height
+                val dst = FrameFit.scaledDst(bmp.width, bmp.height, cw, ch)
+                if (dst == null) canvas.drawBitmap(bmp, 0f, 0f, null)
+                else {
+                    scaleDst.set(dst[0], dst[1], dst[2], dst[3])
+                    canvas.drawBitmap(bmp, null, scaleDst, scalePaint)
+                    if (framesScaled++ == 0L) Log.i(TAG, "first scaled frame: ${bmp.width}x${bmp.height} -> ${cw}x$ch")
+                }
+            } finally {
                 // Its own catch: a surface the producer let go of between the lock and here throws
                 // IllegalStateException, and on the main thread that would end the app.
                 posted = try { surface.unlockCanvasAndPost(canvas); true } catch (e: IllegalStateException) {
@@ -166,7 +189,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             if (!posted) return
             framesDrawn++
             if (!ready.getAndSet(true)) Log.i(TAG, "first frame on the texture")
-            if (framesDrawn % 200 == 0L) Log.i(TAG, "texture frames=$framesDrawn ${player?.census() ?: ""}")
+            if (framesDrawn % 200 == 0L) Log.i(TAG, "texture frames=$framesDrawn scaled=$framesScaled ${player?.census() ?: ""}")
         }
 
         /**
