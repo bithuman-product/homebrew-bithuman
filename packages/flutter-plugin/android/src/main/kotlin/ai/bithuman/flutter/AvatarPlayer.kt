@@ -405,14 +405,16 @@ class AvatarPlayer(
         inbox.clear()
         toWrite.clear()
         toPresent.clear()
-        track.pause()
-        track.flush()
-        track.play()
+        synchronized(trackLock) {
+            track.pause()
+            track.flush()
+            track.play()
+            pBase = sessionSamples          // the device counter restarts; the session does not
+            tsValid = false; tsReadAt = 0L  // and so does its timestamp
+        }
         nBarge++; cutAtMs = t0; cutIdleAtMs = t0
         Log.i("bhbarge", "CUT $nBarge reason=$reason hostMs=$t0 epoch=$epoch headBefore=$headBefore flushedInMs=${System.currentTimeMillis() - t0} " +
             "q=${avatar.queuedFrames} pendingSlices=${avatar.pendingAudioSlices}")
-        pBase = sessionSamples          // the device counter restarts; the session does not
-        tsValid = false; tsReadAt = 0L  // and so does its timestamp
         inbox.offer(Reset)
         discardPlayout()                // captions: the cut voice is never heard
     }
@@ -477,6 +479,20 @@ class AvatarPlayer(
      */
     private fun p(): Long {
         val now = System.nanoTime()
+        // ★ After a speech-start re-base the new run is not audible until the device says so: the
+        // head counter moves as soon as the mixer pulls (55-62 ms ahead of the DAC, measured), and
+        // at the flush it reads 0 with pBase already on the speech unit, so without this wait the
+        // reply's first frame went up before its voice. Until a timestamp of the NEW run arrives
+        // (taken after the flush, within what was handed over) P stays just short of pBase; a
+        // device that never gives one falls back to the head after [DAC_WAIT_MS], as everywhere.
+        if (dacWaitUntil != 0L) {
+            val ok = runCatching { track.getTimestamp(clockTs) }.getOrDefault(false) &&
+                clockTs.nanoTime > dacWaitSince && clockTs.framePosition >= 0 &&
+                clockTs.framePosition <= track.playbackHeadPosition.toLong()
+            if (ok) { tsValid = true; tsReadAt = now; dacWaitUntil = 0L }
+            else if (now < dacWaitUntil) return pBase - 1
+            else dacWaitUntil = 0L
+        }
         if (now - tsReadAt > TS_REFRESH_MS * 1_000_000L) {
             tsReadAt = now
             tsValid = runCatching { track.getTimestamp(clockTs) }.getOrDefault(false)
@@ -487,8 +503,11 @@ class AvatarPlayer(
         return pBase + minOf(dac, track.playbackHeadPosition.toLong())
     }
     private val clockTs = AudioTimestamp()
-    private var tsReadAt = 0L
-    private var tsValid = false
+    @Volatile private var tsReadAt = 0L
+    @Volatile private var tsValid = false
+    /** Speech-start re-base: [p] waits for a DAC timestamp taken after [dacWaitSince] (nanoTime) until this deadline; 0 = not waiting. */
+    @Volatile private var dacWaitSince = 0L
+    @Volatile private var dacWaitUntil = 0L
 
     // ---------------------------------------------------------------- producer
 
@@ -931,6 +950,32 @@ class AvatarPlayer(
         }
     }
 
+    // ★ SPEECH START DOES NOT WAIT BEHIND SILENCE (2.6.29, 2026-10-02).
+    // A reply's first unit used to queue behind everything already handed on: up to IDLE_FLOOR
+    // idle units in [toWrite] and a full device buffer (DEVICE_UNITS, 160-200 ms), all of it
+    // SILENCE (idle and held units carry no voice), plus the DAC. Measured on a Galaxy Fold5 with
+    // the plugin presenter driven like bitHuman Live: ~0.5 s from the first speech frame to the
+    // first audible sample. When the device holds nothing but silence ([silentWritten] covers its
+    // whole buffer), that silence is dropped instead of waited out: silent units still queued
+    // ahead of a speech unit are not written, and at the speech unit the device is paused,
+    // flushed and restarted with P re-based on that unit's pts — the barge-in's own mechanics
+    // (pause/flush/play, `pBase`), under the same lock — and P holds until the device reports the
+    // new run's first DAC timestamp ([p]), so the first frame goes up with its voice, not before.
+    // Nothing that carries voice is ever dropped, every speech unit keeps its own samples, and the
+    // picture is still clocked on the DAC, so A/V sync is untouched; the idle (or held) frames of
+    // the dropped silence are the only frames not shown. `debug.bh.speechstart.wait=1` (debuggable host only) restores the wait.
+    private val trackLock = Any()
+    private val speechStartWait: Boolean = debuggable && devInt("debug.bh.speechstart.wait") == 1
+    private var silentWritten = 0
+    @Volatile private var nSpeechStarts = 0
+    @Volatile private var nSilentSkipped = 0
+    private val deviceUnits: Int by lazy {
+        unitsIn(runCatching { track.bufferSizeInFrames }.getOrDefault(-1), SAMPLES_PER_FRAME)
+    }
+    private fun silent(u: AvUnit) = isSilentKind(u.kind)
+    /** [nextVoicedIsSpeech] over [toWrite], current epoch only (weakly consistent; <= LEAD units). */
+    private fun speechQueued(): Boolean = nextVoicedIsSpeech(toWrite.filter { it.epoch == epoch }.map { it.kind })
+
     private fun writeLoop() {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
         while (running) {
@@ -940,7 +985,38 @@ class AvatarPlayer(
             // Blocking inside track.write IS the pacing, and it only happens once the
             // device buffer is genuinely full — which is the lead we could never build.
             while (running && u != null) {
+                if (u.epoch == epoch && !speechStartWait && silentWritten >= deviceUnits) {
+                    if (silent(u) && speechQueued()) {
+                        // Silence ahead of a waiting speech unit, with nothing but silence in the
+                        // device: not written, not shown. P is re-based at the speech unit below.
+                        nSilentSkipped++
+                        u = toWrite.poll()
+                        continue
+                    }
+                    if (u.kind == 'S') {
+                        val t0 = System.nanoTime()
+                        var headAfter = -1L
+                        synchronized(trackLock) {
+                            if (u.epoch == epoch) {
+                                track.pause()
+                                track.flush()
+                                headAfter = track.playbackHeadPosition.toLong()   // 0: flush restarts the counter
+                                track.play()
+                                pBase = u.ptsSamples       // the device counter restarts at this unit
+                                tsValid = false; tsReadAt = 0L
+                                dacWaitSince = System.nanoTime()
+                                dacWaitUntil = dacWaitSince + DAC_WAIT_MS * 1_000_000L
+                            }
+                        }
+                        nSpeechStarts++
+                        Log.i("bhstart", "SPEECH-START no wait behind silence: device held $silentWritten silent unit(s) " +
+                            "(buffer $deviceUnits), skipped=$nSilentSkipped starts=$nSpeechStarts pts=${u.ptsSamples} " +
+                            "headAfterFlush=$headAfter flushUs=${(System.nanoTime() - t0) / 1000} hostMs=${System.currentTimeMillis()}")
+                        silentWritten = 0
+                    }
+                }
                 if (u.epoch == epoch) {
+                    if (silent(u)) silentWritten++ else silentWritten = 0
                     val writeT0 = System.nanoTime()
                     runCatching { track.write(u.audio, 0, u.audio.size) }
                     val wus = (System.nanoTime() - writeT0) / 1000L
@@ -1143,6 +1219,23 @@ class AvatarPlayer(
     }
 
     companion object {
+        /** Idle and held units carry silence; S, C and T carry the reply's voice. */
+        internal fun isSilentKind(kind: Char) = kind == 'I' || kind == 'H'
+
+        /**
+         * Speech start: the first unit in [kinds] (queue order) that carries voice is a speech unit 'S'.
+         * Only then may the writer drop the silence ahead of it, because that 'S' re-bases the device
+         * clock before any voice is written; a 'C' or 'T' first (voice under an older frame) must not.
+         */
+        internal fun nextVoicedIsSpeech(kinds: Iterable<Char>): Boolean {
+            for (k in kinds) if (!isSilentKind(k)) return k == 'S'
+            return false
+        }
+
+        /** Units of [samplesPerUnit] a device buffer of [bufferFrames] holds (rounded up; unknown = never). */
+        internal fun unitsIn(bufferFrames: Int, samplesPerUnit: Int): Int =
+            if (bufferFrames > 0 && samplesPerUnit > 0) (bufferFrames + samplesPerUnit - 1) / samplesPerUnit else Int.MAX_VALUE
+
         const val RATE = 24_000   // the wire rate: the realtime session speaks 24 kHz PCM16 both ways
         /** Whole units the writer may run ahead of the device — contract 4b requires this be stated. */
         const val LEAD = 12
@@ -1162,6 +1255,8 @@ class AvatarPlayer(
         private const val RING = LEAD + DEVICE_UNITS + 4
         /** How often the DAC timestamp is re-read; between reads it is extrapolated. */
         private const val TS_REFRESH_MS = 250L
+        /** Longest a speech-start re-base waits for the device's first DAC timestamp of the new run. */
+        private const val DAC_WAIT_MS = 300L
         /** The sync marker's click: 12 ms of 2 kHz. */
         private const val CLICK_HZ = 2000.0
         private val CLICK_SAMPLES = RATE * 12 / 1000
