@@ -241,6 +241,7 @@ Plus catalog helpers (anonymous, no auth):
 | `userTranscriptStream` | The user's transcribed speech (when OpenAI returns it). |
 | `micLevelStream` | Mic peak in [0, 1] per ~85 ms chunk. |
 | `botLevelStream` | Bot-audio peak in [0, 1] per chunk. |
+| `errorStream` / `lastError` | Why the session stopped for good: the relay refused or ended it (`UNAUTHORIZED`, `INSUFFICIENT_BALANCE`, `PAYWALL` (no Live minutes left), `PLAN_REQUIRED`, `FORBIDDEN`, `SESSION_DURATION_LIMIT`, `MODEL_LOCKED`, `BAD_REQUEST`). Emitted once, before `RealtimeStatus.error`; the session then tears itself down (microphone and speaker off, captions ended) and its streams close. It does not reconnect; build a new session to try again. |
 | `interruptionStream` | The avatar's `audioInterruptions` while the session runs. With `endOnAudioInterruption` (default true) a `began` is followed by the session stopping itself (`closed`), so nothing more is billed; `endedByInterruption` then says why. |
 
 The session auto-reconnects WS drops with 1/2/4/8/16/30 s backoff (cap 30 s, 8 attempts) before surfacing `RealtimeStatus.error`.
