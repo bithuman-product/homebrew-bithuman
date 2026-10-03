@@ -43,7 +43,7 @@ let releaseTag = "v2.4.0"
 let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(releaseTag)"
 
 // The Expression 2 archives.
-let expression2Tag = "v2.20.1"
+let expression2Tag = "v2.20.2"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 // The Essence 2 archives. Essence2Kit fetches its runtime files from this release too.
@@ -100,17 +100,17 @@ let package = Package(
         .binaryTarget(
             name: "Expression2Binary",
             url: "\(expression2Base)/Expression2.xcframework.zip",
-            checksum: "7e3f6c6619cd2a0408b234ac0aadee56526306825e40c1acd2c8f29f45ef4864"
+            checksum: "153d1ac53d9a902ace4608bd5422eaecc10810500ba53871896472d4ca57cc17"
         ),
         .binaryTarget(
             name: "BithumanEngineProtocolBinary",
             url: "\(expression2Base)/BithumanEngineProtocol.xcframework.zip",
-            checksum: "f26841e3753f4dfab79f2d0579835135010aa0e1a703dcc4360a0a9f295dd43f"
+            checksum: "a0dafca111b1d77183450d365a747345b8fdba752b4394c4477267c7f836553b"
         ),
         .binaryTarget(
             name: "UnifiedModelHeaderBinary",
             url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
-            checksum: "45f5911496afebe9bdb56b5238d5ce7cc5af359fb436c6aa0b8fed6ab75b3055"
+            checksum: "8b15ecc9ff9964a189dd1a009ba84cbd6033a2dc7c5597f139ddf201f734b65f"
         ),
         // The Essence 2 engine. Its module map declares `Essence2` and `CLibEssence2`.
         .binaryTarget(
