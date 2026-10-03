@@ -107,23 +107,23 @@ class BithumanAvatar implements VoiceHost {
   // matching [audioStart] await (the realtime session's sole caller).
   int _micGen = 0;
 
-  /// Load a model from a local file path.
+  /// Load an avatar and return it with a fresh [textureId].
   ///
-  /// Pass [apiSecret] (your bitHuman API secret) to authenticate the
-  /// metered engine before any frames are produced. The public-release
-  /// libessence requires this — without a successful auth the runtime stays
-  /// in the unauthenticated state and `pull_frame` returns no frames (black
-  /// canvas). The dev-only `BITHUMAN_UNMETERED=1` bypass is compiled out of
-  /// release builds, so a real secret is the supported path.
+  /// [engine] picks the model: `'expression2'` (Expression 2) or `'essence2'` (Essence 2); the public
+  /// model ids `'expression-2'` and `'essence-2'` are accepted too. Pass it every time. The default is
+  /// `'expression2'` (2.6.36; it was `'essence'`, a name no engine has: Android refused it and iOS and
+  /// macOS rendered Expression 2). An unknown name fails with `PlatformException` code `unsupported` on
+  /// every platform, and so does `'essence2'` in an iOS or macOS build that does not carry the Essence 2
+  /// engine (run the plugin's `scripts/bootstrap.sh`).
   ///
-  /// Engine swap (the same UI, a different engine): the default is Essence
-  /// (libessence, `.imx`). Pass [engine] = `'elevate'` to drive the Essence2
-  /// (light-avatar photoreal) engine instead — [imxPath] is then the `.lab`
-  /// path, [motionDir] the teacher-onnx dir, and [chunk] the frames-per-flush
-  /// (16 = realtime on Apple Silicon; use 2 on iOS for lower latency/memory).
-  /// Essence2 runs on macOS + iOS arm64, and on Android (`engine: 'essence2'`,
-  /// where [imxPath] is the agent CODE and [apiSecret] is required: the members
-  /// come through the metered door and every frame is metered).
+  /// [imxPath]: on Android, the agent code (for example `A23WJF0199`); the plugin downloads the avatar
+  /// and keeps it. On iOS and macOS, the avatar files your app downloaded: for Essence 2 the `.imx`
+  /// file; for Expression 2 the folder you also pass to [setExpression2AgentDir] before this call.
+  ///
+  /// [apiSecret]: your bitHuman API secret. The engines bill the session they serve and refuse to
+  /// render without it. A shipped app gets it from your backend, never as a literal in the app.
+  ///
+  /// [motionDir] and [chunk] are Apple engine tuning; leave them unset.
   ///
   /// [skipAhead] (Essence 2): the player tells the engine where the voice is, and a device that
   /// renders below real time shows fewer frames in step with the voice instead of a frozen face.
@@ -140,7 +140,7 @@ class BithumanAvatar implements VoiceHost {
   static Future<BithumanAvatar> load(
     String imxPath, {
     String? apiSecret,
-    String engine = 'essence',
+    String engine = 'expression2',
     String? motionDir,
     int chunk = 16,
     bool? skipAhead,
@@ -412,9 +412,15 @@ class BithumanAvatar implements VoiceHost {
     await _channel.invokeMethod('fitWindowToCanvas', {'width': w, 'height': h});
   }
 
-  /// Push 16 kHz mono int16 PCM. Native side schedules `tick_compose` at
-  /// 25 fps as the queue drains; new frames flow into the texture
-  /// automatically.
+  /// Push 16 kHz mono int16 speech.
+  ///
+  /// Android (2.6.36): the plugin converts it to 24 kHz and plays it through the same path as
+  /// [playSpeakerPCM], so the speech is heard and the lips follow it; call [notifyTurnEnd] after the
+  /// last chunk. Until 2.6.36 Android threw MissingPluginException here. iOS and macOS: the lips move
+  /// and nothing is played.
+  ///
+  /// To play your own speech with the same result on every platform, use [audioStart]
+  /// (`enableMic: false`), then [playSpeakerPCM] with 24 kHz audio, [notifyTurnEnd] and [interrupt].
   Future<void> pushAudio(Int16List pcm) async {
     if (_disposed) throw const BithumanAvatarException('avatar is disposed');
     await _channel.invokeMethod('pushAudio', {
@@ -564,8 +570,8 @@ class BithumanAvatar implements VoiceHost {
   /// frames-path only: the plugin maps drive-protocol playback onto the
   /// bundle's TALKING frame ranges while true and its IDLE (mouth-closed)
   /// ranges while false (`motion_ranges.json` sidecar; no sidecar = no-op).
-  /// Other platforms drive the mouth from real lipsync audio and don't
-  /// implement this method — call sites must gate on Platform.isAndroid.
+  /// iOS and macOS drive the mouth from the real audio and answer it as a
+  /// no-op (2.6.36; it threw MissingPluginException there before).
   Future<void> setSpeaking(bool speaking) async {
     if (_disposed) return;
     await _channel.invokeMethod('setSpeaking', {

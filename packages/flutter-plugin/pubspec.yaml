@@ -1,10 +1,10 @@
 name: bithuman
-description: "The bitHuman avatar umbrella Flutter plugin (macOS · iOS · Android) — engine-agnostic glue + the single libconverse module-map xcframework; statically aggregates N engine SDKs (expression-2, essence-2)."
+description: "bitHuman avatars on the device for Flutter (Android, iOS, macOS): Expression 2 and Essence 2, with a voice conversation through the bitHuman realtime relay."
 version: 2.6.35
 homepage: https://www.bithuman.ai
 repository: https://github.com/bithuman-product/homebrew-bithuman
 issue_tracker: https://github.com/bithuman-product/homebrew-bithuman/issues
-documentation: https://docs.bithuman.ai/sdk/android
+documentation: https://docs.bithuman.ai/platforms/flutter
 
 environment:
   sdk: ^3.11.5
@@ -16,12 +16,10 @@ dependencies:
   plugin_platform_interface: ^2.0.2
   web_socket_channel: ^3.0.3
 
-  # Shared realtime layer, moved down from the product app so the product and
-  # the public demo use ONE implementation. `http` mints the ephemeral OpenAI
-  # Realtime token from api.bithuman.ai; flutter_webrtc is the iOS/Android cloud
-  # transport (libwebrtc owns mic/speaker/AEC + the RTCAudioRenderer lipsync
-  # tap), while macOS keeps the WebSocket path through the native VP-IO
-  # RealtimeAudioIO.
+  # Shared realtime layer. The default session is a WebSocket to bitHuman's
+  # realtime relay (your API secret, no token to mint); flutter_webrtc carries
+  # the optional WebRTC transport (libwebrtc owns mic/speaker/AEC + the
+  # RTCAudioRenderer lipsync tap).
   # Pinned to 1.4.0 exactly: it locks WebRTC-SDK 144.7559.01, whose macOS
   # deployment target matches this pod's. 1.4.1+ pulls a newer WebRTC-SDK that
   # needs a higher macOS min than the podspec declares, and pod install fails.
@@ -52,9 +50,9 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
-  # bitHuman avatar plugin — Apple-only (macOS · iOS). Android was removed
-  # 2026-06-30 (Apple Silicon focus). pluginClass registers the native plugin
-  # for method channels; the native engine libs are bundled at build time.
+  # bitHuman avatar plugin — Android, iOS and macOS. pluginClass registers the
+  # native plugin for the method channels; Android resolves the engines from
+  # maven.bithuman.ai, iOS and macOS link the ones scripts/bootstrap.sh stages.
   plugin:
     platforms:
       ios:

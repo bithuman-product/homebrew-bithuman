@@ -15,9 +15,10 @@
 //     (mirrors the Dart kEngineRegistry; design §4).
 //
 // Resolution is DUAL-ACCEPT via EngineId.matches (the FROZEN slugs:
-// expression2/embody, essence2/elevate). An unknown/missing slug — and essence2
-// on a non-ESSENCE2_AVAILABLE (embody-only) build — falls back to the REQUIRED
-// default engine (expression2), exactly as the old loadFixtureAndRuntime did.
+// expression2/embody, essence2/elevate). ★2.6.36: the load handler asks `select(_:)`
+// first and REFUSES an unknown slug, or essence2 on a non-ESSENCE2_AVAILABLE build
+// (EngineSelection.swift); the expression2 fallback below now only answers callers
+// that have already passed that check.
 //
 // Apache-2.0; (c) bitHuman.
 
@@ -75,6 +76,21 @@ enum EngineRegistry {
   /// Canonical slug for a (possibly aliased) wire slug.
   static func canonical(for slug: String) -> String {
     descriptor(for: slug).id.canonical
+  }
+
+  /// True when this build links the engine (canonical slug): Essence 2 only when bootstrap staged it.
+  static func isInBuild(_ canonical: String) -> Bool {
+    #if ESSENCE2_AVAILABLE
+    return true
+    #else
+    return canonical != "essence2"
+    #endif
+  }
+
+  /// What a `load(engine:)` names (2.6.36): the load handler refuses an unknown slug, or an engine
+  /// this build does not carry, BEFORE anything is created — never the expression2 fallback above.
+  static func select(_ slug: String) -> EngineSelection {
+    EngineSelection.resolve(slug, among: descriptors.map { $0.id }, inBuild: isInBuild)
   }
 
   #if os(macOS) || os(iOS)
