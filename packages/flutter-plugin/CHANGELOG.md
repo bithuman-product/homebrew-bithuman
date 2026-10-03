@@ -1,17 +1,27 @@
-## Unreleased — avatar files published before the mouth-corner fix (not in 2.6.33: waits for engines that refuse them)
+## Unreleased — iOS / macOS: avatar files published before the mouth-corner fix (waits for an Apple engine that refuses them)
 
-The plugin's half is in place since 2.6.29; it acts once the engines refuse such a file, which the pinned ones
-(`essence2-android` 0.9.2, Essence 2 on Apple) do not. Every live Essence 2 avatar was re-published with
-the mouth-corner fix on 2026-10-01.
+The plugin's half is in place since 2.6.29; on iOS and macOS it acts once the Apple engine refuses such a file.
 
-* **Android: an identity installed before the re-publish refreshes itself.** The store no longer opens such an install
-  from its cache; the load downloads the changed parts (not the whole identity) and opens the current one. If the
-  engine still refuses (a check that passed), the load fetches it again once and opens it — a second refusal is the
-  load's error.
 * **iOS / macOS: an out-of-date file is named in the log** (`[essence2] OUT-OF-DATE AVATAR FILE … download it again`)
   with the engine's sentence, instead of a bare `rc=-2 — idle only`. Download the file again
   (`GET /v1/agent/{code}/model/download`). (Essence2Kit's `Essence2Download.identity(agentCode:)` +
   `Essence2Engine.create` refresh a downloaded file by themselves.)
+
+## 2.6.34 — 2026-10-03 — Android: an installed Essence 2 avatar opens in about 3 s; downloads continue in the background
+
+Tag `flutter-plugin-v2.6.34`. Android `essence2-android` 0.9.2 -> **0.9.3** (maven.bithuman.ai); `expression2-android`
+0.5.2. iOS / macOS unchanged from 2.6.31. No plugin code change.
+
+* **An installed Essence 2 avatar opens in about 3 s (Android).** The engine keeps its compiled GPU programs per device
+  and driver instead of compiling them on every open: measured by bitHuman on a Galaxy Z Flip5, 2.5–4.3 s instead of
+  6.0–11.2 s (the first open after an install compiles once, about 5 s). The warm-phone gains of 0.9.2 are kept.
+* **Downloads survive the background (Android).** A first download fetches several parts at once, resumes, and goes on
+  as a background job when the app leaves the screen (no notification). Your app's merged manifest gains
+  `ACCESS_NETWORK_STATE` and the engine's job service.
+* **An avatar file installed before the mouth-corner re-publish refreshes itself (Android).** The store no longer opens such an install
+  from its cache; the load downloads the changed parts (not the whole identity) and opens the current one. If the
+  engine still refuses (a check that passed), the load fetches it again once and opens it — a second refusal ends the
+  load with `MODEL_REJECTED`.
 
 ## 2.6.33 — 2026-10-02 — Expression 2 characters published without an idle clip no longer stay blank (Android)
 
