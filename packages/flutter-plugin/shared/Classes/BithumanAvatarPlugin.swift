@@ -202,13 +202,22 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
         return
       }
       // Engine select — REGISTRY-DRIVEN (M3), no `engineKind == "essence2"` here.
-      // The wire slug is dual-accept (expression2/embody, essence2/elevate;
-      // unknown/missing → the required default expression2). EngineRegistry
+      // The wire slug is dual-accept (expression2/embody/expression-2, essence2/elevate/essence-2;
+      // missing → expression2; unknown → refused below, 2.6.36). EngineRegistry
       // resolves it to the canonical slug + the engine's capabilities; the actual
       // engine CREATION (incl. essence2's activeAgentDir/motionDir from the avatar
       // ref) happens later in EngineRegistry.make (loadFixtureAndRuntime), so this
       // handler pokes no concrete engine type.
       let engineArg = (args["engine"] as? String) ?? "embody"
+      // ★2.6.36: an engine name no registered engine has, or one this build does not carry (Essence 2
+      // when bootstrap did not stage it), fails the load here, by name, with Android's code. Until now
+      // both rendered Expression 2 without a word.
+      let selection = EngineRegistry.select(engineArg)
+      if let why = selection.errorMessage {
+        NSLog("[BithumanAvatar] load refused: %@", why)
+        result(FlutterError(code: EngineSelection.errorCode, message: why, details: ["engine": engineArg]))
+        return
+      }
       let texture = AvatarTexture(imxPath: path)
       texture.engineKind = EngineRegistry.canonical(for: engineArg)
       texture.capabilities = EngineRegistry.capabilities(for: engineArg)
@@ -683,6 +692,12 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       }
       audioIOs[textureId]?.barge(reason: (args["reason"] as? String) ?? "app")
       result(nil)
+
+    // Android's frames-path hint (`BithumanAvatar.setSpeaking`). The mouth here follows the real
+    // audio, so there is nothing to gate: answered as Android answers it (2.6.36), where until now
+    // the call threw MissingPluginException on iOS and macOS.
+    case "setSpeaking":
+      result(true)
 
     case "log":
       // The transport's instrument lines, into the same stream as the presenter's.
