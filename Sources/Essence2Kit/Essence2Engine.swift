@@ -785,7 +785,8 @@ public enum Essence2Download {
     /// True (the default): a call for an avatar already on the device returns that file at once
     /// and asks the door in the background; a change is staged and lands on the next call.
     /// False: the door is asked before returning, as up to 2.20.0, and a change lands on this
-    /// call. Either way a door error never fails a call that has a good copy.
+    /// call. Either way a door that is down, slow or failing never fails a call that has a good
+    /// copy THIS credential has opened before (2.20.2); the door's refusal of the credential does.
     public static var revalidateInBackground: Bool {
         get { optionLock.lock(); defer { optionLock.unlock() }; return background }
         set { optionLock.lock(); background = newValue; optionLock.unlock() }
@@ -876,7 +877,20 @@ public enum Essence2Download {
     struct DoorAnswer: Error {
         let status: Int
         let error: Error
-        var isDenial: Bool { status == 401 || status == 403 || status == 404 }
+        /// `error.code` of the door's body (`NOT_FOUND`, `MODEL_ARTIFACT_NOT_READY`, ...), or nil.
+        var code: String? = nil
+        /// 401/403 refuse the credential, 404 NOT_FOUND ("Agent not found") the avatar for it. Not
+        /// a "no": 404 MODEL_ARTIFACT_NOT_READY, which the door answers the OWNER while an avatar is
+        /// re-baked or published (poll on it), or any other answer.
+        var isDenial: Bool { status == 401 || status == 403 || (status == 404 && code == "NOT_FOUND") }
+    }
+
+    /// `error.code` of a door error body (`{"error": {"code": "NOT_FOUND", ...}}`), or nil.
+    static func doorErrorCode(_ body: String) -> String? {
+        guard let r = body.range(of: "\"code\"\\s*:\\s*\"[A-Za-z0-9_]+\"", options: .regularExpression) else { return nil }
+        let m = body[r]
+        guard let open = m.dropLast().lastIndex(of: "\"") else { return nil }
+        return String(m[m.index(after: open)..<m.index(before: m.endIndex)])
     }
 
     // MARK: the two requests
@@ -927,7 +941,7 @@ public enum Essence2Download {
               let urlString = d["url"] as? String, let url = URL(string: urlString) else {
             let msg = String(decoding: body.prefix(300), as: UTF8.self)
             throw DoorAnswer(status: status, error: Essence2KitError.resourcesUnavailable(
-                "\(agentCode): the download door answered HTTP \(status): \(msg)"))
+                "\(agentCode): the download door answered HTTP \(status): \(msg)"), code: doorErrorCode(msg))
         }
         return Grant(url: url, sha256: (d["raw_sha256"] as? String) ?? (d["sha256"] as? String),
                      isSlice: (d["slice"] as? String).map { $0 != "universal" } ?? false)

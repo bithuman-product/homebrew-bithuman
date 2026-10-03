@@ -43,18 +43,21 @@ final class Essence2KitCrossAccountTests: XCTestCase {
         private let lock = NSLock()
         private var ownerKey: String
         private var isDown = false
+        private var ownerBody404: String?
         private(set) var asks: [String] = []
         let bytes: Data
         init(owner: String, bytes: Data) { ownerKey = owner; self.bytes = bytes }
         func setOwner(_ o: String) { lock.lock(); ownerKey = o; lock.unlock() }
         func setDown(_ d: Bool) { lock.lock(); isDown = d; lock.unlock() }
+        /// Answer the owner 404 with this body (the door's MODEL_ARTIFACT_NOT_READY during a re-bake).
+        func setOwner404(_ b: String?) { lock.lock(); ownerBody404 = b; lock.unlock() }
         var askLog: [String] { lock.lock(); defer { lock.unlock() }; return asks }
         func clear() { lock.lock(); asks = []; lock.unlock() }
-        private func decide(_ key: String?) -> (down: Bool, owner: Bool) {
+        private func decide(_ key: String?) -> (down: Bool, owner: Bool, owner404: String?) {
             lock.lock(); defer { lock.unlock() }
             let isOwner = key == ownerKey
             asks.append(isOwner ? "owner" : (key == nil ? "anonymous" : "other"))
-            return (isDown, isOwner)
+            return (isDown, isOwner, ownerBody404)
         }
 
         var io: Essence2Download.DoorIO {
@@ -63,6 +66,7 @@ final class Essence2KitCrossAccountTests: XCTestCase {
                     let d = decide(req.value(forHTTPHeaderField: "api-secret"))
                     if d.down { return (503, Data()) }
                     if !d.owner { return (404, Data(Essence2KitCrossAccountTests.prod404.utf8)) }
+                    if let b = d.owner404 { return (404, Data(b.utf8)) }
                     let sha = Essence2KitCrossAccountTests.sha(bytes)
                     return (200, Data("{\"data\":{\"url\":\"https://door.invalid/file/\(sha)\",\"sha256\":\"\(sha)\",\"slice\":\"apple\"}}".utf8))
                 },
@@ -174,6 +178,29 @@ final class Essence2KitCrossAccountTests: XCTestCase {
         _ = try await open(door, as: Self.owner)
         door.setDown(true)
         _ = try await open(door, as: Self.owner)   // marked once the door answered: door-down opens work
+    }
+
+    func testANotReadyAnswerKeepsTheOwnersMark() async throws {
+        // review finding 1: the door answers the OWNER 404 MODEL_ARTIFACT_NOT_READY during a re-bake.
+        let door = Door(owner: Self.owner, bytes: avatar)
+        _ = try await open(door, as: Self.owner)
+        await Essence2Download.settle()
+        door.setOwner404("{\"error\": {\"code\": \"MODEL_ARTIFACT_NOT_READY\", \"message\": \"not ready yet\", \"httpStatus\": 404}}")
+        let now = try await open(door, as: Self.owner)
+        XCTAssertEqual(now.standardizedFileURL, file.standardizedFileURL)
+        await Essence2Download.settle()
+        let blocking = try await open(door, as: Self.owner, .blocking)
+        XCTAssertEqual(blocking.standardizedFileURL, file.standardizedFileURL, "blocking: the copy, no throw")
+        door.setOwner404(nil)
+        door.setDown(true)
+        let down = try await open(door, as: Self.owner)
+        XCTAssertEqual(down.standardizedFileURL, file.standardizedFileURL, "the mark survived: door-down opens")
+    }
+
+    func testOnlyNotFoundIsADenial() {
+        XCTAssertEqual(Essence2Download.doorErrorCode(Self.prod404), "NOT_FOUND")
+        XCTAssertEqual(Essence2Download.doorErrorCode("{\"error\": {\"code\": \"MODEL_ARTIFACT_NOT_READY\"}}"), "MODEL_ARTIFACT_NOT_READY")
+        XCTAssertNil(Essence2Download.doorErrorCode("{\"error\":\"door down\"}"))
     }
 
     func testTheMarkIsATagNeverTheCredential() {
