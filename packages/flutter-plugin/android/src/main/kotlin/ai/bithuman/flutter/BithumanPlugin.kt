@@ -130,6 +130,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         var pushedPlayed = -1L
         var pushedFed = -1L
         var pushedAtMs = 0L
+        /** pushAudio's 16 kHz speech, converted to the player's 24 kHz (2.6.36). Platform thread. */
+        val upsampler = Pcm16kTo24k()
         private val hwCanvas = avatar.hardwareFrames
 
         /**
@@ -269,21 +271,26 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             // --- the agent's voice in: play it AND lipsync from it, one unit ---
             "playSpeakerPCM" -> {
                 val s = session(call) ?: return result.error("no_session", "unknown textureId", null)
-                val pcm = call.argument<ByteArray>("pcm")
-                if (pcm != null && pcm.isNotEmpty()) {
-                    // `fed` first, before anything can drop the chunk (captions count what Dart handed over).
-                    val fedStart = s.fedSamples
-                    s.fedSamples += pcm.size / 2
-                    val p = s.player
-                    if (p != null) { p.noteFirstByte(); p.offer(pcm, fedStart) }
-                    else notePlayed(s, s.fedSamples)        // no player (held): this audio is never heard
-                    if (fedStart == 0L) pushPlayout(s, force = true)   // the first chunk: a playout source exists
-                }
+                speak(s, call.argument<ByteArray>("pcm"))
                 result.success(null)
             }
-            "notifyTurnEnd" -> { session(call)?.player?.endOfReply(); result.success(null) }
+            // ★2.6.36: 16 kHz speech in (the Dart `pushAudio`), played and lip-synced like playSpeakerPCM.
+            // Until now Android had no such branch and the call threw MissingPluginException.
+            "pushAudio" -> {
+                val s = session(call) ?: return result.error("no_session", "unknown textureId", null)
+                val pcm = call.argument<ByteArray>("pcm")
+                if (pcm != null && pcm.isNotEmpty()) speak(s, s.upsampler.process(pcm))
+                result.success(null)
+            }
+            "notifyTurnEnd" -> {
+                val s = session(call)
+                // The last pushAudio samples the converter still holds (at most two), then the end of the reply.
+                if (s != null) speak(s, s.upsampler.flush())
+                s?.player?.endOfReply(); result.success(null)
+            }
             "interrupt" -> {
                 val s = session(call)
+                s?.upsampler?.reset()
                 s?.player?.bargeIn(call.argument<String>("reason") ?: "app")
                 // Everything handed over is discarded: captions end on what was heard before the cut.
                 if (s != null) { notePlayed(s, s.fedSamples); pushPlayout(s, force = true) }
@@ -322,9 +329,17 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             "pipStart", "pipStop", "fitWindowToCanvas", "setExpression2AgentDir",
             "attachWebrtcRemoteAudio", "detachWebrtcRemoteAudio" -> result.success(null)
 
+            // The on-device brain (local mode) runs on iOS and macOS only; isLocalModeSupported says
+            // false here. Answered by name (2.6.36) instead of notImplemented: a start is refused,
+            // and a stop or a mute has nothing to act on.
+            "localAudioStart", "localPushText" -> result.error("unsupported",
+                "local mode runs on iOS and macOS only (BithumanAvatar.isLocalModeSupported() is false on Android)", null)
+            "localAudioStop", "localSetMuted" -> result.success(null)
+
             // A container FILE is not expanded on Android: the SDK fetches an identity's
             // members by code through the download door (see load). `isModelContainer`
-            // falls through to notImplemented, which the Dart side reads as "cannot tell".
+            // answers null, which the Dart side reads as "cannot tell".
+            "isModelContainer" -> result.success(null)
             "unpackModelContainer" -> result.error("unsupported",
                 "Android loads an identity by code (BithumanAvatar.load); a container file is not expanded on this platform", null)
 
@@ -345,13 +360,16 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
 
     private fun load(call: MethodCall, result: Result) {
         val code = call.argument<String>("path")
-        val engine = call.argument<String>("engine") ?: "expression2"
+        val engine = call.argument<String>("engine") ?: EngineIds.EXPRESSION2
         val secret = call.argument<String>("apiSecret")
         val skipAhead = call.argument<Boolean>("skipAhead")
-        val essence2 = engine == "essence2" || engine == "elevate"
-        if (code.isNullOrBlank() || !(essence2 || engine == "expression2" || engine == "embody")) {
+        // 2.6.36: the public model ids (`essence-2`, `expression-2`) too, as on iOS and macOS.
+        val canonical = EngineIds.canonical(engine)
+            ?: return result.error("unsupported", EngineIds.unknownMessage(engine), null)
+        val essence2 = canonical == EngineIds.ESSENCE2
+        if (code.isNullOrBlank()) {
             return result.error("unsupported",
-                "Android runs engine='expression2' or 'essence2'; 'path' is the agent code (e.g. A02HCY0444)", null)
+                "Android runs engine='expression2' or 'essence2'; 'path' is the agent code (e.g. A23WJF0199)", null)
         }
         // Texture registration must happen on the platform thread; the fetch and the
         // engine warm-up must not (a first run downloads ~158 MB).
@@ -550,6 +568,21 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
 
     // ---------------------------------------------------------------- speech playout (captions)
 
+    /**
+     * 24 kHz mono PCM16 of the agent's voice into the player: it plays it and lip-syncs from the
+     * same chunk (playSpeakerPCM, and pushAudio after its 16 -> 24 kHz conversion). Platform thread.
+     */
+    private fun speak(s: AvatarSession, pcm: ByteArray?) {
+        if (pcm == null || pcm.isEmpty()) return
+        // `fed` first, before anything can drop the chunk (captions count what Dart handed over).
+        val fedStart = s.fedSamples
+        s.fedSamples += pcm.size / 2
+        val p = s.player
+        if (p != null) { p.noteFirstByte(); p.offer(pcm, fedStart) }
+        else notePlayed(s, s.fedSamples)        // no player (held): this audio is never heard
+        if (fedStart == 0L) pushPlayout(s, force = true)   // the first chunk: a playout source exists
+    }
+
     /** The player says [played] (fed coordinate) has been heard. Platform thread. */
     private fun notePlayed(s: AvatarSession, played: Long) {
         val p = minOf(played, s.fedSamples)
@@ -666,6 +699,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         // A new audio unit: the playout counts restart at zero (captions, `speechPlayout`).
         s.playMicGen = gen; s.fedSamples = 0L; s.playedSamples = 0L
         s.pushedPlayed = -1L; s.pushedFed = -1L; s.pushedAtMs = 0L; s.playoutOn = true
+        s.upsampler.reset()
         s.player?.resetPlayout()
         // The call's audio focus and the phone-call watch, for speaker-only sessions too: a call
         // answered from its notification leaves the app on screen and would otherwise go on.

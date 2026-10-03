@@ -1,9 +1,36 @@
-## Unreleased — iOS / macOS: avatar files published before the mouth-corner fix (waits for an Apple engine that refuses them)
+## Unreleased — Android `pushAudio` plays your speech; the public model ids on Android; an unknown engine fails by name on iOS / macOS
 
-The plugin's half is in place since 2.6.29; on iOS and macOS it acts once the Apple engine refuses such a file.
+No engine change. Nothing that worked before changes, except that iOS and macOS now refuse an engine name they used to
+replace with Expression 2 (below).
 
-* **iOS / macOS: an out-of-date file is named in the log** (`[essence2] OUT-OF-DATE AVATAR FILE … download it again`)
-  with the engine's sentence, instead of a bare `rc=-2 — idle only`. Download the file again
+* **`pushAudio` works on Android.** Until now Android had no `pushAudio`, the call the docs taught for your own
+  speech: it threw `MissingPluginException`. It now takes the 16 kHz speech, converts it to 24 kHz and plays it through
+  the same path as `playSpeakerPCM`, so it is heard and the lips follow it; call `notifyTurnEnd()` after the last chunk.
+  On iOS and macOS `pushAudio` still moves the lips with no sound. For the same result on every platform, use
+  `audioStart(enableMic: false)`, then `playSpeakerPCM` (24 kHz), `notifyTurnEnd()` and `interrupt()`.
+* **Android accepts the public model ids.** `load(engine: 'essence-2')` and `load(engine: 'expression-2')` now load
+  Essence 2 and Expression 2 (they failed with `unsupported`), as on iOS and macOS. `'essence2'` and `'expression2'`
+  still work.
+* **An unknown engine fails by name on iOS and macOS.** A name no engine has, or `'essence2'` in a build that does not
+  carry the Essence 2 engine (bootstrap did not stage it), rendered Expression 2 without a word. `load` now fails with
+  `PlatformException` code `unsupported`, as on Android, and the message says what to pass or how to fix the build.
+* **`engine:` defaults to `'expression2'`.** The old default, `'essence'`, named no engine: Android refused it and iOS
+  and macOS rendered Expression 2. A `load` without `engine:` now loads Expression 2 everywhere. Pass `engine:` every
+  time.
+* **Every channel call is answered on both platforms.** A new test (`test/channel_parity_test.dart`) checks that each
+  method the Dart side calls has a branch on Android and on iOS / macOS, or is listed as unsupported with a reason.
+  Android now answers the on-device brain's calls (`localAudioStart` and `localPushText` with `unsupported`; it has no
+  local mode) and `isModelContainer`; iOS and macOS answer `setSpeaking` as Android does. Each threw
+  `MissingPluginException` before.
+* **README and pubspec.** The README's voice example now uses your bitHuman API secret through bitHuman's realtime
+  relay (it showed an OpenAI key), presents iOS as supported, states the default engine, and drops `downloadAgent`
+  (no such function) and a link to a private repository. The pubspec's documentation link is
+  `docs.bithuman.ai/platforms/flutter`.
+* **iOS / macOS: an out-of-date avatar file is named in the log** (waits for an Apple engine that refuses such files;
+  the plugin's half is in place since 2.6.29).
+
+  The log line is `[essence2] OUT-OF-DATE AVATAR FILE … download it again`, with the engine's sentence, instead of a
+  bare `rc=-2 — idle only`. Download the file again
   (`GET /v1/agent/{code}/model/download`). (Essence2Kit's `Essence2Download.identity(agentCode:)` +
   `Essence2Engine.create` refresh a downloaded file by themselves.)
 
