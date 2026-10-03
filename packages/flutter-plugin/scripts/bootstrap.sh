@@ -167,11 +167,11 @@ ENGINECORE_SHA256="${ENGINECORE_SHA256:-1d3b6de3956bf6b287169331d0e12eb5b750d285
 # BithumanEngineProtocol, UnifiedModelHeader), from the same tap release and checked against the same
 # checksums Package.swift pins; the Essence 2 adapter is the plugin's own (shared/Classes). No engine
 # source is fetched, from anywhere. X2_XCF_DIR=<dir holding the three zips> stages a candidate build.
-EXPRESSION2_RELEASE="${EXPRESSION2_RELEASE:-v2.20.1}"
-EXPRESSION2_SHA256="${EXPRESSION2_SHA256:-7e3f6c6619cd2a0408b234ac0aadee56526306825e40c1acd2c8f29f45ef4864}"
-BEP_SHA256="${BEP_SHA256:-f26841e3753f4dfab79f2d0579835135010aa0e1a703dcc4360a0a9f295dd43f}"
-UMH_RELEASE="${UMH_RELEASE:-v2.20.1}"
-UMH_SHA256="${UMH_SHA256:-45f5911496afebe9bdb56b5238d5ce7cc5af359fb436c6aa0b8fed6ab75b3055}"
+EXPRESSION2_RELEASE="${EXPRESSION2_RELEASE:-v2.20.2}"
+EXPRESSION2_SHA256="${EXPRESSION2_SHA256:-153d1ac53d9a902ace4608bd5422eaecc10810500ba53871896472d4ca57cc17}"
+BEP_SHA256="${BEP_SHA256:-a0dafca111b1d77183450d365a747345b8fdba752b4394c4477267c7f836553b}"
+UMH_RELEASE="${UMH_RELEASE:-v2.20.2}"
+UMH_SHA256="${UMH_SHA256:-8b15ecc9ff9964a189dd1a009ba84cbd6033a2dc7c5597f139ddf201f734b65f}"
 
 # ---------------------------------------------------------------- PUBLIC vendor
 # The build outputs above also live on a PUBLIC, versioned, immutable release, so
