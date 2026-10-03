@@ -133,7 +133,9 @@ let package = Package(
         .target(
             name: "Essence2Kit",
             dependencies: ["libessence2", "onnxruntime", "UnifiedModelHeaderBinary", "Essence2LinkSettings", "BithumanEngineCoreLink"],
-            path: "Sources/Essence2Kit"
+            path: "Sources/Essence2Kit",
+            // The App Store privacy manifest (2.20.2), copied into the app as this target's bundle.
+            resources: [.copy("PrivacyInfo.xcprivacy")]
         ),
         .testTarget(
             name: "Essence2KitTests",
@@ -158,6 +160,9 @@ let package = Package(
             name: "BithumanEngineCoreLink",
             dependencies: [.target(name: "EngineCore", condition: .when(platforms: [.macOS]))],
             path: "Sources/BithumanEngineCoreLink",
+            // The privacy manifest for the binaries (2.20.2): this target is in every Expression2
+            // and Essence2 product, and static libraries cannot carry a bundle of their own.
+            resources: [.copy("PrivacyInfo.xcprivacy")],
             linkerSettings: [
                 .linkedFramework("Security", .when(platforms: [.macOS])),
                 .linkedFramework("CoreFoundation", .when(platforms: [.macOS])),

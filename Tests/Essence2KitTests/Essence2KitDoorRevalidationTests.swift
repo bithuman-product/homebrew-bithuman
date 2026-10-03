@@ -265,6 +265,47 @@ final class Essence2KitDoorRevalidationTests: XCTestCase {
         let got = try await open(door)
         XCTAssertEqual(try Data(contentsOf: got), v1, "downloaded again")
     }
+
+    // MARK: - backups (2.20.2)
+
+    private func excluded(_ u: URL) throws -> Bool {
+        var u = u
+        u.removeCachedResourceValue(forKey: .isExcludedFromBackupKey)
+        return try u.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup ?? false
+    }
+
+    /// What the downloader writes stays out of the user's backups; the directory the app passed
+    /// in is not flagged as a whole.
+    func testDownloadsAreExcludedFromBackupButNotTheCallersDirectory() async throws {
+        let door = Door(.serve(v1))
+        let got = try await open(door)
+        XCTAssertTrue(try excluded(got), "the downloaded .imx")
+        XCTAssertTrue(try excluded(meta), "the .door bookkeeping")
+        XCTAssertFalse(try excluded(dir), "the caller's own directory is left as it was")
+
+        // a change staged in the background, then swapped in: the new file is flagged too
+        door.set(.serve(v2))
+        _ = try await open(door)
+        await Essence2Download.settle()
+        XCTAssertTrue(try excluded(meta.appendingPathComponent("staging/\(Self.sha(v2)).imx")))
+        door.set(.status(503))
+        let next = try await open(door)
+        XCTAssertEqual(next.standardizedFileURL, file(v2).standardizedFileURL)
+        XCTAssertTrue(try excluded(next), "the swapped-in file keeps the flag")
+    }
+
+    /// A copy a 2.20.1 cache already holds (written before the flag existed) is flagged on its next open.
+    func testAnOlderCopyIsFlaggedOnItsNextOpen() async throws {
+        // the 2.20.1 layout, written by hand: the file under its sha256 and the `.door` pointer
+        try v1.write(to: file(v1))
+        try FileManager.default.createDirectory(at: meta, withIntermediateDirectories: true)
+        try Data((Self.sha(v1) + "\n").utf8).write(to: meta.appendingPathComponent(key + ".current"))
+        XCTAssertFalse(try excluded(file(v1)), "a copy from before 2.20.2 carries no flag")
+        let door = Door(.status(503))                    // the door is down: the copy is served
+        let again = try await open(door)
+        XCTAssertEqual(again.standardizedFileURL, file(v1).standardizedFileURL)
+        XCTAssertTrue(try excluded(again), "flagged on its next open")
+    }
 }
 
 /// The in-flight key the store uses for an avatar in a directory.
