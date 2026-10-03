@@ -7,6 +7,18 @@ The plugin's half is in place since 2.6.29; on iOS and macOS it acts once the Ap
   (`GET /v1/agent/{code}/model/download`). (Essence2Kit's `Essence2Download.identity(agentCode:)` +
   `Essence2Engine.create` refresh a downloaded file by themselves.)
 
+## 2.6.35 — 2026-10-03 — iOS / macOS: Expression 2 engine v2.20.1 (Swift package 2.20.1)
+
+Tag `flutter-plugin-v2.6.35`. iOS / macOS Expression 2 `v2.19.2` -> **`v2.20.1`** (Swift package 2.20.1); Essence 2
+`essence2-v1.15.3`, macOS `enginecore-v1.0.2` (unchanged). Android unchanged from 2.6.34: `essence2-android` 0.9.3,
+`expression2-android` 0.5.2. No plugin code change.
+
+* **Expression 2 engine v2.20.1 on iOS and macOS.** The change in 2.20.1 is in the Swift package's download stores: a
+  downloaded avatar opens at once instead of waiting on bitHuman's server, and still opens when the server does not
+  answer (about 90 ms instead of about 570 ms, measured by bitHuman). This plugin opens the files your app gives it and
+  does not use those stores, so how the plugin opens an avatar does not change; it carries the same engine binary as
+  the Swift package.
+
 ## 2.6.34 — 2026-10-03 — Android: an installed Essence 2 avatar opens in about 3 s; downloads continue in the background
 
 Tag `flutter-plugin-v2.6.34`. Android `essence2-android` 0.9.2 -> **0.9.3** (maven.bithuman.ai); `expression2-android`
