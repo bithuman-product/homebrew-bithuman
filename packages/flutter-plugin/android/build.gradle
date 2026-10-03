@@ -203,7 +203,17 @@ dependencies {
     // that ~4.8 MB member after the first session on 0.9.2 and the step-down arms from the next. The frames the
     // plugin receives keep their size, so the presenter is unchanged. Galaxy Z Flip5 at the deepest throttle
     // (10x Efficiency): shown/due median ~75%, 37% on 0.9.1. AAR sha256 92c1fde5b38a07f9… (as served).
-    implementation 'ai.bithuman:essence2-android:0.9.2'
+    // 0.9.3 (2026-10-03, maven.bithuman.ai only, cut from main): an installed avatar opens in ~3 s (the engine keeps
+    // its compiled GPU programs per device + driver and prepares the teeth data during the credential check; Flip5:
+    // 2.5-4.3 s vs 6.0-11.2 s on 0.9.2; the first open after install compiles once, ~5 s); a cache hit no longer
+    // waits for the door (background re-check, at most hourly); the first download asks the door once, fetches 4 at
+    // once, resumes and continues in the background as a JobScheduler job (no foreground service, no notification;
+    // the AAR adds ACCESS_NETWORK_STATE + a BIND_JOB_SERVICE-protected service to the merged manifest); an identity
+    // installed before the mouth-corner re-publish is refreshed or refused with the fix (the plugin's half of this is
+    // in place since 2.6.29 and acts from this pin); a killed session is billed its active seconds on the next start.
+    // Same API for the plugin (additive only). Step-down and skip-ahead unchanged from 0.9.2. AAR sha256
+    // b1f5534669793012… (as served).
+    implementation 'ai.bithuman:essence2-android:0.9.3'
 
     // Plain-JVM unit tests of the platform-free parts (src/test/kotlin: EngineUsersTest — dispose
     // closes an engine only after its threads returned). Test scope only: nothing ships in the AAR.
