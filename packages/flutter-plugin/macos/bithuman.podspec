@@ -207,6 +207,10 @@ Pod::Spec.new do |s|
   mac_staged = staged_minos.call(mac_binaries, 1)          # 1 = PLATFORM_MACOS
   mac_floor = mac_staged.nil? ? Gem::Version.new('26.0') : [mac_base, mac_staged].max
   s.platform         = :osx, mac_floor.to_s
+  # Above the base, the floor also goes into the APP target's preprocessor definitions for
+  # Classes/BHDeploymentFloor.h, which fails an app below it by name (see the iOS podspec).
+  floor_macro = lambda { |v| s0, s1 = v.segments; (s0.to_i * 10000 + (s1 || 0).to_i * 100).to_s }
+  mac_floor_defines = mac_floor > mac_base ? " BITHUMAN_MACOS_FLOOR=#{floor_macro.call(mac_floor)}" : ''
   if mac_floor > mac_base && defined?(Pod::UI)
     Pod::UI.warn "bithuman: the engines scripts/bootstrap.sh staged are built for macOS #{mac_floor}, so this pod " \
                  "needs macOS #{mac_floor} (set `platform :osx, '#{mac_floor}'` in macos/Podfile and the Runner target)."
@@ -285,7 +289,7 @@ Pod::Spec.new do |s|
   pod_xcconfig['EXCLUDED_ARCHS[sdk=macosx*]'] = 'x86_64'
   s.pod_target_xcconfig = pod_xcconfig
 
-  s.user_target_xcconfig = {
+  user_xcconfig = {
     # See EXCLUDED_ARCHS on the pod target above: the app links arm64-only bytes.
     'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64',
     # libconverse.a comes from the vendored xcframework (CocoaPods links it
@@ -295,4 +299,7 @@ Pod::Spec.new do |s|
     # Embed @rpath entries so the Homebrew dylibs resolve at run-time.
     'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) /opt/homebrew/lib /opt/homebrew/opt/onnxruntime/lib /opt/homebrew/opt/llama.cpp/lib',
   }
+  # The staged engines' floor, for Classes/BHDeploymentFloor.h (see "THE DECLARED FLOOR").
+  user_xcconfig['GCC_PREPROCESSOR_DEFINITIONS'] = "$(inherited)#{mac_floor_defines}" unless mac_floor_defines.empty?
+  s.user_target_xcconfig = user_xcconfig
 end

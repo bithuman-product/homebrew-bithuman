@@ -38,7 +38,10 @@ refuse an engine name they used to replace with Expression 2.
   (and the on-device brain's macOS library for macOS 26). An app at the declared floor that linked Essence 2 could
   not start on iOS below 18.4 or macOS below 15.4, whether it used Essence 2 or not. Each pod now reads the floor
   from the binaries it vendors: iOS 26.0 and macOS 26.0 with today's engines, so a Podfile below that fails
-  `pod install` with the floor named, instead of building an app that crashes at launch. An iOS app for iOS 16 to
+  `pod install` with the floor named, instead of building an app that crashes at launch. An app whose `Podfile.lock`
+  already resolves this pod gets only a CocoaPods warning there, so its build now fails by name instead: the pod
+  puts the floor in the app target's preprocessor definitions and `BHDeploymentFloor.h`, in the pod's module,
+  stops an app compiled below it (on macOS Swift already refuses the import). An iOS app for iOS 16 to
   25 bootstraps with `BITHUMAN_SKIP_ESSENCE2=1` (Expression 2 only; the pod then declares iOS 16.0). Essence 2 now
   also refuses by name below iOS 26 / macOS 26 at `load` (`unsupported`), ready for an Essence 2 engine rebuilt at
   the package floor.

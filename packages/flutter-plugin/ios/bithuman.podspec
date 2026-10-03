@@ -220,6 +220,13 @@ Pod::Spec.new do |s|
   ios_staged = staged_minos.call(ios_binaries, 2)          # 2 = PLATFORM_IOS (the device slices)
   ios_floor = ios_staged.nil? ? Gem::Version.new('26.0') : [ios_base, ios_staged].max
   s.platform         = :ios, ios_floor.to_s
+  # Above the base, the floor also goes into the APP target's preprocessor definitions, where
+  # Classes/BHDeploymentFloor.h (in this pod's umbrella module, compiled with the app's deployment target
+  # by the app's `@import bithuman`) fails an app below it by name. Without it an app whose Podfile.lock
+  # already resolves this pod gets only CocoaPods' "may not be compatible" warning and builds for its own
+  # lower target (measured 2026-10-03: a Runner at iOS 16.0 built and linked with no error).
+  floor_macro = lambda { |v| s0, s1 = v.segments; (s0.to_i * 10000 + (s1 || 0).to_i * 100).to_s }
+  ios_floor_defines = ios_floor > ios_base ? " BITHUMAN_IOS_FLOOR=#{floor_macro.call(ios_floor)}" : ''
   if ios_floor > ios_base && defined?(Pod::UI)
     Pod::UI.warn "bithuman: the engines scripts/bootstrap.sh staged are built for iOS #{ios_floor}, so this pod " \
                  "needs iOS #{ios_floor} (set `platform :ios, '#{ios_floor}'` in ios/Podfile and the Runner target). " \
@@ -268,8 +275,11 @@ Pod::Spec.new do |s|
   # final link step pulls in the system frameworks libconverse needs.
   # libconverse.a + onnxruntime come from the vendored xcframeworks, which
   # CocoaPods links automatically.
-  s.user_target_xcconfig = {
+  user_xcconfig = {
     'OTHER_LDFLAGS' => "$(inherited) #{common_frameworks}",
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386 x86_64',
   }
+  # The staged engines' floor, for Classes/BHDeploymentFloor.h (see "THE DECLARED FLOOR").
+  user_xcconfig['GCC_PREPROCESSOR_DEFINITIONS'] = "$(inherited)#{ios_floor_defines}" unless ios_floor_defines.empty?
+  s.user_target_xcconfig = user_xcconfig
 end
