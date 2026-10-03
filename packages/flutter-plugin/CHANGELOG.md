@@ -19,7 +19,8 @@ refuse an engine name they used to replace with Expression 2.
     credential, the native stores' tag, and sealed; the key is never written to disk.
   * With a fresh mark the kept copy opens at once, as before, also with the door down: for 24 hours after the
     door last said yes for an account's own avatar, 7 days for a public one (one the door serves with no
-    credential). The door is asked again in the background; its no makes the next call fail.
+    credential). The door is asked again in the background; its no makes the next call fail. A public avatar's
+    7 days end as soon as the door answers any account 404 `NOT_FOUND` for it (it was made private or deleted).
   * Without a fresh mark (another account, no credential, a mark that is missing, tampered with or too old) the door
     is asked first, and the call throws the new `BithumanEntitlementException` (a `BithumanAvatarException`) unless
     it says yes: `refused: true` when the door said no, `refused: false` when it could not be asked (fail closed).
