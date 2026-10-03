@@ -44,7 +44,9 @@ checks their sha256. Then raise the deployment targets to the floor of the engin
 the files and `pod install` names it (`platform :ios, '26.0'` in `ios/Podfile` and `platform :osx, '26.0'` in
 `macos/Podfile` with today's engines, and the Runner targets to match). For an iOS app that supports iOS 16 to 25,
 bootstrap with `BITHUMAN_SKIP_ESSENCE2=1` (Expression 2 only, `platform :ios, '16.0'`): an app that links the
-current Essence 2 engine cannot start on iOS below 18.4.
+current Essence 2 engine cannot start on iOS below 18.4. An app below the floor does not build: a fresh `pod install`
+refuses it, and an app whose `Podfile.lock` already has the pod fails at compile time with a `bithuman:` message
+naming the fix.
 
 ## Show an avatar
 
