@@ -1,7 +1,19 @@
 ## Unreleased — Android `pushAudio` plays your speech; the public model ids on Android; an unknown engine fails by name on iOS / macOS
 
-No engine change. Nothing that worked before changes, except that iOS and macOS now refuse an engine name they used to
-replace with Expression 2 (below).
+No engine change. Two defaults change (below). Otherwise nothing that worked before changes, except that iOS and
+macOS now refuse an engine name they used to replace with Expression 2.
+
+### Changed
+
+* **`engine:` defaults to `'expression2'`.** The old default, `'essence'`, named no engine: Android refused it
+  (`unsupported`) and iOS and macOS fell back to Expression 2. The fallback is now the explicit default, so a `load`
+  without `engine:` loads Expression 2 everywhere. Pass `engine:` every time.
+* **`BithumanRealtimeSession`'s `model` defaults to `gpt-realtime-mini`** (`BithumanRealtimeSession.defaultModel`).
+  The old default, `gpt-realtime`, is served by the relay only on accounts entitled to it, so a session on a standard
+  API secret that left `model` out was refused at the start (`FORBIDDEN`). Entitled accounts that want the full model
+  pass `model: 'gpt-realtime'`.
+
+### Fixed and added
 
 * **`pushAudio` works on Android.** Until now Android had no `pushAudio`, the call the docs taught for your own
   speech: it threw `MissingPluginException`. It now takes the 16 kHz speech, converts it to 24 kHz and plays it through
@@ -14,9 +26,6 @@ replace with Expression 2 (below).
 * **An unknown engine fails by name on iOS and macOS.** A name no engine has, or `'essence2'` in a build that does not
   carry the Essence 2 engine (bootstrap did not stage it), rendered Expression 2 without a word. `load` now fails with
   `PlatformException` code `unsupported`, as on Android, and the message says what to pass or how to fix the build.
-* **`engine:` defaults to `'expression2'`.** The old default, `'essence'`, named no engine: Android refused it and iOS
-  and macOS rendered Expression 2. A `load` without `engine:` now loads Expression 2 everywhere. Pass `engine:` every
-  time.
 * **Every channel call is answered on both platforms.** A new test (`test/channel_parity_test.dart`) checks that each
   method the Dart side calls has a branch on Android and on iOS / macOS, or is listed as unsupported with a reason.
   Android now answers the on-device brain's calls (`localAudioStart` and `localPushText` with `unsupported`; it has no
