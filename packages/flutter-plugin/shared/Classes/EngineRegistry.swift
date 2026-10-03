@@ -90,7 +90,23 @@ enum EngineRegistry {
   /// What a `load(engine:)` names (2.6.36): the load handler refuses an unknown slug, or an engine
   /// this build does not carry, BEFORE anything is created — never the expression2 fallback above.
   static func select(_ slug: String) -> EngineSelection {
-    EngineSelection.resolve(slug, among: descriptors.map { $0.id }, inBuild: isInBuild)
+    EngineSelection.resolve(slug, among: descriptors.map { $0.id }, inBuild: isInBuild, unmetOS: unmetOS)
+  }
+
+  /// The OS an engine needs when this device runs an older one (2.6.36): Essence 2 renders on iOS 26 /
+  /// macOS 26 and later. A no-op while the pod's floor is 26 (the staged libessence2 is built for 26);
+  /// it is what refuses Essence 2 by name on iOS 16-25 once a libessence2 rebuilt at the package floor
+  /// (#1826) lets the app run there.
+  static func unmetOS(_ canonical: String) -> (need: String, running: String)? {
+    guard canonical == "essence2" else { return nil }
+    if #available(iOS 26.0, macOS 26.0, *) { return nil }
+    let v = ProcessInfo.processInfo.operatingSystemVersion
+    #if os(iOS)
+    let os = "iOS"
+    #else
+    let os = "macOS"
+    #endif
+    return (need: "\(os) 26", running: "\(os) \(v.majorVersion).\(v.minorVersion)")
   }
 
   #if os(macOS) || os(iOS)

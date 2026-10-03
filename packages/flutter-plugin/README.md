@@ -11,8 +11,8 @@ connect it to a voice conversation through bitHuman's realtime relay. Full guide
 | Platform | Status |
 | --- | --- |
 | Android (arm64-v8a phone, API 29+) | Supported: Expression 2 and Essence 2 on the device. `load` takes the agent code and downloads the avatar. Emulators cannot load the engines. |
-| iOS (16.0+, arm64 device) | Supported: Expression 2 and Essence 2 on the device (Essence 2 needs iOS 26, as in the [Swift package](https://docs.bithuman.ai/platforms/ios)). Run `scripts/bootstrap.sh` once; your app supplies the avatar files. |
-| macOS (13.0+, Apple silicon) | Supported, as iOS; also `brew install llama.cpp onnxruntime`, which the plugin links. |
+| iOS (arm64 device) | Supported: Expression 2 and Essence 2 on the device. Run `scripts/bootstrap.sh` once; your app supplies the avatar files. iOS 26.0+ with Essence 2 (the staged Essence 2 engine is built for iOS 26); iOS 16.0+ for Expression 2 alone (`BITHUMAN_SKIP_ESSENCE2=1 scripts/bootstrap.sh`). |
+| macOS (Apple silicon) | Supported, as iOS; macOS 26.0+ (the staged engines are built for macOS 26). Also `brew install llama.cpp onnxruntime`, which the plugin links. |
 
 ## Install
 
@@ -38,11 +38,13 @@ android {
 }
 ```
 
-On iOS and macOS, raise the deployment targets (`platform :ios, '16.0'` in `ios/Podfile`,
-`platform :osx, '13.0'` in `macos/Podfile`, and the Runner targets to match), then run
-`scripts/bootstrap.sh` once in the plugin's folder (for a git dependency, `packages/flutter-plugin`
-under `~/.pub-cache/git/homebrew-bithuman-…`). It downloads the published engines and checks their
-sha256.
+On iOS and macOS, run `scripts/bootstrap.sh` once in the plugin's folder (for a git dependency,
+`packages/flutter-plugin` under `~/.pub-cache/git/homebrew-bithuman-…`). It downloads the published engines and
+checks their sha256. Then raise the deployment targets to the floor of the engines it staged: the pod reads it from
+the files and `pod install` names it (`platform :ios, '26.0'` in `ios/Podfile` and `platform :osx, '26.0'` in
+`macos/Podfile` with today's engines, and the Runner targets to match). For an iOS app that supports iOS 16 to 25,
+bootstrap with `BITHUMAN_SKIP_ESSENCE2=1` (Expression 2 only, `platform :ios, '16.0'`): an app that links the
+current Essence 2 engine cannot start on iOS below 18.4.
 
 ## Show an avatar
 
@@ -233,6 +235,20 @@ Plus catalog helpers (anonymous, no auth):
 | --- | --- |
 | `fetchPublicAgents({limit})` | Fetch the public agent catalog from bithuman.ai. |
 | `nativeEngineVersion()` | Diagnostic version stamp from the native side. |
+
+Avatar downloads (iOS / macOS; Android's `load` downloads by code itself):
+
+| Member | Purpose |
+| --- | --- |
+| `downloadAgentImx(agent, cacheDir, {apiSecret, allowedHosts})` | An Essence 2 character's `.imx` into `cacheDir`; returns its path for `load`. |
+| `downloadExpression2Avatar(code, avatarUrl, cacheDir, {apiSecret, allowedHosts})` | An Expression 2 avatar, verified and expanded into `cacheDir/<code>/`; returns the directory. |
+
+`cacheDir` belongs to your app, not to an account. Since 2.6.36 a kept avatar is returned only to a credential
+bitHuman's door has said yes to for it: pass the signed-in account's `apiSecret` (none: public avatars only). With
+that yes on the device the kept copy opens at once, also offline: for 24 hours after the door last answered for an
+account's own avatar, 7 days for a public one. Otherwise the door is asked first, and a refusal (another account's
+private avatar) or a door that cannot be asked throws `BithumanEntitlementException` (`refused` says which). The key
+is sent only to bitHuman's door and is never written to disk.
 
 ### `BithumanRealtimeSession`
 
