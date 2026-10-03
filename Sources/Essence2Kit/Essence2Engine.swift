@@ -183,7 +183,11 @@ public final class Essence2Engine: @unchecked Sendable {
                               readyTimeout: Double = 300) async throws -> Essence2Engine {
         try await create(identity: identity, resourcesDirectory: resourcesDirectory,
                          readyTimeout: readyTimeout,
-                         fetchAgain: { code, dir in try await Essence2Download.identity(agentCode: code, directory: dir) })
+                         fetchAgain: { code, dir in
+                             // the door's CURRENT file: a cache hit would hand back the one refused
+                             try await Essence2Download.identity(agentCode: code, directory: dir,
+                                                                 io: .network, mode: .doorFirst)
+                         })
     }
 
     /// `create` with the re-download as a parameter (tests serve a local file instead of the door).
@@ -737,26 +741,130 @@ struct Essence2ReplyTracker {
 /// file when that avatar has no slice yet; either one opens with `Essence2Engine.create`. A slice
 /// whose bytes do not match the door's sha256 is refused, never opened. Files are kept under
 /// their content hash, so a second call for the same avatar downloads nothing.
+///
+/// ★A CACHE HIT NO LONGER WAITS FOR THE DOOR (2.20.1). Up to 2.20.0 every call asked the door
+/// first and only then looked in the cache, so opening an avatar already on the device waited on
+/// a network round trip (the same blocking check measured a 2.65 s median on Android), and a door
+/// error FAILED the open even with a good copy on disk. Now the last file this downloader served
+/// for the avatar (`revalidateInBackground`, on by default):
+///  * is returned at once, after its sha256 is checked, and the door is asked in the background
+///    (one request per avatar in flight);
+///  * when the door names a different file, that file is downloaded and checked into a staging
+///    area and a swap journal is written. The file the app is opening now is never touched;
+///  * the next call finishes the swap from disk, with no network, and returns the new file;
+///  * a door that is down, slow or refusing never fails a call that has a good copy.
+/// With no copy on the device a call works exactly as before. `revalidateInBackground = false`
+/// restores the blocking check: the door is asked before returning and a change lands on this
+/// call (a door error still returns the copy on disk).
 public enum Essence2Download {
     static let door = "https://api.bithuman.ai"
     /// Highest container ABI this engine reads.
     static let abiMax = 1
+    /// The product the door is asked for.
+    static let model = "essence-2"
+    /// Seconds a revalidation waits for the door's answer (a call with no copy waits as before).
+    static let revalidateTimeout: TimeInterval = 10
+
+    /// True (the default): a call for an avatar already on the device returns that file at once
+    /// and asks the door in the background; a change is staged and lands on the next call.
+    /// False: the door is asked before returning, as up to 2.20.0, and a change lands on this
+    /// call. Either way a door error never fails a call that has a good copy.
+    public static var revalidateInBackground: Bool {
+        get { optionLock.lock(); defer { optionLock.unlock() }; return background }
+        set { optionLock.lock(); background = newValue; optionLock.unlock() }
+    }
+    private static let optionLock = NSLock()
+    nonisolated(unsafe) private static var background = true
 
     /// Downloads avatar `agentCode` (for example `A52DHS2219`) and returns the file to pass to
     /// `Essence2Engine.create(identity:)`. Uses the secret from `Essence2Credential.set`.
     public static func identity(agentCode: String, directory: URL? = nil) async throws -> URL {
-        guard agentCode.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil,
-              var c = URLComponents(string: door + "/v1/agent/" + agentCode + "/model/download") else {
+        try await identity(agentCode: agentCode, directory: directory, io: .network,
+                           mode: revalidateInBackground ? .background : .blocking)
+    }
+
+    /// How a call treats a copy already on the device.
+    enum Mode: Sendable {
+        /// Return the copy at once; ask the door in the background, stage a change.
+        case background
+        /// Ask the door first; a change lands now; a door error returns the copy.
+        case blocking
+        /// The door's current file, as up to 2.20.0: the heal's re-fetch (`Essence2Engine.create`),
+        /// which must not be handed back the file the engine just refused.
+        case doorFirst
+    }
+
+    /// `identity` with the door and the mode as parameters (tests script the door).
+    static func identity(agentCode: String, directory: URL?, io: DoorIO, mode: Mode) async throws -> URL {
+        guard agentCode.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil else {
             throw Essence2KitError.resourcesUnavailable("not an agent code: \(agentCode)")
         }
-        c.queryItems = [URLQueryItem(name: "model", value: "essence-2"),
+        let dir = directory ?? Essence2Download.defaultDirectory
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let store = DoorStore(dir: dir, key: "\(agentCode).\(model).apple.abi\(abiMax)")
+        if mode != .doorFirst {
+            store.finishPendingSwap()                  // from disk: never a request
+            if let hit = store.current() {
+                if mode == .background {
+                    revalidateLater(agentCode: agentCode, store: store, io: io)
+                    return hit
+                }
+                return await revalidateNow(agentCode: agentCode, store: store, hit: hit, io: io)
+            }
+        }
+        // No copy on the device (or the heal's re-fetch): exactly the 2.20.0 path.
+        let g = try await grant(agentCode: agentCode, io: io, timeout: nil)
+        if let want = g.sha256, let hit = try? cached(want, in: dir) {
+            store.record(want)
+            return hit
+        }
+        let tmp = try await fetch(agentCode: agentCode, grant: g, io: io)
+        let dst = dir.appendingPathComponent(tmp.sha256 + ".imx")
+        try? FileManager.default.removeItem(at: dst)
+        try FileManager.default.moveItem(at: tmp.file, to: dst)
+        store.record(tmp.sha256)
+        return dst
+    }
+
+    // MARK: the two requests
+
+    /// The door's answer for one avatar: where its file is, and the sha256 it must have.
+    struct Grant: Sendable {
+        let url: URL
+        let sha256: String?
+        let isSlice: Bool
+    }
+
+    /// The download's two requests, as parameters: tests serve a scripted door, the app gets `.network`.
+    struct DoorIO: Sendable {
+        /// The door's answer to `request`: (HTTP status, body). Throws when the door cannot be reached.
+        var grant: @Sendable (URLRequest) async throws -> (Int, Data)
+        /// The file at `url` in a temporary location the caller then owns: (HTTP status, file).
+        var file: @Sendable (URL) async throws -> (Int, URL)
+
+        static let network = DoorIO(
+            grant: { req in
+                let (body, resp) = try await URLSession.shared.data(for: req)
+                return ((resp as? HTTPURLResponse)?.statusCode ?? -1, body)
+            },
+            file: { url in
+                let (tmp, resp) = try await URLSession.shared.download(from: url)
+                return ((resp as? HTTPURLResponse)?.statusCode ?? -1, tmp)
+            })
+    }
+
+    static func grant(agentCode: String, io: DoorIO, timeout: TimeInterval?) async throws -> Grant {
+        guard var c = URLComponents(string: door + "/v1/agent/" + agentCode + "/model/download") else {
+            throw Essence2KitError.resourcesUnavailable("not an agent code: \(agentCode)")
+        }
+        c.queryItems = [URLQueryItem(name: "model", value: model),
                         URLQueryItem(name: "slice", value: "apple"),
                         URLQueryItem(name: "abi_max", value: String(abiMax)),
                         URLQueryItem(name: "redirect", value: "false")]
         var req = URLRequest(url: c.url!)
+        if let timeout { req.timeoutInterval = timeout }
         if let s = Essence2Credential.current { req.setValue(s, forHTTPHeaderField: "api-secret") }
-        let (body, resp) = try await URLSession.shared.data(for: req)
-        let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        let (status, body) = try await io.grant(req)
         guard status == 200,
               let root = try JSONSerialization.jsonObject(with: body) as? [String: Any],
               let d = root["data"] as? [String: Any],
@@ -764,24 +872,189 @@ public enum Essence2Download {
             let msg = String(decoding: body.prefix(300), as: UTF8.self)
             throw Essence2KitError.resourcesUnavailable("\(agentCode): the download door answered HTTP \(status): \(msg)")
         }
-        let isSlice = (d["slice"] as? String).map { $0 != "universal" } ?? false
-        let want = (d["raw_sha256"] as? String) ?? (d["sha256"] as? String)
-        let dir = directory ?? Essence2Download.defaultDirectory
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if let want, let hit = try? cached(want, in: dir) { return hit }
-        let (tmp, fileResp) = try await URLSession.shared.download(from: url)
-        guard (fileResp as? HTTPURLResponse)?.statusCode == 200 else {
-            throw Essence2KitError.resourcesUnavailable("\(agentCode): the avatar file download failed (HTTP \((fileResp as? HTTPURLResponse)?.statusCode ?? -1))")
+        return Grant(url: url, sha256: (d["raw_sha256"] as? String) ?? (d["sha256"] as? String),
+                     isSlice: (d["slice"] as? String).map { $0 != "universal" } ?? false)
+    }
+
+    /// Downloads the granted file and checks it against the door's sha256; the caller owns the file.
+    static func fetch(agentCode: String, grant g: Grant, io: DoorIO) async throws -> (file: URL, sha256: String) {
+        let (status, tmp) = try await io.file(g.url)
+        guard status == 200 else {
+            try? FileManager.default.removeItem(at: tmp)
+            throw Essence2KitError.resourcesUnavailable("\(agentCode): the avatar file download failed (HTTP \(status))")
         }
         let got = try Essence2Resources.sha256(of: tmp)
-        if let want, got != want {
+        if let want = g.sha256, got != want {
             try? FileManager.default.removeItem(at: tmp)
-            throw Essence2KitError.resourcesUnavailable("\(agentCode): the \(isSlice ? "apple slice" : "avatar file") is sha256 \(got), not the door's \(want); refused")
+            throw Essence2KitError.resourcesUnavailable("\(agentCode): the \(g.isSlice ? "apple slice" : "avatar file") is sha256 \(got), not the door's \(want); refused")
         }
-        let dst = dir.appendingPathComponent(got + ".imx")
-        try? FileManager.default.removeItem(at: dst)
-        try FileManager.default.moveItem(at: tmp, to: dst)
-        return dst
+        return (tmp, got)
+    }
+
+    // MARK: revalidation
+
+    /// What one revalidation did. Internal: the app only ever sees a file.
+    enum Revalidated: Sendable, Equatable { case unchanged, staged, swapped, keptUnreachable, keptFailed }
+
+    /// The background half of a cache hit: at most one per avatar (and directory) in flight.
+    static func revalidateLater(agentCode: String, store: DoorStore, io: DoorIO) {
+        inFlight.start(store.id) { await stage(agentCode: agentCode, store: store, io: io) }
+    }
+
+    /// The blocking check (`revalidateInBackground = false`): stage, swap now, and hand back a
+    /// verified file whatever happened. Never throws.
+    static func revalidateNow(agentCode: String, store: DoorStore, hit: URL, io: DoorIO) async -> URL {
+        let r = await stage(agentCode: agentCode, store: store, io: io)
+        guard r == .staged else { return hit }
+        store.finishPendingSwap()
+        return store.current() ?? hit
+    }
+
+    /// Asks the door; when it names another file, downloads and checks it into the staging area
+    /// and writes the swap journal. It never touches the file the app has open, and never throws.
+    @discardableResult
+    static func stage(agentCode: String, store: DoorStore, io: DoorIO) async -> Revalidated {
+        let have = store.currentSha()
+        let g: Grant
+        do { g = try await grant(agentCode: agentCode, io: io, timeout: revalidateTimeout) } catch {
+            return .keptUnreachable
+        }
+        if let want = g.sha256 {
+            if want == have { return .unchanged }
+            if (try? cached(want, in: store.dir)) != nil { store.journal(want); return .staged }
+        }
+        let got: (file: URL, sha256: String)
+        do { got = try await fetch(agentCode: agentCode, grant: g, io: io) } catch { return .keptFailed }
+        if got.sha256 == have { try? FileManager.default.removeItem(at: got.file); return .unchanged }
+        do { try store.stageFile(got.file, sha256: got.sha256) } catch {
+            try? FileManager.default.removeItem(at: got.file)
+            return .keptFailed
+        }
+        store.journal(got.sha256)
+        return .staged
+    }
+
+    /// The revalidations in flight, by avatar and directory. Tests wait for them with `settle()`.
+    static let inFlight = InFlight()
+
+    /// Waits for every background revalidation in flight (tests; the app never needs to).
+    static func settle() async { await inFlight.settle() }
+
+    final class InFlight: @unchecked Sendable {
+        private let lock = NSLock()
+        private var tasks: [String: Task<Revalidated, Never>] = [:]
+        private(set) var last: [String: Revalidated] = [:]
+
+        func start(_ id: String, _ work: @escaping @Sendable () async -> Revalidated) {
+            lock.lock(); defer { lock.unlock() }
+            guard tasks[id] == nil else { return }       // one per avatar in flight
+            tasks[id] = Task.detached(priority: .utility) { [weak self] in
+                let r = await work()
+                self?.finish(id, r)
+                return r
+            }
+        }
+
+        private func finish(_ id: String, _ r: Revalidated) {
+            lock.lock(); tasks[id] = nil; last[id] = r; lock.unlock()
+        }
+
+        func lastOutcome(_ id: String) -> Revalidated? { lock.lock(); defer { lock.unlock() }; return last[id] }
+
+        private func running() -> [Task<Revalidated, Never>] {
+            lock.lock(); defer { lock.unlock() }; return Array(tasks.values)
+        }
+
+        func settle() async {
+            while true {
+                let running = running()
+                if running.isEmpty { return }
+                for t in running { _ = await t.value }
+            }
+        }
+    }
+
+    /// The bookkeeping beside the files, in `<directory>/.door/`: `<key>.current` names the file
+    /// last served for an avatar, `<key>.pending` a staged one the next call swaps in, and
+    /// `staging/<sha256>.imx` holds it until then. The `.imx` files themselves stay where they
+    /// always were, named by their sha256, so a 2.20.0 cache is still a cache (its first call
+    /// asks the door as before and records what it served).
+    struct DoorStore: Sendable {
+        let dir: URL
+        let key: String
+        var id: String { dir.standardizedFileURL.path + "|" + key }
+        private var meta: URL { dir.appendingPathComponent(".door", isDirectory: true) }
+        private var pointer: URL { meta.appendingPathComponent(key + ".current") }
+        private var pending: URL { meta.appendingPathComponent(key + ".pending") }
+        private var staging: URL { meta.appendingPathComponent("staging", isDirectory: true) }
+
+        init(dir: URL, key: String) { self.dir = dir; self.key = key }
+
+        /// Swaps run under one lock, so a journal is never written while a swap reads it.
+        private static let swapLock = NSLock()
+
+        func currentSha() -> String? { Self.readSha(pointer) }
+
+        /// The last file served for this avatar, if it is still on disk with its sha256.
+        func current() -> URL? {
+            guard let sha = currentSha() else { return nil }
+            return try? cached(sha, in: dir)
+        }
+
+        /// What the no-copy path served: it becomes the current file, and any older journal goes.
+        func record(_ sha: String) {
+            Self.swapLock.lock(); defer { Self.swapLock.unlock() }
+            Self.writeSha(sha, to: pointer)
+            if let p = Self.readSha(pending), p != sha {
+                try? FileManager.default.removeItem(at: staging.appendingPathComponent(p + ".imx"))
+            }
+            try? FileManager.default.removeItem(at: pending)
+        }
+
+        /// Moves a downloaded, checked file into the staging area.
+        func stageFile(_ file: URL, sha256 sha: String) throws {
+            try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+            let dst = staging.appendingPathComponent(sha + ".imx")
+            try? FileManager.default.removeItem(at: dst)
+            try FileManager.default.moveItem(at: file, to: dst)
+        }
+
+        /// The swap journal: the next call makes `sha` current.
+        func journal(_ sha: String) {
+            Self.swapLock.lock(); defer { Self.swapLock.unlock() }
+            Self.writeSha(sha, to: pending)
+        }
+
+        /// Finishes a journalled swap from disk (no network): the staged file joins the others and
+        /// becomes current. A journal whose file is gone is dropped. Safe to run again after a
+        /// process died part-way.
+        @discardableResult
+        func finishPendingSwap() -> Bool {
+            Self.swapLock.lock(); defer { Self.swapLock.unlock() }
+            guard let sha = Self.readSha(pending) else { return false }
+            let fm = FileManager.default
+            let staged = staging.appendingPathComponent(sha + ".imx")
+            let live = dir.appendingPathComponent(sha + ".imx")
+            if fm.fileExists(atPath: staged.path) {
+                if fm.fileExists(atPath: live.path) { try? fm.removeItem(at: staged) }
+                else if (try? fm.moveItem(at: staged, to: live)) == nil { try? fm.removeItem(at: pending); return false }
+            }
+            guard fm.fileExists(atPath: live.path) else { try? fm.removeItem(at: pending); return false }
+            Self.writeSha(sha, to: pointer)
+            try? fm.removeItem(at: pending)
+            return true
+        }
+
+        private static func readSha(_ u: URL) -> String? {
+            guard let d = try? Data(contentsOf: u) else { return nil }
+            let s = String(decoding: d, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            return s.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil ? s : nil
+        }
+
+        private static func writeSha(_ sha: String, to u: URL) {
+            try? FileManager.default.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? Data((sha + "\n").utf8).write(to: u, options: .atomic)
+        }
     }
 
     /// Where downloads are kept when no directory is given: Caches/bitHuman/essence2/avatars.
