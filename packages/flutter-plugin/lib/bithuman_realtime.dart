@@ -55,7 +55,7 @@ class BithumanRealtimeSession {
   BithumanRealtimeSession({
     required this.apiKey,
     required this.avatar,
-    this.model = 'gpt-realtime',
+    this.model = defaultModel,
     this.systemPrompt = '',
     this.voice = 'alloy',
     this.vadThreshold = 0,
@@ -76,6 +76,12 @@ class BithumanRealtimeSession {
 
   /// bitHuman's realtime relay (the OpenAI Realtime protocol, billed by bitHuman).
   static const String relayEndpoint = 'wss://api.bithuman.ai/v1/realtime';
+
+  /// The [model] when none is passed (2.6.36): the one the relay serves on every API secret. It was
+  /// `gpt-realtime`, which the relay allows only on accounts entitled to it; anyone else's session
+  /// was refused at the start (HTTP 403, reported as `FORBIDDEN`). Pass `model: 'gpt-realtime'` on
+  /// an entitled account.
+  static const String defaultModel = 'gpt-realtime-mini';
 
   /// True when [apiKey] is an OpenAI credential (`sk-…`, or a leftover `ek_…`):
   /// the session then dials OpenAI directly instead of the relay.

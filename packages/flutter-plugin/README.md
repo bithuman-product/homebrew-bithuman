@@ -87,7 +87,7 @@ import 'package:bithuman/bithuman_realtime.dart';
 final session = BithumanRealtimeSession(
   apiKey: apiSecret,              // your bitHuman API secret (the same one load takes)
   avatar: avatar,
-  model: 'gpt-realtime-mini',     // the model a standard API secret may use
+  model: 'gpt-realtime-mini',     // the default since 2.6.36; every API secret may use it
   systemPrompt: 'You are a friendly avatar host.',
   speechReady: avatar.ready,      // dial once the avatar can move its mouth
 );
@@ -238,7 +238,7 @@ Plus catalog helpers (anonymous, no auth):
 
 | Member | Purpose |
 | --- | --- |
-| `BithumanRealtimeSession({apiKey, avatar, model, systemPrompt, voice, speechReady, echoOnsetGuard, bargeFloorDb, endOnAudioInterruption})` | Construct. `apiKey`: your bitHuman API secret; the session runs through bitHuman's realtime relay and is billed to your account. `model` defaults to `gpt-realtime`, which the relay allows only on accounts entitled to it (`PLAN_REQUIRED` otherwise): pass `'gpt-realtime-mini'`. `vadThreshold` is accepted and ignored (the server detects speech). `bargeFloorDb`: while the agent is heard, how close (dB) to its voice the microphone must come, for 200 ms, to cut it in; quieter sound is its echo and goes up as silence. Null = the device's default (Android -11, iPhone and macOS -18); under -40 turns the gate off. |
+| `BithumanRealtimeSession({apiKey, avatar, model, systemPrompt, voice, speechReady, echoOnsetGuard, bargeFloorDb, endOnAudioInterruption})` | Construct. `apiKey`: your bitHuman API secret; the session runs through bitHuman's realtime relay and is billed to your account. `model` defaults to `gpt-realtime-mini` (2.6.36; it was `gpt-realtime`, which the relay allows only on accounts entitled to it). `vadThreshold` is accepted and ignored (the server detects speech). `bargeFloorDb`: while the agent is heard, how close (dB) to its voice the microphone must come, for 200 ms, to cut it in; quieter sound is its echo and goes up as silence. Null = the device's default (Android -11, iPhone and macOS -18); under -40 turns the gate off. |
 | `start()` | Open WS, start VP-IO, begin forwarding mic. |
 | `stop()` | Close WS, tear down audio. Single-use; build a new session for the next conversation. |
 | `commitInputAudio()` | End-of-turn marker for non-VAD push-to-talk flows. |
