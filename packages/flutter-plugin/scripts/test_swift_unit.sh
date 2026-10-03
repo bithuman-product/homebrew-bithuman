@@ -15,5 +15,6 @@ swiftc -O -module-name VoiceClockTest -o "$T/voice_clock" shared/Classes/VoiceCl
 # Which engine a load names (2.6.36): EngineSelection.swift with the protocol's EngineId, on its own.
 mkdir -p "$T/es"; cp test/swift/engine_selection_test.swift "$T/es/main.swift"
 swiftc -O -module-name EngineSelectionTest -o "$T/engine_selection" \
-  shared/Classes/Protocol/BithumanEngine.swift shared/Classes/EngineSelection.swift "$T/es/main.swift"
+  shared/Classes/Protocol/BithumanEngine.swift shared/Classes/ModelRefusal.swift shared/Classes/EngineSelection.swift \
+  "$T/es/main.swift"
 "$T/engine_selection"
