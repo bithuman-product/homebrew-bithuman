@@ -756,6 +756,12 @@ struct Essence2ReplyTracker {
 /// With no copy on the device a call works exactly as before. `revalidateInBackground = false`
 /// restores the blocking check: the door is asked before returning and a change lands on this
 /// call (a door error still returns the copy on disk).
+///
+/// ★NOT IN THE USER'S BACKUPS (2.20.2). Every file this downloader writes — the `.imx` files, its
+/// `.door/` bookkeeping and staging, and the default directory itself — carries
+/// `isExcludedFromBackup`: an avatar is downloaded again on demand, so it must not fill the user's
+/// iCloud or computer backup (Apple's data storage guidelines). A directory you pass in is never
+/// flagged as a whole; only the files this downloader puts in it are.
 public enum Essence2Download {
     static let door = "https://api.bithuman.ai"
     /// Highest container ABI this engine reads.
@@ -801,29 +807,41 @@ public enum Essence2Download {
         }
         let dir = directory ?? Essence2Download.defaultDirectory
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if directory == nil { excludeFromBackup(dir) }  // ours; a caller's directory is never flagged whole
         let store = DoorStore(dir: dir, key: "\(agentCode).\(model).apple.abi\(abiMax)")
         if mode != .doorFirst {
             store.finishPendingSwap()                  // from disk: never a request
             if let hit = store.current() {
                 if mode == .background {
                     revalidateLater(agentCode: agentCode, store: store, io: io)
-                    return hit
+                    return excludeFromBackup(hit)
                 }
-                return await revalidateNow(agentCode: agentCode, store: store, hit: hit, io: io)
+                return excludeFromBackup(await revalidateNow(agentCode: agentCode, store: store, hit: hit, io: io))
             }
         }
         // No copy on the device (or the heal's re-fetch): exactly the 2.20.0 path.
         let g = try await grant(agentCode: agentCode, io: io, timeout: nil)
         if let want = g.sha256, let hit = try? cached(want, in: dir) {
             store.record(want)
-            return hit
+            return excludeFromBackup(hit)
         }
         let tmp = try await fetch(agentCode: agentCode, grant: g, io: io)
         let dst = dir.appendingPathComponent(tmp.sha256 + ".imx")
         try? FileManager.default.removeItem(at: dst)
         try FileManager.default.moveItem(at: tmp.file, to: dst)
         store.record(tmp.sha256)
-        return dst
+        return excludeFromBackup(dst)
+    }
+
+    /// Flags `url` (a file or a directory this SDK owns) `isExcludedFromBackup` and returns it.
+    /// Best effort: a volume that cannot carry the flag still serves the file.
+    @discardableResult
+    static func excludeFromBackup(_ url: URL) -> URL {
+        var u = url
+        var v = URLResourceValues()
+        v.isExcludedFromBackup = true
+        try? u.setResourceValues(v)
+        return url
     }
 
     // MARK: the two requests
@@ -1014,9 +1032,11 @@ public enum Essence2Download {
         /// Moves a downloaded, checked file into the staging area.
         func stageFile(_ file: URL, sha256 sha: String) throws {
             try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+            Essence2Download.excludeFromBackup(meta)
             let dst = staging.appendingPathComponent(sha + ".imx")
             try? FileManager.default.removeItem(at: dst)
             try FileManager.default.moveItem(at: file, to: dst)
+            Essence2Download.excludeFromBackup(dst)        // a rename keeps the flag when it is swapped in
         }
 
         /// The swap journal: the next call makes `sha` current.
@@ -1053,6 +1073,7 @@ public enum Essence2Download {
 
         private static func writeSha(_ sha: String, to u: URL) {
             try? FileManager.default.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            Essence2Download.excludeFromBackup(u.deletingLastPathComponent())   // `.door/`
             try? Data((sha + "\n").utf8).write(to: u, options: .atomic)
         }
     }
@@ -1099,7 +1120,8 @@ public enum Essence2Resources {
         ("audio_encoder_fp16_window_head.onnx", "30b67891439db75b48a7a0469152e62b339298664c3aa72d5ab7426971940241"),
     ]
 
-    /// Where fetched resources live.
+    /// Where fetched resources live (Application Support, so the OS does not purge them). The
+    /// directory is excluded from the user's backups (2.20.2): the files are fetched again on demand.
     public static var directory: URL {
         let root = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                    appropriateFor: nil, create: true))
@@ -1111,6 +1133,7 @@ public enum Essence2Resources {
     public static func ensure() async throws -> URL {
         let dir = directory
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        Essence2Download.excludeFromBackup(dir)        // ~70 MB fetched again on demand: never backed up
         for f in files {
             let dst = dir.appendingPathComponent(f.name)
             if FileManager.default.fileExists(atPath: dst.path), (try? sha256(of: dst)) == f.sha256 { continue }
