@@ -306,6 +306,29 @@ void main() {
       expect(await kept(_private).readAsBytes(), published, reason: 'kept, not opened, not replaced');
     });
 
+    test('a row whose model_url names ANOTHER code never marks this code (no public mark from a crafted row)', () async {
+      // The owner's private file is kept from before the re-publish, so a call re-downloads it from the
+      // row's model_url first. A crafted row (the private code, a public avatar's door) with no credential
+      // gets the PUBLIC avatar's bytes; that yes is about the public avatar, not about this code's file.
+      await ownerDownloads();
+      await kept(_private).setLastModified(DateTime.utc(2026, 9, 30));
+      final crafted = _agent(_private, door.url('127.0.0.1', '/v1/agent/$_public/model/download').toString());
+      final gate = dl().gate;
+      final entry = AgentImxDownloader.markEntry(_private);
+      await dl().download(crafted, tmp.path, allowedHosts: allowed);
+      expect(gate.markFile(tmp.path, entry, null).existsSync(), isFalse,
+          reason: 'a yes about the public avatar wrote no public mark for the private code');
+      // The owner's own file comes back (as the owner's next refresh would put it), and another account,
+      // with the door down, is still refused: there is no public mark to open it with.
+      kept(_private).writeAsBytesSync(published);
+      await expectLater(dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _other), _refused(false));
+      // ...and with no kept file at all, the crafted row's download marks nothing either.
+      kept(_private).deleteSync();
+      await dl().download(crafted, tmp.path, allowedHosts: allowed);
+      expect(gate.markFile(tmp.path, entry, null).existsSync(), isFalse);
+      expect(await gate.mayOpenWithoutDoor(tmp.path, entry, _other), isFalse);
+    });
+
     test('the door refusing the owner later (a revoked key): this open finishes, the next is refused', () async {
       await ownerDownloads();
       doorRule = (req, _) => _answer(req, 401, _missingAuth);
