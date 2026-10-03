@@ -30,7 +30,9 @@
 //  * an account reopens ITS OWN avatar with the door down for up to 24 h after the door last said
 //    yes to its credential;
 //  * a PUBLIC avatar (one the door served to a request with NO credential) opens for any credential
-//    for up to 7 days after that yes: anyone can download it again;
+//    for up to 7 days after that yes: anyone can download it again. The door's 404 NOT_FOUND to ANY
+//    credential drops it at once (the door serves a public avatar to every credential, so the avatar
+//    was made private or deleted): the open under way finishes, the next one asks the door;
 //  * past that, the door is asked, and a door that cannot be asked fails the call.
 //
 // TAMPER. A mark holds the time of the door's yes and whether it was public, sealed with an HMAC-SHA256
@@ -287,11 +289,21 @@ class DoorGate {
   }
 
   /// Applies the door's [answer] to [credential]'s mark for [entry].
+  ///
+  /// A 404 `NOT_FOUND` (or a withdrawn object) also drops [entry]'s PUBLIC mark, whoever asked: the door
+  /// serves a public avatar to any credential (a credentialed non-owner falls through to its anonymous
+  /// arm), so "not found" for one credential means the avatar is not public now (made private, deleted).
+  /// Without this a public mark earned before the owner made the avatar private would keep opening the
+  /// kept copy for other accounts until its 7 days ran out. A 401 / 403 is about the credential (a revoked
+  /// key), not the avatar: the public mark stays.
   Future<void> note(String cacheDir, String entry, String? credential, DoorAnswer answer) async {
     if (answer.granted) {
       await noteGranted(cacheDir, entry, credential);
     } else if (answer.denied) {
       await noteDenied(cacheDir, entry, credential);
+      if (_norm(credential) != null && (answer.withdrawn || answer.status == 404)) {
+        await noteDenied(cacheDir, entry, null);
+      }
     }
   }
 

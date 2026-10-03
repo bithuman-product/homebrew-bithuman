@@ -210,6 +210,24 @@ void main() {
           _refused(false));
     });
 
+    test('a public file made private: the door\'s NOT_FOUND to any account drops the public mark', () async {
+      final p = await dl().download(publicAgent(), tmp.path, allowedHosts: allowed);
+      final publicMark = dl().gate.markFile(tmp.path, AgentImxDownloader.markEntry(_public), null);
+      expect(publicMark.existsSync(), isTrue);
+      // The owner makes it private: the door answers another account 404 NOT_FOUND, no credential 401.
+      doorRule = (req, _) =>
+          req.headers.value('api-secret') == null ? _answer(req, 401, _missingAuth) : _answer(req, 404, _notFound);
+      final d = dl();
+      expect(await d.download(publicAgent(), tmp.path, allowedHosts: allowed, apiSecret: _other), p,
+          reason: 'the public mark opens it at once; the door is asked in the background');
+      await d.refreshing(_public);
+      expect(publicMark.existsSync(), isFalse, reason: 'NOT_FOUND for one account: the avatar is not public now');
+      await expectLater(dl(up: false).download(publicAgent(up: false), tmp.path, allowedHosts: allowed, apiSecret: _other),
+          _refused(false));
+      await expectLater(dl().download(publicAgent(), tmp.path, allowedHosts: allowed, apiSecret: _other), _refused(true));
+      expect(await File(p).readAsBytes(), published, reason: 'kept, never deleted');
+    });
+
     test('door down + another account + a private file: refused, nothing written for it', () async {
       await ownerDownloads();
       final d = dl(up: false);
@@ -402,6 +420,22 @@ void main() {
           await expectLater(open(_public, key: _other), _refused(false));
         });
 
+        test('a public avatar made private: the door\'s NOT_FOUND to another account drops the public mark', () async {
+          final dir = install(_public);
+          useGate();
+          expect(await open(_public), dir);
+          doorRule = (req, _) =>
+              req.headers.value('api-secret') == null ? _answer(req, 401, _missingAuth) : _answer(req, 404, _notFound);
+          expect(await open(_public, key: _other), dir, reason: 'the public mark opens it at once');
+          await entitlementGate.checking(tmp.path, _public, _other);
+          expect(entitlementGate.markFile(tmp.path, _public, null).existsSync(), isFalse);
+          useGate(up: false);
+          await expectLater(open(_public, key: _other), _refused(false));
+          useGate();
+          await expectLater(open(_public, key: _other), _refused(true));
+          expect(Directory(dir).existsSync(), isTrue);
+        });
+
         test('door down + another account + a private install: refused', () async {
           install(_private);
           useGate();
@@ -482,6 +516,18 @@ void main() {
       expect(const DoorAnswer(302).granted, isTrue);
       expect(const DoorAnswer(200).granted, isTrue);
       expect(const DoorAnswer(404, withdrawn: true).denied, isTrue);
+    });
+
+    test('a NOT_FOUND to any credential drops the public mark; a 401 to a key (revoked) keeps it', () async {
+      final g = DoorGate(clock: () => now);
+      await g.noteGranted(tmp.path, 'e', null);
+      await g.note(tmp.path, 'e', _other, const DoorAnswer(401, code: 'MISSING_AUTH'));
+      expect(await g.mayOpenWithoutDoor(tmp.path, 'e', _other), isTrue, reason: 'still public');
+      await g.note(tmp.path, 'e', _other, DoorAnswer(404, code: doorErrorCode(_notReady)));
+      expect(await g.mayOpenWithoutDoor(tmp.path, 'e', _other), isTrue, reason: 'NOT_READY is not a no');
+      await g.note(tmp.path, 'e', _other, DoorAnswer(404, code: doorErrorCode(_notFound)));
+      expect(await g.mayOpenWithoutDoor(tmp.path, 'e', _other), isFalse);
+      expect(await g.mayOpenWithoutDoor(tmp.path, 'e', null), isFalse);
     });
 
     test('ask: production\'s bodies, the credential in the api-secret header only, and a withdrawn object', () async {
