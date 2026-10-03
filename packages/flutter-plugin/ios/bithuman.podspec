@@ -135,7 +135,7 @@ Pod::Spec.new do |s|
   # but in no file pattern, so no app ever shipped it.
   s.resource_bundles = {'bithuman_privacy' => ['Resources/PrivacyInfo.xcprivacy']}
   s.dependency 'Flutter'
-  s.platform         = :ios, '16.0'
+  # s.platform is set below, from the staged bytes (2.6.36): see "THE DECLARED FLOOR".
   s.swift_version    = '5.9'
   # Static framework so unresolved libconverse symbols carry through to the app.
   s.static_framework = true
@@ -171,7 +171,8 @@ Pod::Spec.new do |s|
   x2_frameworks = %w[Expression2 BithumanEngineProtocol UnifiedModelHeader].map { |m| "Frameworks/#{m}.xcframework" }
   missing_x2 = x2_frameworks.reject { |f| File.directory?(File.join(__dir__, f)) }
   raise "run scripts/bootstrap.sh first: #{missing_x2.inspect} not staged" unless missing_x2.empty?
-  s.vendored_frameworks = ['Frameworks/onnxruntime.xcframework'] + module_map_xcframeworks + x2_frameworks
+  ios_frameworks = ['Frameworks/onnxruntime.xcframework'] + module_map_xcframeworks + x2_frameworks
+  s.vendored_frameworks = ios_frameworks
   # Each staged engine's native core = a plain static lib (NEVER a 2nd module-map
   # xcframework). Auto-picked from Engines/*/Vendor/*.a (design §2.2's Dir.glob).
   # libessence2 (OPTIONAL on-device Essence2 / essence2 — the be_essence2_* C ABI
@@ -184,6 +185,46 @@ Pod::Spec.new do |s|
   # iOS): the adapter is `#if (os(macOS) || os(iOS)) && ESSENCE2_AVAILABLE`, so on
   # iOS these symbols are LINKED, not dead-stripped — see the header block.
   s.vendored_libraries  = engine_libs.map { |p| p.sub(__dir__ + '/', '') } if essence2_lib
+
+  # ★THE DECLARED FLOOR IS THE STAGED BYTES' FLOOR (2.6.36, security). Until 2.6.35 this pod declared
+  # iOS 16.0 whatever bootstrap staged, while libessence2.a (essence2-v1.15.3) is built for iOS 26.0:
+  # every one of its 72 objects says minos 26.0, the link prints "built for newer 'iOS' version (26.0)
+  # than being linked (16.0)", and the app takes strong imports that exist only from iOS 18.4 (the libc++
+  # std::bad_function_call key function, Swift runtime symbols from iOS 17 and 18). An app at the floor
+  # this pod declared therefore could not LAUNCH on iOS 16.0 to 18.3, Essence 2 used or not (measured
+  # 2026-10-03, bithuman-models #1826). Now the floor is read from the binaries this pod vendors (the
+  # LC_BUILD_VERSION minos of every device-slice object, otool -l): the highest one wins, and never
+  # below 16.0. With essence2-v1.15.3 staged that is iOS 26.0, so a Podfile below it fails `pod install`
+  # by name instead of building an app that crashes at launch; bootstrapped with
+  # BITHUMAN_SKIP_ESSENCE2=1 (Expression 2 only) it is iOS 16.0. A libessence2 rebuilt at the floor
+  # (#1826, in Swift package 2.20.2) brings it back to 16.0 by itself, and Essence 2 then refuses by
+  # name below iOS 26 at `load` (EngineSelection). Bytes that cannot be read count as iOS 26.0.
+  staged_minos = lambda do |paths, platform_id|
+    found = Gem::Version.new('0')
+    paths.each do |path|
+      out = `otool -l '#{path}' 2>/dev/null`
+      return nil unless $?.success?
+      out.scan(/cmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform (\d+)\s+minos (\d+(?:\.\d+)*)/) do |pl, v|
+        found = [found, Gem::Version.new(v)].max if pl.to_i == platform_id
+      end
+    end
+    found
+  end
+  framework_binary = lambda do |p|
+    File.file?(p) && (p.end_with?('.a') || File.basename(p) == File.basename(File.dirname(p), '.framework'))
+  end
+  ios_binaries = engine_libs + ios_frameworks.flat_map do |xcf|
+    Dir.glob(File.join(__dir__, xcf, 'ios-arm64', '{*.a,*.framework/*}')).select { |p| framework_binary.call(p) }
+  end
+  ios_base = Gem::Version.new('16.0')
+  ios_staged = staged_minos.call(ios_binaries, 2)          # 2 = PLATFORM_IOS (the device slices)
+  ios_floor = ios_staged.nil? ? Gem::Version.new('26.0') : [ios_base, ios_staged].max
+  s.platform         = :ios, ios_floor.to_s
+  if ios_floor > ios_base && defined?(Pod::UI)
+    Pod::UI.warn "bithuman: the engines scripts/bootstrap.sh staged are built for iOS #{ios_floor}, so this pod " \
+                 "needs iOS #{ios_floor} (set `platform :ios, '#{ios_floor}'` in ios/Podfile and the Runner target). " \
+                 'For iOS 16 with Expression 2 only, run BITHUMAN_SKIP_ESSENCE2=1 scripts/bootstrap.sh.'
+  end
 
   # Metal/MetalKit: ggml-metal (libconverse LOCAL mode). CoreML/Accelerate:
   # embody's CoreML graphs + vImage frame conversion. AudioToolbox/CoreAudio:

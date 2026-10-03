@@ -26,6 +26,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:bithuman/bithuman.dart';
+import 'package:bithuman/src/door_gate.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -129,9 +130,11 @@ void main() {
       expect(File('$dir/$_decoder').existsSync(), isTrue);
     });
 
-    test('a complete install is re-used with no download', () async {
+    test('a complete install is re-used with no download (for a credential the door said yes to)', () async {
       _write('${tmp.path}/A00EXAMPLE', _complete);
       engineUnpacks(_complete);
+      // 2.6.36: the door said yes to this (anonymous) call before; without that it is asked first.
+      await entitlementGate.noteGranted(tmp.path, 'A00EXAMPLE', null);
       final dir = await HttpOverrides.runZoned(
           () => downloadExpression2Avatar(
               'A00EXAMPLE', 'https://$_host/A00EXAMPLE.avatar', tmp.path,
@@ -139,6 +142,18 @@ void main() {
           createHttpClient: (_) => throw StateError('must not download'));
       expect(dir, '${tmp.path}/A00EXAMPLE');
       expect(calls, isEmpty);
+      await entitlementGate.checking(tmp.path, 'A00EXAMPLE', null);   // the background door ask
+    });
+
+    test('an install asks the door first and keeps this credential\'s entitlement', () async {
+      engineUnpacks(_complete);
+      await withBody(notAZip, () => downloadExpression2Avatar(
+          'A00EXAMPLE', 'https://$_host/A00EXAMPLE.avatar', tmp.path,
+          allowedHosts: const {_host}));
+      expect(entitlementGate.markFile(tmp.path, 'A00EXAMPLE', null).existsSync(), isTrue);
+      expect(await entitlementGate.mayOpenWithoutDoor(tmp.path, 'A00EXAMPLE', null), isTrue);
+      expect(await entitlementGate.mayOpenWithoutDoor(tmp.path, 'A00EXAMPLE', 'sk_other'), isTrue,
+          reason: 'a yes to a call with no credential is a public avatar: any account opens it for 7 days');
     });
 
     test('a platform whose engine cannot expand the container says so', () async {

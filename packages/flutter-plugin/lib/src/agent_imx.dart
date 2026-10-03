@@ -20,19 +20,29 @@
 // download: the bytes feed the engine's model parser.
 //
 // The cache (the Live app's rule, bithuman-apps #467): a kept file opens AT ONCE, with no network
-// before the open. Whether it is still the published one is asked in the background afterwards (its
-// published length), and a different file is downloaded then, for the NEXT open. Every Essence 2
-// character was re-published on 2026-10-01 (the mouth-corner fix) and the pinned engine refuses the
-// old files, so a kept Essence 2 file older than [kImxStaleBefore] is fetched again ONCE before it
-// opens — the old file stays in place until the new one is complete, and opens if that download
-// fails. The new file is stamped with the current time, so the rule never fires for it again. On a
-// device whose clock reads before the cutoff the rule is off (old and new cannot be told apart).
+// before the open — ★for a credential the door has said yes to (2.6.36, security; lib/src/door_gate.dart).
+// The cache directory is the app's, not an account's: through 2.6.35 account B was handed account A's
+// kept PRIVATE file. Now a kept file opens at once only when the credential of this call (its
+// `apiSecret`, or none) holds a fresh entitlement mark for it (24 h after the door's last yes; 7 days
+// for a public file, one the door served with no credential); otherwise the door is asked first, and a
+// refusal, or a door that cannot be asked, fails the call with [BithumanEntitlementException] (the kept
+// file stays). The door asked about a kept file is always the platform door for the agent's code
+// (owner-scoped, as the native stores ask it), with this call's credential, never the catalog's
+// `model_url`. Whether the kept file is still the published one is asked in the background afterwards
+// (its published length; the same request renews or drops the mark), and a different file is
+// downloaded then, for the NEXT open. Every Essence 2 character was re-published on 2026-10-01 (the
+// mouth-corner fix) and the pinned engine refuses the old files, so a kept Essence 2 file older than
+// [kImxStaleBefore] is fetched again ONCE before it opens — the old file stays in place until the new
+// one is complete, and opens if that download fails while a door said yes (or the mark is fresh). The
+// new file is stamped with the current time, so the rule never fires for it again. On a device whose
+// clock reads before the cutoff the rule is off (old and new cannot be told apart).
 import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../bithuman.dart' show BithumanAgent, BithumanAvatarException;
+import 'door_gate.dart';
 
 /// bitHuman's model doors: the platform API and the site. A redirect a door issues is followed (it
 /// points at the signed file URL the door just minted); so is a redirect to one of these hosts.
@@ -62,12 +72,17 @@ class AgentImxDownloader {
     this.isContainer,
     this.allowInsecure = false,
     this.log,
+    DoorGate? gate,
   })  : clock = clock ?? DateTime.now,
         staleBefore = staleBefore ?? kImxStaleBefore,
         door = door ?? bithumanModelDoor,
-        doorHosts = doorHosts ?? kBithumanModelHosts;
+        doorHosts = doorHosts ?? kBithumanModelHosts,
+        gate = gate ?? DoorGate(clock: clock, allowInsecure: allowInsecure, log: log);
 
   final DateTime Function() clock;
+
+  /// The entitlement marks (2.6.36): which credential the door has said yes to for which kept file.
+  final DoorGate gate;
   final DateTime staleBefore;
   final Uri Function(String code) door;
 
@@ -87,6 +102,9 @@ class AgentImxDownloader {
   @visibleForTesting
   Future<void>? refreshing(String agentId) => _refreshing[agentId];
 
+  /// The mark name of [agentId]'s kept file (beside it, under `<cacheDir>/.door-auth/`).
+  static String markEntry(String agentId) => '${agentId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_')}.imx';
+
   Future<String> download(
     BithumanAgent agent,
     String cacheDir, {
@@ -101,8 +119,11 @@ class AgentImxDownloader {
     final safeId = agent.id.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
     final local = File('$cacheDir/$safeId.imx');
     final key = (apiSecret != null && apiSecret.isNotEmpty) ? apiSecret : null;
+    // ★THE ENTITLEMENT DOOR (2.6.36): the platform door for THIS code, asked with this call's credential
+    // (or none) whenever a kept file needs a yes. The native stores ask the same owner-scoped door.
+    final entDoor = door(agent.id);
     // With a key, the platform door (it honours the key); without, the catalog's own door.
-    final src = key != null ? door(agent.id) : Uri.parse(agent.modelUrl);
+    final src = key != null ? entDoor : Uri.parse(agent.modelUrl);
     _checkUrl(src, 'model_url');
     // A poisoned / MITM'd catalog could point model_url at an attacker host whose bytes reach the
     // native parser: with an allow-list, the first hop must be on it (or be bitHuman's own).
@@ -111,21 +132,76 @@ class AgentImxDownloader {
       throw BithumanAvatarException('model_url host not allowed: ${src.host}');
     }
     final trusted = {...doorHosts, ...?allowedHosts};
+    final entry = markEntry(agent.id);
+    final what = 'imx:${agent.id}';
+    // A download's own answer counts for the mark only when its first host is one of bitHuman's doors
+    // (the platform door with a key, the catalog's www door without): any other host's yes is not about
+    // an entitlement.
+    final markable = doorHosts.contains(src.host);
 
     if (await local.exists() && await local.length() > _kMinImxBytes) {
+      // ★ONE CREDENTIAL PER CALL (2.6.36): [key] is the only credential this call asks with, and the
+      // door's answer to it is the only thing that marks (or unmarks) it.
+      final marked = await gate.mayOpenWithoutDoor(cacheDir, entry, key);
       if (_isStale(local, agent)) {
+        DoorAnswer? said;
+        Object? failed;
         try {
-          await _fetch(src, local, trusted, key, onProgress);
-          log?.call('imx:${agent.id} the kept file predates ${staleBefore.toIso8601String()}: downloaded again');
+          await _fetch(src, local, trusted, key, onProgress, onDoor: (a) => said = a);
+        } on _DoorFailure catch (e) {
+          said = e.door;
+          failed = e.message;
         } catch (e) {
-          log?.call('imx:${agent.id} could not download it again ($e); opening the kept file');
+          failed = e;
         }
+        final a = said ?? DoorAnswer.unreachable(failed ?? 'no answer');
+        if (markable) await gate.note(cacheDir, entry, key, a);
+        if (failed == null) {
+          log?.call('$what the kept file predates ${staleBefore.toIso8601String()}: downloaded again');
+          return local.path;
+        }
+        if (markable && a.denied) throw gate.refusal(what, a, kept: true);
+        // The download failed: the kept (older) file opens only for an entitlement: a fresh mark, a
+        // door's yes just now, or the platform door's yes to this credential (asked now).
+        if (!(markable && a.granted) && !marked) {
+          final d = src == entDoor ? a : (await _check(entDoor, trusted, key)).door;
+          if (src != entDoor) await gate.note(cacheDir, entry, key, d);
+          if (!d.granted) throw gate.refusal(what, d, kept: true);
+        }
+        log?.call('$what could not download it again ($failed); opening the kept file');
         return local.path;
       }
-      _refreshInBackground(agent.id, src, local, trusted, key);
+      if (marked) {
+        _refreshInBackground(agent.id, src, entDoor, local, trusted, key, cacheDir, entry, markable);
+        return local.path;
+      }
+      // No fresh mark for this credential: the door first. Its yes opens the kept file (and a published
+      // file of another length is downloaded in the background, for the next open); anything else fails.
+      final c = await _check(entDoor, trusted, key);
+      await gate.note(cacheDir, entry, key, c.door);
+      if (!c.door.granted) throw gate.refusal(what, c.door, kept: true);
+      log?.call('$what the door said yes to this credential (${c.door}); opening the kept file');
+      if (c.length != null && c.length != await local.length()) {
+        _refreshInBackground(agent.id, src, entDoor, local, trusted, key, cacheDir, entry, markable,
+            publishedLength: c.length);
+      }
       return local.path;
     }
-    await _fetch(src, local, trusted, key, onProgress);
+    DoorAnswer? said;
+    try {
+      await _fetch(src, local, trusted, key, onProgress, onDoor: (a) => said = a);
+    } on _DoorFailure catch (e) {
+      if (markable) await gate.note(cacheDir, entry, key, e.door);
+      if (markable && e.door.denied) {
+        throw BithumanEntitlementException(e.message, refused: true, status: e.door.status);
+      }
+      throw BithumanAvatarException(e.message);
+    } catch (_) {
+      // The door said yes to this credential even if the download then failed: the mark is about that.
+      if (markable && said != null) await gate.note(cacheDir, entry, key, said!);
+      rethrow;
+    }
+    if (markable) await gate.note(cacheDir, entry, key, said ?? const DoorAnswer(200));
     return local.path;
   }
 
@@ -148,8 +224,13 @@ class AgentImxDownloader {
 
   /// GET with redirects followed only when trusted: issued by a door ([doorHosts]), or pointing at a
   /// [trusted] host. The key goes to the door's own host only — never to the file host it redirects to.
-  Future<HttpClientResponse> _open(HttpClient client, Uri src, Set<String> trusted, String? key) async {
+  /// Returns the final 200 and what the FIRST host (the door) answered; any other final status throws
+  /// [_DoorFailure] carrying the same (a storage host's 403 behind the door's redirect is not the door
+  /// refusing the credential).
+  Future<({HttpClientResponse res, DoorAnswer door})> _open(
+      HttpClient client, Uri src, Set<String> trusted, String? key) async {
     var u = src;
+    DoorAnswer? door;
     for (var hop = 0; hop <= 5; hop++) {
       final req = await client.getUrl(u);
       req.followRedirects = false;
@@ -157,6 +238,7 @@ class AgentImxDownloader {
       final res = await req.close();
       final code = res.statusCode;
       if (code >= 300 && code < 400) {
+        door ??= DoorAnswer(code);
         final loc = res.headers.value(HttpHeaders.locationHeader);
         await res.drain<void>().catchError((_) {});
         if (loc == null || loc.isEmpty) {
@@ -170,21 +252,26 @@ class AgentImxDownloader {
         u = next;
         continue;
       }
-      return res;
+      if (code != 200) {
+        final body = await readHead(res, 4096).catchError((_) => '');
+        final answer = door ?? DoorAnswer(code, code: doorErrorCode(body));
+        throw _DoorFailure(answer, _why(code, src, key != null, door == null ? answer.code : null));
+      }
+      return (res: res, door: door ?? const DoorAnswer(200));
     }
     throw BithumanAvatarException('.imx download: too many redirects from ${src.host}');
   }
 
+  /// Downloads [src] over [dest]. [onDoor] hears what the door answered as soon as it answered (before
+  /// the file, which may still fail); a door that did not lead to a 200 throws [_DoorFailure].
   Future<void> _fetch(Uri src, File dest, Set<String> trusted, String? key,
-      void Function(int received, int? total)? onProgress) async {
+      void Function(int received, int? total)? onProgress, {void Function(DoorAnswer door)? onDoor}) async {
     final client = HttpClient();
     final tmp = File('${dest.path}.partial');
     try {
-      final res = await _open(client, src, trusted, key);
-      if (res.statusCode != 200) {
-        await res.drain<void>().catchError((_) {});
-        throw BithumanAvatarException(_why(res.statusCode, src, key != null));
-      }
+      final opened = await _open(client, src, trusted, key);
+      onDoor?.call(opened.door);
+      final res = opened.res;
       // Stream to a `.partial`, then rename over the destination: a failed or cancelled download
       // never replaces a kept file, and never leaves a half file that passes the size check.
       final sink = tmp.openWrite();
@@ -222,51 +309,91 @@ class AgentImxDownloader {
     }
   }
 
-  static String _why(int code, Uri src, bool withKey) {
+  static String _why(int code, Uri src, bool withKey, [String? doorCode]) {
     if (code == 401 || code == 403) {
       return '.imx download HTTP $code from ${src.host}: this character is not downloadable without '
           "its owner's API key — pass apiSecret (anonymous downloads serve only the gallery's "
           'Essence 2 / Expression 2 showcase characters)';
     }
-    if (code == 404 && withKey) {
+    if (code == 404 && withKey && (doorCode == null || doorCode == 'NOT_FOUND')) {
       return '.imx download HTTP 404 from ${src.host}: not found for this API key — its account '
           'does not own this character';
     }
-    return '.imx download HTTP $code from ${src.host}';
+    return '.imx download HTTP $code${doorCode == null ? '' : ' $doorCode'} from ${src.host}';
   }
 
-  /// After a cached open: is the kept file still the published one (same length)? If not, download
-  /// the published file now, for the NEXT open. Offline / no answer: nothing (the next open asks).
-  void _refreshInBackground(String id, Uri src, File kept, Set<String> trusted, String? key) {
-    if (_refreshing.containsKey(id)) return;
+  /// After a cached open: the platform door ([entDoor]) is asked with this call's credential (its yes
+  /// renews the mark, its no drops it: the next open is refused), and the kept file is compared with the
+  /// published one (its length). Another length: the published file is downloaded from [src] now, for the
+  /// NEXT open. Offline / no answer: nothing (the mark keeps its age). [publishedLength]: the door was just
+  /// asked; download only.
+  void _refreshInBackground(String id, Uri src, Uri entDoor, File kept, Set<String> trusted, String? key,
+      String cacheDir, String entry, bool markable, {int? publishedLength}) {
+    final k = '$id|${credentialTag(key)}';
+    if (_refreshing.containsKey(k)) return;
     final run = () async {
       try {
-        final want = await _publishedLength(src, trusted, key);
+        var want = publishedLength;
+        if (want == null) {
+          final c = await _check(entDoor, trusted, key);
+          await gate.note(cacheDir, entry, key, c.door);
+          if (c.door.denied) {
+            log?.call('imx:$id the door refused this credential (${c.door}): the next open is refused');
+            return;
+          }
+          if (!c.door.granted) return;   // no answer: nothing to compare with
+          want = c.length;
+        }
         if (want == null || want == await kept.length()) return;
         log?.call('imx:$id the kept file is not the published one; downloading it in the background');
-        await _fetch(src, kept, trusted, key, null);
+        DoorAnswer? said;
+        try {
+          await _fetch(src, kept, trusted, key, null, onDoor: (a) => said = a);
+        } finally {
+          if (markable && said != null) await gate.note(cacheDir, entry, key, said!);
+        }
         log?.call('imx:$id refreshed');
+      } on _DoorFailure catch (e) {
+        if (markable) await gate.note(cacheDir, entry, key, e.door);
+        log?.call('imx:$id background refresh did not finish (${e.message})');
       } catch (e) {
         log?.call('imx:$id background refresh did not finish ($e)');
       }
     }();
+    _refreshing[k] = run;
     _refreshing[id] = run;
-    unawaited(run.whenComplete(() => _refreshing.remove(id)));
+    unawaited(run.whenComplete(() {
+      _refreshing.remove(k);
+      if (identical(_refreshing[id], run)) _refreshing.remove(id);
+    }));
   }
 
   static const Duration revalidateTimeout = Duration(seconds: 20);
 
-  Future<int?> _publishedLength(Uri src, Set<String> trusted, String? key) async {
-    final client = HttpClient()..connectionTimeout = revalidateTimeout;
+  /// One door ask with [key], following its redirect for the published length (headers only, never the
+  /// file). Never throws: a door that cannot be asked is [DoorAnswer.unreachable].
+  Future<({DoorAnswer door, int? length})> _check(Uri src, Set<String> trusted, String? key) async {
+    final client = HttpClient();
     try {
-      final res = await _open(client, src, trusted, key).timeout(revalidateTimeout);
-      final n = res.statusCode == 200 && res.contentLength > 0 ? res.contentLength : null;
-      await res.listen((_) {}).cancel();   // the headers are the answer: no body
-      return n;
-    } catch (_) {
-      return null;
+      final o = await _open(client, src, trusted, key).timeout(revalidateTimeout);
+      final n = o.res.contentLength > 0 ? o.res.contentLength : null;
+      await o.res.listen((_) {}).cancel();   // the headers are the answer: no body
+      return (door: o.door, length: n);
+    } on _DoorFailure catch (e) {
+      return (door: e.door, length: null);
+    } catch (e) {
+      return (door: DoorAnswer.unreachable(e), length: null);
     } finally {
       client.close(force: true);
     }
   }
+}
+
+/// A download that did not end in a 200, with what the door (the first host) answered.
+class _DoorFailure implements Exception {
+  _DoorFailure(this.door, this.message);
+  final DoorAnswer door;
+  final String message;
+  @override
+  String toString() => message;
 }

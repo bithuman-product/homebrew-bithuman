@@ -40,5 +40,20 @@ check(EngineSelection.resolve("expression2", among: ids, inBuild: noEssence2) ==
       "expression2 still loads in that build")
 check(EngineSelection.errorCode == "unsupported", "the code is Android's for an engine it cannot run")
 
+// 2.6.36: Essence 2 on an OS older than it renders on (a libessence2 rebuilt at the package floor lets the
+// app run on iOS 16) is refused by name, never handed to the engine; Expression 2 still loads there.
+let oldOS: (String) -> (need: String, running: String)? = { $0 == "essence2" ? (need: "iOS 26", running: "iOS 17.5") : nil }
+let below = EngineSelection.resolve("essence-2", among: ids, inBuild: full, unmetOS: oldOS)
+check(below == .needsNewerOS("essence2", need: "iOS 26", running: "iOS 17.5") && below.canonical == nil,
+      "essence2 below its OS: refused")
+check(below.errorMessage?.contains("Essence 2 needs iOS 26 or later; this device runs iOS 17.5") == true
+      && below.errorMessage?.contains("engine: 'expression2'") == true, "its message names both OSes and what loads")
+check(EngineSelection.resolve("expression2", among: ids, inBuild: full, unmetOS: oldOS) == .engine("expression2"),
+      "expression2 still loads on that OS")
+check(EngineSelection.resolve("essence2", among: ids, inBuild: noEssence2, unmetOS: oldOS) == .notInBuild("essence2"),
+      "a build without Essence 2 says so first")
+check(EngineSelection.resolve("essence2", among: ids, inBuild: full, unmetOS: { _ in nil }) == .engine("essence2"),
+      "on iOS 26 essence2 loads")
+
 if failures > 0 { print("engine_selection_test: \(failures) FAILED"); exit(1) }
 print("engine_selection_test: all passed")
