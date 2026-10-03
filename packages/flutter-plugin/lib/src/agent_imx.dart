@@ -135,9 +135,12 @@ class AgentImxDownloader {
     final entry = markEntry(agent.id);
     final what = 'imx:${agent.id}';
     // A download's own answer counts for the mark only when its first host is one of bitHuman's doors
-    // (the platform door with a key, the catalog's www door without): any other host's yes is not about
-    // an entitlement.
-    final markable = doorHosts.contains(src.host);
+    // AND the request names THIS code (the platform door with a key; without one the catalog's www door,
+    // `/api/agents/<code>/model/download`): any other host's yes is not about an entitlement, and a
+    // door's yes about ANOTHER code (a stale or tampered row whose model_url names a public avatar) must
+    // never become a public mark for this code's kept file.
+    final markable =
+        src == entDoor || (doorHosts.contains(src.host) && src.pathSegments.contains(agent.id));
 
     if (await local.exists() && await local.length() > _kMinImxBytes) {
       // ★ONE CREDENTIAL PER CALL (2.6.36): [key] is the only credential this call asks with, and the
