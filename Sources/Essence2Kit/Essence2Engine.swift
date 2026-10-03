@@ -762,6 +762,17 @@ struct Essence2ReplyTracker {
 /// `isExcludedFromBackup`: an avatar is downloaded again on demand, so it must not fill the user's
 /// iCloud or computer backup (Apple's data storage guidelines). A directory you pass in is never
 /// flagged as a whole; only the files this downloader puts in it are.
+///
+/// ★A COPY OPENS ONLY FOR A CREDENTIAL THE DOOR HAS SAID YES TO (2.20.2, security). The download
+/// directory belongs to the app, not to an account: in 2.20.1 account B, signed in where account A
+/// had opened its PRIVATE avatar, got A's file back at once, and the door's refusal of B (it is
+/// owner-scoped: 404 "Agent not found") was ignored; the session meter checks the key, not the
+/// avatar. A copy is now returned only when the current credential holds an entitlement mark for
+/// that avatar (`.door/<key>.auth/<tag>`, the tag a salted SHA-256 prefix of the credential, never
+/// the credential): the door's 200 for that credential writes it, its 401/403/404 drops it. A
+/// credential without a mark asks the door first, as in 2.20.0, and a refusal is thrown. A
+/// credential with a mark keeps everything above: the open is instant and a door that is down
+/// never fails it.
 public enum Essence2Download {
     static let door = "https://api.bithuman.ai"
     /// Highest container ABI this engine reads.
@@ -809,18 +820,28 @@ public enum Essence2Download {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         if directory == nil { excludeFromBackup(dir) }  // ours; a caller's directory is never flagged whole
         let store = DoorStore(dir: dir, key: "\(agentCode).\(model).apple.abi\(abiMax)")
+        // ★ONE CREDENTIAL PER CALL (2.20.2): read once; the door's answer to the request that
+        // carried it is the only thing that marks (or unmarks) it.
+        let credential = Essence2Credential.current
+        let tag = credentialTag(credential)
         if mode != .doorFirst {
             store.finishPendingSwap()                  // from disk: never a request
-            if let hit = store.current() {
+            if let hit = store.current(), store.isAuthorized(tag) {
                 if mode == .background {
-                    revalidateLater(agentCode: agentCode, store: store, io: io)
+                    revalidateLater(agentCode: agentCode, store: store, io: io, credential: credential)
                     return excludeFromBackup(hit)
                 }
-                return excludeFromBackup(await revalidateNow(agentCode: agentCode, store: store, hit: hit, io: io))
+                // nil: the door refused this credential just now; the door path below says how.
+                if let url = await revalidateNow(agentCode: agentCode, store: store, hit: hit, io: io,
+                                                 credential: credential) { return excludeFromBackup(url) }
             }
         }
-        // No copy on the device (or the heal's re-fetch): exactly the 2.20.0 path.
-        let g = try await grant(agentCode: agentCode, io: io, timeout: nil)
+        // No copy on the device, a copy this credential has no mark for, or the heal's re-fetch:
+        // exactly the 2.20.0 path (the door first; a refusal or a door error fails the call).
+        let g: Grant
+        do { g = try await grant(agentCode: agentCode, io: io, timeout: nil, credential: credential) }
+        catch let e as DoorAnswer { if e.isDenial { store.deny(tag) }; throw e.error }
+        store.authorize(tag)
         if let want = g.sha256, let hit = try? cached(want, in: dir) {
             store.record(want)
             return excludeFromBackup(hit)
@@ -842,6 +863,20 @@ public enum Essence2Download {
         v.isExcludedFromBackup = true
         try? u.setResourceValues(v)
         return url
+    }
+
+    /// The mark name for `credential`: 32 hex of SHA-256 over a fixed salt and the credential
+    /// ("" when there is none). Never the credential itself.
+    static func credentialTag(_ credential: String?) -> String {
+        String(Essence2Resources.sha256Hex(Data(("bithuman.door.auth.v1\u{0}" + (credential ?? "")).utf8)).prefix(32))
+    }
+
+    /// The door's non-200 answer to a grant request, kept apart from an unreachable door: 401 and
+    /// 403 refuse the credential and 404 the avatar for it (the door is owner-scoped).
+    struct DoorAnswer: Error {
+        let status: Int
+        let error: Error
+        var isDenial: Bool { status == 401 || status == 403 || status == 404 }
     }
 
     // MARK: the two requests
@@ -871,7 +906,10 @@ public enum Essence2Download {
             })
     }
 
-    static func grant(agentCode: String, io: DoorIO, timeout: TimeInterval?) async throws -> Grant {
+    /// Throws `DoorAnswer` (wrapping the error 2.20.1 threw) when the door answers but not 200, and
+    /// passes through what `io` throws when the door cannot be reached.
+    static func grant(agentCode: String, io: DoorIO, timeout: TimeInterval?,
+                      credential: String?) async throws -> Grant {
         guard var c = URLComponents(string: door + "/v1/agent/" + agentCode + "/model/download") else {
             throw Essence2KitError.resourcesUnavailable("not an agent code: \(agentCode)")
         }
@@ -881,14 +919,15 @@ public enum Essence2Download {
                         URLQueryItem(name: "redirect", value: "false")]
         var req = URLRequest(url: c.url!)
         if let timeout { req.timeoutInterval = timeout }
-        if let s = Essence2Credential.current { req.setValue(s, forHTTPHeaderField: "api-secret") }
+        if let s = credential { req.setValue(s, forHTTPHeaderField: "api-secret") }
         let (status, body) = try await io.grant(req)
         guard status == 200,
               let root = try JSONSerialization.jsonObject(with: body) as? [String: Any],
               let d = root["data"] as? [String: Any],
               let urlString = d["url"] as? String, let url = URL(string: urlString) else {
             let msg = String(decoding: body.prefix(300), as: UTF8.self)
-            throw Essence2KitError.resourcesUnavailable("\(agentCode): the download door answered HTTP \(status): \(msg)")
+            throw DoorAnswer(status: status, error: Essence2KitError.resourcesUnavailable(
+                "\(agentCode): the download door answered HTTP \(status): \(msg)"))
         }
         return Grant(url: url, sha256: (d["raw_sha256"] as? String) ?? (d["sha256"] as? String),
                      isSlice: (d["slice"] as? String).map { $0 != "universal" } ?? false)
@@ -911,18 +950,21 @@ public enum Essence2Download {
 
     // MARK: revalidation
 
-    /// What one revalidation did. Internal: the app only ever sees a file.
-    enum Revalidated: Sendable, Equatable { case unchanged, staged, swapped, keptUnreachable, keptFailed }
+    /// What one revalidation did. Internal: the app only ever sees a file. `keptDenied` (2.20.2):
+    /// the door refused the credential the check carried (401/403/404); its mark is dropped.
+    enum Revalidated: Sendable, Equatable { case unchanged, staged, swapped, keptUnreachable, keptFailed, keptDenied }
 
     /// The background half of a cache hit: at most one per avatar (and directory) in flight.
-    static func revalidateLater(agentCode: String, store: DoorStore, io: DoorIO) {
-        inFlight.start(store.id) { await stage(agentCode: agentCode, store: store, io: io) }
+    static func revalidateLater(agentCode: String, store: DoorStore, io: DoorIO, credential: String?) {
+        inFlight.start(store.id) { await stage(agentCode: agentCode, store: store, io: io, credential: credential) }
     }
 
     /// The blocking check (`revalidateInBackground = false`): stage, swap now, and hand back a
-    /// verified file whatever happened. Never throws.
-    static func revalidateNow(agentCode: String, store: DoorStore, hit: URL, io: DoorIO) async -> URL {
-        let r = await stage(agentCode: agentCode, store: store, io: io)
+    /// verified file whatever happened — except a refusal of this credential: nil (never throws).
+    static func revalidateNow(agentCode: String, store: DoorStore, hit: URL, io: DoorIO,
+                              credential: String?) async -> URL? {
+        let r = await stage(agentCode: agentCode, store: store, io: io, credential: credential)
+        if r == .keptDenied { return nil }
         guard r == .staged else { return hit }
         store.finishPendingSwap()
         return store.current() ?? hit
@@ -930,13 +972,20 @@ public enum Essence2Download {
 
     /// Asks the door; when it names another file, downloads and checks it into the staging area
     /// and writes the swap journal. It never touches the file the app has open, and never throws.
+    /// The door's answer marks (200) or unmarks (401/403/404) `credential` for this avatar.
     @discardableResult
-    static func stage(agentCode: String, store: DoorStore, io: DoorIO) async -> Revalidated {
+    static func stage(agentCode: String, store: DoorStore, io: DoorIO, credential: String?) async -> Revalidated {
         let have = store.currentSha()
+        let tag = credentialTag(credential)
         let g: Grant
-        do { g = try await grant(agentCode: agentCode, io: io, timeout: revalidateTimeout) } catch {
+        do { g = try await grant(agentCode: agentCode, io: io, timeout: revalidateTimeout, credential: credential) }
+        catch let e as DoorAnswer {
+            if e.isDenial { store.deny(tag); return .keptDenied }
+            return .keptUnreachable
+        } catch {
             return .keptUnreachable
         }
+        store.authorize(tag)
         if let want = g.sha256 {
             if want == have { return .unchanged }
             if (try? cached(want, in: store.dir)) != nil { store.journal(want); return .staged }
@@ -1010,6 +1059,18 @@ public enum Essence2Download {
 
         /// Swaps run under one lock, so a journal is never written while a swap reads it.
         private static let swapLock = NSLock()
+
+        /// `<key>.auth/<tag>`: the door said yes to the credential `tag` names for this avatar.
+        private func mark(_ tag: String) -> URL {
+            meta.appendingPathComponent(key + ".auth", isDirectory: true).appendingPathComponent(tag)
+        }
+        func isAuthorized(_ tag: String) -> Bool { FileManager.default.fileExists(atPath: mark(tag).path) }
+        func authorize(_ tag: String) {
+            let m = mark(tag)
+            try? FileManager.default.createDirectory(at: m.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? Data().write(to: m, options: .atomic)
+        }
+        func deny(_ tag: String) { try? FileManager.default.removeItem(at: mark(tag)) }
 
         func currentSha() -> String? { Self.readSha(pointer) }
 
@@ -1176,4 +1237,6 @@ public enum Essence2Resources {
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
+
+    static func sha256Hex(_ d: Data) -> String { SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }
 }
