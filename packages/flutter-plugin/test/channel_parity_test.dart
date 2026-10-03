@@ -39,12 +39,13 @@ class _Channel {
 
 String _read(String path) => File(path).readAsStringSync();
 
-/// The part of [text] from [start] up to [end] (both must be present).
+/// The part of [text] from [start] up to [end] (both must be present; read before any test runs, so a
+/// missing marker is a StateError that fails the whole file).
 String _slice(String text, String start, String end) {
   final a = text.indexOf(start);
-  expect(a, isNonNegative, reason: 'marker not found: $start');
+  if (a < 0) throw StateError('marker not found: $start');
   final b = text.indexOf(end, a + start.length);
-  expect(b, isNonNegative, reason: 'marker not found after "$start": $end');
+  if (b < 0) throw StateError('marker not found after "$start": $end');
   return text.substring(a, b);
 }
 
