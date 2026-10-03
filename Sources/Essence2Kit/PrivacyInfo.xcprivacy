@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The bitHuman Swift package's App Store privacy manifest (Swift package 2.20.2).
+  SwiftPM copies it into the app as this target's resource bundle; Xcode's privacy report and
+  App Store Connect read it from there. The same file ships in Essence2Kit and in
+  BithumanEngineCoreLink, the source target every Expression2 and Essence2 product carries, so it
+  covers the binary xcframeworks (static libraries, which cannot carry a bundle of their own).
+
+  Required-reason APIs, found by scanning the shipped binaries (nm -u / strings, 2026-10-03:
+  Expression2 v2.20.1, libessence2 + onnxruntime essence2-v1.15.3, EngineCore enginecore-v1.0.2)
+  and the Swift sources:
+  - File timestamp: stat / fstat / lstat (libessence2, onnxruntime, EngineCore),
+    NSFileModificationDate and contentModificationDateKey (Expression2's compiled-model cache and
+    meter state). Only the SDK's own files inside the app container: C617.1.
+  - System boot time: ProcessInfo.systemUptime (Expression2, libessence2), to time events inside
+    the app. 35F9.1.
+  Not used: disk space (no statfs / statvfs / volumeAvailableCapacity), user defaults, active
+  keyboards.
+
+  Data the SDK itself sends: the session meter's beat to api.bithuman.ai (bills the developer's
+  account for session time): a random per-install id the SDK creates (install_id) and session
+  seconds. Not linked to the user's identity, never used for tracking or advertising.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeDeviceID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUsageData</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
