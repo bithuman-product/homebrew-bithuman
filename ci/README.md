@@ -39,7 +39,9 @@ run their commands by hand on a release host with the named credentials
 `publish-mcp.yml` (mcp-v*), `publish-pubdev.yml` (flutter-v*), `publish-cli-wheel.yml`,
 `publish-essence2-apple.yml`. After any release, run
 `python3 tools/verify_latest_badge.py --heal` and `ci/run-local.sh --only release-coverage`
-(these used to run on `release:` events and a schedule).
+(these used to run on `release:` events and a schedule). Releases are published to
+https://downloads.bithuman.ai with `scripts/downloads-publish.py` (RELEASE.md); recipes that
+still say `gh release` are ported by hand to it.
 
 ## Where the old workflows live
 

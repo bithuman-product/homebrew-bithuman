@@ -1,19 +1,24 @@
 #!/bin/sh
-# Offline test for install.sh's GitHub error handling (no network, no real
-# downloads): a fake `curl` on PATH plays GitHub. Run from the repo root:
-#   sh tests/install-sh-github-errors.sh
+# Offline test for install.sh's download error handling (no network, no real
+# downloads): a fake `curl` on PATH plays the release origin
+# (https://origin.test/homebrew-bithuman). Run from the repo root:
+#   sh tests/install-sh-download-errors.sh
 # Covers: a 429 on the tarball is retried (honouring Retry-After) and then
 # installs; a Retry-After beyond the cap stops at once with an honest
 # "rate-limiting" message; a real 404 says the asset is missing; a 403 with an
-# exhausted API quota during version resolution says "rate-limiting"; and
-# GITHUB_TOKEN is sent to api.github.com only when set. Nothing may ever say
-# "may not be published" for a rate limit.
+# exhausted quota during version resolution says "rate-limiting"; and no
+# credential is ever sent (a GITHUB_TOKEN in the environment is ignored and never
+# printed). Nothing may ever say "may not be published" for a rate limit.
 set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
 installer="$here/install.sh"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
 fail=0
+# The tarball this host's installer asks for (runs on Linux and on macOS alike).
+case "$(uname -s)" in Darwin) _os=apple-darwin ;; *) _os=unknown-linux-gnu ;; esac
+case "$(uname -m)" in arm64|aarch64) _arch=aarch64 ;; *) _arch=x86_64 ;; esac
+T="bithuman-${_arch}-${_os}.tar.gz"
 
 # ── fixtures: a tarball whose `bithuman` prints the real --version layout ──
 mkdir -p "$work/pkg"
@@ -29,7 +34,7 @@ cat > "$work/fakebin/curl" <<'CURL'
 #!/bin/sh
 # Fake curl: honours -D <hdr> -o <out> -w '%{http_code}' and -H; plays the
 # scenario in $FAKE_DIR. Codes are consumed one per call from
-# $FAKE_DIR/<kind>.codes (kind = api | tarball | sha).
+# $FAKE_DIR/<kind>.codes (kind = api | tarball | sha); api = latest.json / releases.json.
 hdr=""; out=""; url=""; w=""; auth=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -43,9 +48,9 @@ while [ $# -gt 0 ]; do
   shift
 done
 case "$url" in
-  *.sha256) kind=sha ;;
-  *releases/download/*) kind=tarball ;;
-  *api.github.com*) kind=api ;;
+  https://origin.test/homebrew-bithuman/latest.json|https://origin.test/homebrew-bithuman/releases.json) kind=api ;;
+  https://origin.test/homebrew-bithuman/*.sha256) kind=sha ;;
+  https://origin.test/homebrew-bithuman/*/*) kind=tarball ;;
   *) kind=other ;;
 esac
 printf '%s %s auth=%s\n' "$kind" "$url" "${auth:-0}" >> "$FAKE_DIR/log"
@@ -63,7 +68,7 @@ body=""
 if [ "$code" = 200 ]; then
   case "$kind" in
     tarball) [ -n "$out" ] && cp "$FAKE_DIR/tarball.tgz" "$out" ;;
-    # One key per line, as GitHub pretty-prints it (install.sh greps line by line).
+    # One release; install.sh reads it as latest.json and as a one-entry releases.json.
     api) body='{
   "tag_name": "cli-v9.9.9",
   "draft": false,
@@ -93,6 +98,7 @@ run_case() { # <name> ; scenario files already in $work/$name
   mkdir -p "$d/bin"
   env -i PATH="$work/fakebin:/usr/bin:/bin" HOME="$d" FAKE_DIR="$d" \
     BITHUMAN_INSTALL_DIR="$d/bin" BITHUMAN_NO_MODIFY_PATH=1 BITHUMAN_MIRROR=off \
+    BITHUMAN_DOWNLOADS=https://origin.test/homebrew-bithuman \
     ${CASE_VERSION:+BITHUMAN_VERSION=$CASE_VERSION} \
     ${CASE_TOKEN:+GITHUB_TOKEN=$CASE_TOKEN} \
     sh "$installer" > "$d/out" 2>&1
@@ -118,29 +124,29 @@ check "429 retry-after 300: exit 1"                    "$( [ "$(cat "$work/c2/rc
 check "429 retry-after 300: 'retry in about 300s'"     "$(has c2 'rate-limiting downloads from this network (HTTP 429); retry in about 300s'; echo $?)"
 check "429 retry-after 300: no sleep past the cap"     "$( [ $((t1 - t0)) -lt 10 ]; echo $?)"
 check "429 retry-after 300: not 'may not be published'" "$(! has c2 'may not be published'; echo $?)"
-check "429 retry-after 300: offers GITHUB_TOKEN"       "$(has c2 'GITHUB_TOKEN=<your token> sh'; echo $?)"
+check "429 retry-after 300: offers a pin"              "$(has c2 'BITHUMAN_VERSION=cli-vX.Y.Z sh'; echo $?)"
 
 # 3) a real 404 on the tarball -> says the release has no such asset, no retry.
 mkdir -p "$work/c3"; printf '404\n' > "$work/c3/tarball.codes"
 CASE_VERSION=cli-v9.9.9 CASE_TOKEN= run_case c3
 check "404: exit 1"                                    "$( [ "$(cat "$work/c3/rc")" = 1 ]; echo $?)"
-check "404: names HTTP 404 and the missing asset"      "$(has c3 'download failed (HTTP 404): cli-v9.9.9 has no bithuman-x86_64-unknown-linux-gnu.tar.gz'; echo $?)"
+check "404: names HTTP 404 and the missing asset"      "$(has c3 "download failed (HTTP 404): cli-v9.9.9 has no $T"; echo $?)"
 check "404: not called a rate limit"                   "$(! has c3 'rate-limiting'; echo $?)"
 check "404: fetched once (no retry)"                   "$( [ "$(grep -c '^tarball' "$work/c3/log")" = 1 ]; echo $?)"
 
-# 4) api.github.com 403 with the quota spent, while resolving the latest release.
+# 4) the index answers 403 with the quota spent, while resolving the latest release.
 mkdir -p "$work/c4"; printf '403\n' > "$work/c4/api.codes"
 printf 'x-ratelimit-remaining: 0\r\nx-ratelimit-reset: %s\r\n' "$(( $(date +%s) + 900 ))" > "$work/c4/api.headers"
 CASE_VERSION= CASE_TOKEN= run_case c4
 check "api 403 quota spent: exit 1"                    "$( [ "$(cat "$work/c4/rc")" = 1 ]; echo $?)"
 check "api 403 quota spent: says rate-limiting (HTTP 403)" "$(has c4 'rate-limiting downloads from this network (HTTP 403)'; echo $?)"
 
-# 5) GITHUB_TOKEN reaches api.github.com when set, and only then; never printed.
+# 5) a GITHUB_TOKEN in the environment is ignored: no Authorization header, never printed.
 mkdir -p "$work/c5"; printf '404\n' > "$work/c5/sha.codes"
-CASE_VERSION=cli-v9.9.9 CASE_TOKEN=tok-fake-123 run_case c5
-check "token: install ok"                              "$( [ "$(cat "$work/c5/rc")" = 0 ]; echo $?)"
-check "token: sent to api.github.com"                  "$(grep -q '^api .* auth=1' "$work/c5/log"; echo $?)"
-check "token: never printed"                           "$(! has c5 'tok-fake-123'; echo $?)"
-check "control: no token -> no Authorization header"   "$(! grep -q 'auth=1' "$work/c1/log"; echo $?)"
+CASE_VERSION= CASE_TOKEN=tok-fake-123 run_case c5
+check "token present: install ok (latest resolved)"    "$( [ "$(cat "$work/c5/rc")" = 0 ] && grep -q '^api ' "$work/c5/log"; echo $?)"
+check "★token present: no Authorization header sent"  "$(! grep -q 'auth=1' "$work/c5/log"; echo $?)"
+check "token present: never printed"                   "$(! has c5 'tok-fake-123'; echo $?)"
+check "★no request left the origin, in any case"      "$(! cat "$work"/c*/log | grep -q '^other '; echo $?)"
 
-if [ "$fail" = 0 ]; then echo "install-sh-github-errors: ALL PASS"; else echo "install-sh-github-errors: FAILED"; for c in c1 c2 c3 c4 c5; do echo "--- $c (rc $(cat "$work/$c/rc"))"; cat "$work/$c/out"; done; exit 1; fi
+if [ "$fail" = 0 ]; then echo "install-sh-download-errors: ALL PASS"; else echo "install-sh-download-errors: FAILED"; for c in c1 c2 c3 c4 c5; do echo "--- $c (rc $(cat "$work/$c/rc"))"; cat "$work/$c/out"; done; exit 1; fi

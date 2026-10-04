@@ -30,10 +30,13 @@
 # re-pinned to yet — this repo already carries the fix commit for that,
 # 2a7cd37 "re-pin mac sha256 after linux-lane rebuild re-uploaded the asset".
 #
-# The fix is procedural and this script enforces it:
-#   create the release as a DRAFT -> upload every asset -> run this -> publish.
-# A draft is invisible to `brew` and to anonymous downloads, so the window
-# closes. This script is what makes the last step safe.
+# The fix is procedural and this script enforces it. Since the 2026-10 move to
+# https://downloads.bithuman.ai (no drafts there):
+#   stage the release locally -> run this on the staged manifest + files ->
+#   publish EVERY asset in ONE call (the release enters the index only after
+#   all of them are verified) -> run this live -> bump the formula.
+# A release published in two calls is listed while incomplete; C5 refuses it.
+# This script is what makes the publish step safe.
 #
 # ── CHECKS ───────────────────────────────────────────────────────────────────
 #   C1 COMPLETE      every asset in the required matrix is present
@@ -86,22 +89,29 @@
 #                                   [--assets DIR] [--verify-bytes]
 #   scripts/check-release-atomic.sh --self-test
 #
-#   --manifest takes the JSON `gh api repos/OWNER/REPO/releases/tags/TAG`
-#   returns, so the checks can be exercised against fixtures — including
-#   fixtures that are deliberately broken — with no network and no risk of
-#   touching a published release. In LIVE mode a DRAFT is read from the
-#   release LIST instead, because a draft has no git tag and the tags
-#   endpoint 404s on it (measured 2026-09-10 on cli-v2.6.5) — which is the
-#   state this gate exists to grade.
+#   --manifest takes one release object in the shape of
+#   https://downloads.bithuman.ai/<repo>/releases.json (GitHub's release shape:
+#   tag_name, draft, published_at, assets[{name,size,created_at}]), so the checks
+#   can be exercised against fixtures — including fixtures that are deliberately
+#   broken — with no network and no risk of touching a published release. In
+#   LIVE mode the published release is read from the public index by
+#   scripts/downloads-publish.py (edge-cached up to 300 s). There are no drafts on
+#   the downloads host: grade a release BEFORE it exists with
+#     scripts/downloads-publish.py stage <tag> <files...> > m.json
+#     scripts/check-release-atomic.sh --manifest m.json --assets <dir> --verify-bytes
+#   and then publish every asset in ONE `downloads-publish.py publish` call.
 #
 # ── EXIT CODES ───────────────────────────────────────────────────────────────
 #   0  release is complete, consistent and was assembled before it was visible
 #   1  a check failed — DO NOT PUBLISH
-#   3  could not run (no gh, no jq/python, no manifest). Not a pass.
+#   3  could not run (no python, no manifest, index unreadable). Not a pass.
 # =============================================================================
 set -uo pipefail
 
-REPO="${BITHUMAN_TAP_REPO:-bithuman-product/homebrew-bithuman}"
+REPO="${BITHUMAN_TAP_REPO:-homebrew-bithuman}"   # the repo name on downloads.bithuman.ai
+# Until the move this variable took OWNER/NAME (a GitHub repo); a host that still exports
+# bithuman-product/homebrew-bithuman keeps working: only the last path segment names the repo.
+REPO="${REPO##*/}"
 
 # ── THE MATRIX — single source of truth. Add a platform here only. ──────────
 # name                                       floor bytes (a sane lower bound;
@@ -273,8 +283,9 @@ else:
             probs.append("formula has no top-level url/sha256 pair")
         else:
             u, s = url.group(1), sha.group(1)
-            if f"/download/{tag}/" not in u:
-                probs.append(f"formula url points at {u.split('/download/')[-1].split('/')[0]!r}, release is {tag!r}")
+            # https://downloads.bithuman.ai/<repo>/<tag>/<asset>
+            if f"/{tag}/" not in u:
+                probs.append(f"formula url points at {u.rstrip('/').split('/')[-2]!r}, release is {tag!r}")
             if not u.endswith(formula_platform):
                 probs.append(f"formula url asset is {u.rsplit('/',1)[-1]!r}, expected {formula_platform!r}")
             want = sidecar_digest.get(formula_platform)
@@ -568,12 +579,12 @@ draft_verdict() {
   local state="$1" require="$2"
   case "$state" in
     missing)
-      echo "REFUSE: the release does not exist. Create it as a DRAFT first:"
-      echo "        gh release create <tag> --draft --title '…' --notes '…'"
+      echo "REFUSE: the release does not exist. Stage and grade it locally, then publish"
+      echo "        every asset in ONE call: scripts/downloads-publish.py publish <tag> <files...>"
       return 1 ;;
     true)
-      echo "ALLOW: still a draft — invisible to brew and to anonymous"
-      echo "       downloads, so nothing is advertised while assets arrive."
+      echo "ALLOW: still a draft — never latest.json and skipped by the"
+      echo "       installers, so nothing is advertised while assets arrive."
       return 0 ;;
     false)
       if [[ "$require" == "true" ]]; then
@@ -639,7 +650,7 @@ json.dump(man, open(out, "w"), indent=1)
 MK
   cat > "$FIX/good.rb" <<RB
 class BithumanCli < Formula
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v9.9.9/bithuman-aarch64-apple-darwin.tar.gz"
+  url "https://downloads.bithuman.ai/homebrew-bithuman/cli-v9.9.9/bithuman-aarch64-apple-darwin.tar.gz"
   sha256 "$MAC_SHA"
 end
 RB
@@ -777,7 +788,7 @@ json.dump(m, open(sys.argv[2], "w"), indent=1)
 MK7
   cat > "$C7D/good.rb" <<RB7
 class BithumanCli < Formula
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v9.9.9/bithuman-aarch64-apple-darwin.tar.gz"
+  url "https://downloads.bithuman.ai/homebrew-bithuman/cli-v9.9.9/bithuman-aarch64-apple-darwin.tar.gz"
   sha256 "$C7_MAC"
 RB7
   echo "end" >> "$C7D/good.rb"
@@ -868,7 +879,7 @@ json.dump({"tag_name": "cli-v9.9.9", "draft": False,
            ]}, open(out, "w"), indent=1)
 MK8
     { echo 'class BithumanCli < Formula'
-      echo '  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v9.9.9/bithuman-aarch64-apple-darwin.tar.gz"'
+      echo '  url "https://downloads.bithuman.ai/homebrew-bithuman/cli-v9.9.9/bithuman-aarch64-apple-darwin.tar.gz"'
       echo "  sha256 \"$ms\""
       echo 'end'; } > "$rb"
   }
@@ -966,33 +977,14 @@ fi
 # ---------------------------------------------------------------------------
 if [[ -z "$MANIFEST" ]]; then
   [[ -n "$TAG" ]] || { echo "usage: $0 <cli-vX.Y.Z> | --manifest F | --self-test" >&2; exit 3; }
-  command -v gh >/dev/null 2>&1 || { echo "FATAL: no gh — cannot read the release" >&2; exit 3; }
+  PUBLISH=(python3 "$SCRIPT_DIR/downloads-publish.py" --repo "$REPO")
   MANIFEST="$WORK/live.json"
-  # ★A DRAFT HAS NO TAG, AND THIS GATE'S WHOLE JOB IS TO GRADE A DRAFT.
-  # MEASURED 2026-09-10 while cutting cli-v2.6.5: `gh api
-  # repos/OWNER/REPO/releases/tags/cli-v2.6.5` answers **404** for a release
-  # that exists as a DRAFT — GitHub's get-release-by-tag resolves a real git
-  # tag, and a draft has not created one yet. The list endpoint sees it
-  # (`draft:true, tag_name:"cli-v2.6.5"`), and the published cli-v2.6.4
-  # answers the tags endpoint fine, so this is about draftness and nothing
-  # else. The procedure this file documents in its own header is
-  # "create as a DRAFT -> upload every asset -> RUN THIS -> publish", so
-  # every honest use of live mode hit the one lookup that cannot see the
-  # subject: the gate could only ever be run AFTER the irreversible half.
-  # So the tag lookup is tried first (cheapest, and the right answer for a
-  # published release) and the LIST is the fallback that can see a draft.
-  # A miss in both is still FATAL — never a silent pass.
-  if ! gh api "repos/${REPO}/releases/tags/${TAG}" > "$MANIFEST" 2>"$WORK/gherr"; then
-    if ! gh api --paginate "repos/${REPO}/releases" --jq \
-           "[.[] | select(.tag_name==\"${TAG}\")] | .[0] // empty" \
-           > "$WORK/live_draft.json" 2>>"$WORK/gherr" \
-       || [[ ! -s "$WORK/live_draft.json" ]]; then
-      echo "FATAL: could not read ${REPO} release ${TAG} (neither by tag nor in the release list):" >&2
-      sed 's/^/  /' "$WORK/gherr" >&2
-      exit 3
-    fi
-    cp "$WORK/live_draft.json" "$MANIFEST"
-    echo "note: ${TAG} is not resolvable by tag (a DRAFT has no git tag) — read from the release list"
+  # LIVE mode grades a PUBLISHED release (the downloads host has no drafts; grade a release
+  # before it exists with `stage` + --manifest, see USAGE). A miss is FATAL, never a pass.
+  if ! "${PUBLISH[@]}" view "$TAG" --json > "$MANIFEST" 2>"$WORK/viewerr"; then
+    echo "FATAL: could not read ${REPO} release ${TAG} from the downloads index:" >&2
+    sed 's/^/  /' "$WORK/viewerr" >&2
+    exit 3
   fi
   # Sidecars are ~107 bytes — fetch their CONTENT so C3/C4 are real checks
   # rather than "the file exists". Without this they would report "content
@@ -1000,8 +992,7 @@ if [[ -z "$MANIFEST" ]]; then
   SC_DIR="$WORK/sidecars"; mkdir -p "$SC_DIR"
   for spec in "${REQUIRED_TARBALLS[@]}"; do
     name="${spec%%:*}"
-    gh release download "$TAG" --repo "$REPO" --pattern "${name}.sha256" \
-       --dir "$SC_DIR" --clobber >/dev/null 2>&1 || true
+    "${PUBLISH[@]}" download "$TAG" -p "${name}.sha256" -D "$SC_DIR" --clobber >/dev/null 2>&1 || true
   done
   [[ -n "$ASSETS" ]] || ASSETS="$SC_DIR"
 fi
@@ -1012,7 +1003,7 @@ if run_checks "$MANIFEST" "$FORMULA" "${ASSETS:--}" "$VERIFY_BYTES"; then
   exit 0
 fi
 echo "OVERALL: FAIL — DO NOT PUBLISH."
-echo "  Assemble releases as a DRAFT: create with --draft, upload every asset,"
-echo "  re-run this, then \`gh release edit <tag> --draft=false\`. A draft is"
-echo "  invisible to brew and to anonymous downloads, so there is no window."
+echo "  Assemble releases LOCALLY: scripts/downloads-publish.py stage <tag> <files> > m.json,"
+echo "  grade with --manifest m.json --assets <dir> --verify-bytes, then publish every asset in"
+echo "  ONE \`scripts/downloads-publish.py publish <tag> <files>\` call, so there is no window."
 exit 1

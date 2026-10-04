@@ -75,11 +75,8 @@ jobs:
       # instrument check for the step below, which needs the network.
       - name: the guard proves itself
         run: python3 scripts/guard-public-vocabulary.py --selftest
-      # GITHUB_TOKEN only lifts the 60/hour unauthenticated rate limit; the
-      # releases of a public repo are readable without it. The guard never
-      # prints a token — it reports the boolean `authenticated:` and nothing
-      # more.
+      # 2026-10: the release text is read from the public
+      # https://downloads.bithuman.ai/homebrew-bithuman/releases.json; no
+      # credential is needed or sent.
       - name: no internal vocabulary in the published release titles + notes
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/guard-public-vocabulary.py --releases
+        run: python3 scripts/guard-public-vocabulary.py --releases --repo homebrew-bithuman

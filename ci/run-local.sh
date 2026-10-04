@@ -22,13 +22,17 @@ STEPS=(
   "latest-badge-selftest|0|python3|Latest-badge detector can refuse, no network (latest-badge.yml, --selftest only)|python3 tools/verify_latest_badge.py --selftest"
   "release-coverage|0|python3 curl|newest CLI release carries every platform (release-coverage.yml:coverage)|$WF/release-coverage.yml coverage"
   "formula-pin-anonymous|0|python3 curl|formula asset anonymously fetchable + mutation proof (release-coverage.yml)|$WF/release-coverage.yml formula-pin-is-anonymously-fetchable"
-  "installer-self-test|0|sh curl|install.sh --self-test live arms (release-coverage.yml)|$WF/release-coverage.yml installer-self-test"
+  "installer-self-test|0|sh curl|install.sh --self-test live arms against downloads.bithuman.ai (release-coverage.yml)|$WF/release-coverage.yml installer-self-test"
+  "installer-offline|0|sh tar|install.sh origin + mirror + error handling, offline; no host but the origin/mirror is ever asked (tests/install-sh-*.sh)|sh tests/install-sh-mirror.sh && sh tests/install-sh-download-errors.sh"
+  "installer-ps1-offline|0|pwsh python3|install.ps1 retry helper, offline (tests/install-ps1-download-errors.ps1)|pwsh -NoProfile -File tests/install-ps1-download-errors.ps1"
+  "installer-ps1-resolution|0|pwsh python3|install.ps1 end to end, offline: latest.json -> releases.json -> mirror order (tests/install-ps1-resolution.ps1)|pwsh -NoProfile -File tests/install-ps1-resolution.ps1"
+  "downloads-publish-selftest|0|python3|the publish wrapper: cli-v* only for latest.json, refusals map to exit 1, no publisher is exit 2 (scripts/downloads-publish.py)|python3 scripts/downloads-publish.py --self-test"
   "flutter-plugin-tests|1|flutter|flutter plugin census + flutter test (flutter-plugin-tests.yml)|$WF/flutter-plugin-tests.yml plugin"
 )
 
 # slower / scheduled / non-PR jobs that still run on this host (read-only)
 FULL_STEPS=(
-  "public-vocabulary-releases|0|python3 gh|published release titles + notes carry no internal vocabulary (public-vocabulary.yml:releases; token from gh auth, never printed)|GITHUB_TOKEN=\$(gh auth token) $WF/public-vocabulary.yml releases"
+  "public-vocabulary-releases|0|python3|published release titles + notes carry no internal vocabulary (public-vocabulary.yml:releases; reads downloads.bithuman.ai releases.json, no credential)|$WF/public-vocabulary.yml releases"
 )
 
 MANUAL=(
@@ -36,13 +40,13 @@ MANUAL=(
   "voice-render-edge        [macOS host] python3 ci/wf-step.py ci/github-workflows-disabled/plugin-platform-guards.yml voice-render-edge   (check_voice_render_edge.sh, prove_lipsync_sink_headless.sh + controls)"
   "swift-package            [macOS 26 + Xcode] swift build --disable-keychain && swift test --disable-keychain   (swift-package.yml)"
   "flutter-plugin-android-unit [Android SDK + a Flutter app that depends on the plugin] packages/flutter-plugin/scripts/test_android_unit.sh <app dir>   (JVM unit tests: EngineUsersTest)"
-  "latest-badge --heal      [WRITES the live /releases/latest flag] python3 tools/verify_latest_badge.py --heal   (latest-badge.yml; run only after a release)"
+  "latest-badge --heal      [WRITES latest.json on downloads.bithuman.ai; bucket credentials] python3 tools/verify_latest_badge.py --heal   (latest-badge.yml; run only after a release)"
   "preflight                [secret BITHUMAN_MODELS_SSH_KEY] probe the models deploy key: see preflight.yml"
   "release-pypi             [RELEASE; macOS+Linux x86_64+aarch64 hosts, docker, secrets BITHUMAN_MODELS_SSH_KEY PYPI_API_TOKEN] recipe: ci/github-workflows-disabled/release-pypi.yml; RELEASE.md"
   "publish-cli-wheel        [RELEASE; secret PYPI_API_TOKEN] sha256 pin check + twine check + twine upload dist/bithuman-cli/<wheel>   (publish-cli-wheel.yml)"
   "publish-mcp              [RELEASE; secret PYPI_API_TOKEN] cd packages/python-mcp && python -m build && twine upload dist/*   (publish-mcp.yml, tag mcp-v*)"
   "publish-pubdev           [RELEASE; pub.dev credentials] cd packages/flutter-plugin && no _unpackImxContainer in lib/ && dart pub publish   (publish-pubdev.yml, tag flutter-v*)"
-  "publish-essence2-apple   [RELEASE; macOS host, secret SDK_RO_PAT] mirror graded essence2-apple archives into a tap release, --latest=false   (publish-essence2-apple.yml)"
+  "publish-essence2-apple   [RELEASE; macOS host, bucket credentials] graded essence2-apple archives -> scripts/downloads-publish.py publish essence2-v<x> <files> (never latest.json)   (recipe: publish-essence2-apple.yml, still written for gh)"
 )
 
 # ---------------------------------------------------------------------------

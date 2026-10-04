@@ -14,6 +14,11 @@ C4 FORMULA-PIN check, but it grades the formula against a manifest the CALLER
 supplies, and it is wired in NO workflow (`git grep check-release-atomic --
 .github/workflows` returns nothing). Neither half would have caught a draft.
 
+★ 2026-10: THE RELEASES MOVED to https://downloads.bithuman.ai (the tap's own origin; GitHub is
+no longer used). The formula pins https://downloads.bithuman.ai/<repo>/<tag>/<asset>, the
+release state comes from https://downloads.bithuman.ai/<repo>/releases.json, and a draft there is
+listed with "draft": true (its files are reachable by exact URL), so R4 is what refuses it.
+
 ★ THE ONE THING THAT MAKES THIS GATE MEAN ANYTHING: IT FETCHES ANONYMOUSLY.
 A CI job has `GITHUB_TOKEN` in its environment, and `curl` picks up `~/.netrc`
 and `GH_*`/`GITHUB_*` credentials from habit and from wrapper scripts. Any of
@@ -29,8 +34,8 @@ those turns a draft into a 200 and this gate into decoration. So it:
 
 ★ WHAT IT CHECKS, in order, each one a different way to be broken:
   R1 the formula has a top-level `url` + `sha256` pair at all
-  R2 the url is a GitHub release-asset url this tap could serve
-  R3 the release for that tag is visible ANONYMOUSLY (a draft is not)
+  R2 the url is a downloads-host release-asset url (<base>/<repo>/<tag>/<asset>)
+  R3 the release for that tag is in the ANONYMOUS releases.json
   R4 that release is not marked draft
   R5 the pinned asset NAME is among that release's assets
   R6 the asset URL itself answers 200 anonymously, with a non-empty body
@@ -70,9 +75,13 @@ CRED_VARS = (
     "HOMEBREW_GITHUB_API_TOKEN", "GH_CONFIG_DIR", "NETRC",
 )
 
+# The downloads host. BITHUMAN_DOWNLOADS_BASE grades the same pin against another copy (a local
+# test server): the formula's canonical URL is accepted and fetched from that copy instead.
+CANON = "https://downloads.bithuman.ai"
+BASE = os.environ.get("BITHUMAN_DOWNLOADS_BASE", CANON).rstrip("/")
 URL_RE = re.compile(
-    r"https://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/releases/download/"
-    r"(?P<tag>[^/]+)/(?P<asset>[^\"'\s]+)"
+    "(?:%s|%s)" % (re.escape(CANON), re.escape(BASE))
+    + r"/(?P<repo>[^/\s\"']+)/(?P<tag>[^/\s\"']+)/(?P<asset>[^/\"'\s]+)"
 )
 
 
@@ -98,7 +107,6 @@ def fetch(url: str, method: str = "GET", max_bytes: int | None = 2 << 20):
     """-> (status, body_bytes). No Authorization header, ever."""
     req = urllib.request.Request(url, method=method)
     req.add_header("User-Agent", "bithuman-formula-gate/1 (anonymous)")
-    req.add_header("Accept", "application/vnd.github+json")
     opener = urllib.request.build_opener()  # no HTTPBasicAuthHandler, no netrc
     try:
         with opener.open(req, timeout=60) as r:
@@ -121,9 +129,9 @@ def parse_formula(path: str) -> tuple[str, str | None]:
     m = URL_RE.search(text)
     if not m:
         raise CannotMeasure(
-            "R1 the formula has no GitHub release-asset url — nothing to check"
+            "R1 the formula has no %s release-asset url — nothing to check" % BASE
         )
-    if len({u[2] + "/" + u[3] for u in urls}) > 1:
+    if len({u[1] + "/" + u[2] for u in urls}) > 1:
         raise CannotMeasure(
             "R1 the formula pins more than one release asset (%d); this gate "
             "grades ONE pin and must not silently pick" % len(urls)
@@ -137,22 +145,25 @@ def parse_formula(path: str) -> tuple[str, str | None]:
 def check(url: str, sha256: str | None, verify_bytes: bool) -> int:
     m = URL_RE.match(url)
     if not m:
-        print("  R2 FAIL  not a GitHub release-asset url: %s" % url)
+        print("  R2 FAIL  not a %s/<repo>/<tag>/<asset> url: %s" % (BASE, url))
         return 1
-    owner, repo, tag, asset = m.group("owner", "repo", "tag", "asset")
-    print("  subject  %s/%s  tag=%s  asset=%s" % (owner, repo, tag, asset))
+    repo, tag, asset = m.group("repo", "tag", "asset")
+    print("  subject  %s/%s  tag=%s  asset=%s" % (BASE, repo, tag, asset))
 
-    api = "https://api.github.com/repos/%s/%s/releases/tags/%s" % (owner, repo, tag)
-    status, body = fetch(api)
-    if status == 404:
-        print("  R3 FAIL  the release for %r is NOT VISIBLE anonymously (404)." % tag)
-        print("           That is what a DRAFT looks like to everyone but its author,")
-        print("           and it is exactly what `brew install` would have seen.")
-        return 1
+    index_url = "%s/%s/releases.json" % (BASE, repo)
+    status, body = fetch(index_url, max_bytes=None)
     if status != 200:
-        raise CannotMeasure("R3 the releases API answered %d for %s" % (status, tag))
-    rel = json.loads(body.decode("utf-8", "replace"))
-    print("  R3 ok    the release is visible anonymously")
+        raise CannotMeasure("R3 %s answered %d" % (index_url, status))
+    try:
+        index = json.loads(body.decode("utf-8", "replace"))
+    except ValueError as e:
+        raise CannotMeasure("R3 %s is not JSON: %s" % (index_url, e))
+    rel = next((r for r in index if r.get("tag_name") == tag), None)
+    if rel is None:
+        print("  R3 FAIL  the release %r is NOT in the anonymous releases.json." % tag)
+        print("           `brew install` would download a file no published release vouches for.")
+        return 1
+    print("  R3 ok    the release is in the anonymous releases.json")
 
     if rel.get("draft"):
         print("  R4 FAIL  the release is marked DRAFT")
@@ -166,6 +177,7 @@ def check(url: str, sha256: str | None, verify_bytes: bool) -> int:
         return 1
     print("  R5 ok    the release carries the pinned asset name")
 
+    url = "%s/%s/%s/%s" % (BASE, repo, tag, asset)   # the copy under test
     status, body = fetch(url, max_bytes=None if verify_bytes else (1 << 20))
     if status != 200:
         print("  R6 FAIL  the asset URL answered %d anonymously" % status)
@@ -193,7 +205,7 @@ def self_test() -> int:
     """Grades the PARSER and the anonymity primitive. The network arms are in
     --prove-by-mutation, which needs a probe repo."""
     ok = True
-    good = 'url "https://github.com/o/r/releases/download/cli-v1.2.3/x.tar.gz"\n  sha256 "%s"\n' % ("a" * 64)
+    good = 'url "%s/r/cli-v1.2.3/x.tar.gz"\n  sha256 "%s"\n' % (BASE, "a" * 64)
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "f.rb")
@@ -242,24 +254,20 @@ def prove_by_mutation(probe_repo: str, live_url: str | None) -> int:
     # existed and never will; `PROBE_REAL_TAG` is a release this tap actually
     # published, asked for a file it does not carry.
     #
-    # ★THE DRAFT ARM IS THE SAME CODE PATH AS ARM 1 — R3, "not visible
-    # anonymously" — because that is what a draft IS to an anonymous caller.
-    # It was proven ONCE against a real draft release on 2026-09-11
-    # (sgu-bithuman/bh-latest-resolver-proof cli-v0.0.0-draft: draft=true to an
-    # authenticated caller, HTTP 404 to an anonymous one, gate rc=1), and is
-    # re-runnable here by setting PROBE_DRAFT_TAG on a repo that has one.
+    # ★THE DRAFT ARM: on the downloads host a draft IS in releases.json, marked
+    # "draft": true, so it is refused by R4 (on GitHub it was R3: a draft 404ed
+    # anonymously). Re-runnable by setting PROBE_DRAFT_TAG to a draft's tag.
     real_tag = os.environ.get("PROBE_REAL_TAG", "cli-v2.3.27")
     arms = [
         ("★a tag that does not exist",
-         "https://github.com/%s/releases/download/cli-v0.0.0-nope/x.tar.gz" % owner_repo, 1),
+         "%s/%s/cli-v0.0.0-nope/x.tar.gz" % (BASE, owner_repo), 1),
         ("★a real release, an asset it does not carry",
-         "https://github.com/%s/releases/download/%s/not-an-asset.tar.gz" % (owner_repo, real_tag), 1),
+         "%s/%s/%s/not-an-asset.tar.gz" % (BASE, owner_repo, real_tag), 1),
     ]
     draft_tag = os.environ.get("PROBE_DRAFT_TAG")
     if draft_tag:
-        arms.insert(1, ("★a DRAFT release (no anonymous tag)",
-                        "https://github.com/%s/releases/download/%s/x.tar.gz"
-                        % (owner_repo, draft_tag), 1))
+        arms.insert(1, ("★a DRAFT release (listed, draft: true)",
+                        "%s/%s/%s/x.tar.gz" % (BASE, owner_repo, draft_tag), 1))
     if live_url:
         arms.append(("control: the formula's real pin", live_url, 0))
 
@@ -301,10 +309,15 @@ def main() -> int:
             live = None
             probe = a.probe_repo
             if os.path.isfile(a.formula):
-                live, _ = parse_formula(a.formula)
+                try:
+                    live, _ = parse_formula(a.formula)
+                except CannotMeasure:
+                    if not probe:
+                        raise
+                    live = None   # the gate points at another copy (BITHUMAN_DOWNLOADS_BASE)
                 if not probe:
                     m = URL_RE.match(live)
-                    probe = "%s/%s" % (m.group("owner"), m.group("repo"))
+                    probe = m.group("repo")
             if not probe:
                 raise CannotMeasure(
                     "no --probe-repo and no formula to take one from")
