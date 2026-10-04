@@ -13,6 +13,7 @@ import android.util.Log
 import android.view.Choreographer
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 
 /**
  * The agent's voice and the frames generated from it, presented as ONE unit.
@@ -94,6 +95,12 @@ class AvatarPlayer(
      * `speechPlayout`.
      */
     private val onPlayout: ((played: Long) -> Unit)? = null,
+    /**
+     * Off screen (2.6.37): whether the app is visible — [AppVisibility.process], set by the plugin from
+     * the process lifecycle. Off screen with nothing to say, every thread of this player waits on a
+     * monitor instead of polling (see OffScreen.kt and [parkAway]).
+     */
+    private val visibility: AppVisibility = AppVisibility.process,
     private val onFrame: (Bitmap) -> Unit,
 ) {
     /** Live health of the pipeline — surfaced by the app's debug overlay. */
@@ -312,6 +319,8 @@ class AvatarPlayer(
             "= ${"%.0f".format(bufFrames * 1000.0 / maxOf(got, 1))} ms")
         track.play()
         started = true
+        // Off screen (2.6.37): a change of visibility wakes every waiting thread (and re-arms the presenter).
+        unlisten = visibility.listen { v -> onVisibility(v) }
         workers.spawn("bh-feed", ::feed)
         workers.spawn("bh-produce", ::produce)
         // The writer releases the track when it returns ([write]). Stopped before it could
@@ -342,6 +351,7 @@ class AvatarPlayer(
     fun offer(pcm24k: ByteArray, fedStart: Long = -1L) {
         if (fedStart >= 0) fedOffered = maxOf(fedOffered, fedStart + pcm24k.size / 2)
         inbox.offer(Chunk(pcm24k, fedStart, playGen))
+        park.wakeAll()        // a producer parked off screen with nothing to say has something now
     }
 
     // ---------------------------------------------------------------- speech playout (captions)
@@ -424,11 +434,12 @@ class AvatarPlayer(
         Log.i("bhbarge", "CUT $nBarge reason=$reason hostMs=$t0 epoch=$epoch headBefore=$headBefore flushedInMs=${System.currentTimeMillis() - t0} " +
             "q=${avatar.queuedFrames} pendingSlices=${avatar.pendingAudioSlices}")
         inbox.offer(Reset)
+        park.wakeAll()
         discardPlayout()                // captions: the cut voice is never heard
     }
 
     /** The agent finished a sentence — let the engine render the padded tail. */
-    fun endOfReply() { inbox.offer(Tail) }
+    fun endOfReply() { inbox.offer(Tail); park.wakeAll() }
 
     /**
      * Stops the player: silent at once, its threads return at their next check. Does NOT wait
@@ -440,9 +451,13 @@ class AvatarPlayer(
      */
     fun stop() {
         workers.stop()
+        unlisten?.invoke(); unlisten = null
         inbox.offer(Reset)
         toWrite.clear()
         toPresent.clear()
+        // Off screen the producer may wait on [park] and the writer on an empty [toWrite]: both return now.
+        park.wakeAll()
+        toWrite.offer(stopUnit)
         // Silent now: pause + flush drops what the device holds, and frees a blocking write
         // in the writer (the same two calls a barge-in makes on a live writer).
         runCatching { track.pause() }
@@ -517,6 +532,78 @@ class AvatarPlayer(
     @Volatile private var dacWaitSince = 0L
     @Volatile private var dacWaitUntil = 0L
 
+    // ---------------------------------------------------------------- off screen (2.6.37)
+    //
+    // ★WHY. essence2-android 0.9.5 / expression2-android 0.6.1 end a session whose app has been in the
+    // background for 60 s, and until the app is visible again every frame call answers "no frame". Each
+    // thread below took that for a late frame and polled: the producer every 2 ms, the feeder every 4 ms,
+    // the writer every 1 ms, the presenter once per vsync — for as long as the app stayed in the
+    // background. Now, off screen with nothing to say, each one WAITS: the producer on [park] (woken by
+    // audio, a cut, a reply's end, the app coming back, or the stop), the feeder and the writer on their
+    // own queues (an offer wakes them), the presenter by not asking for the next vsync once nothing is
+    // left to show. A reply that arrives in the background still plays (its audio wakes the producer);
+    // once the engine has given no frame for [REFUSED_PARK_MS] off screen (the SDK's background end) the
+    // producer waits for the app to come back, and the reply's audio waits with it.
+
+    /** The producer waits here off screen, and between refused idle frames (see [RefusalBackoff]). */
+    private val park = ParkSpot()
+    private val idleBackoff = RefusalBackoff()
+    /** When the producer last went without a frame it needed (0: it has one); see [parkAway]. */
+    @Volatile private var noFrameSinceMs = 0L
+    @Volatile private var nParks = 0
+    @Volatile private var nBackoffWaits = 0
+    @Volatile private var nPresenterParks = 0
+    /** The app came back at this time (ms); cleared by the first unit presented after it (`bhpark RESUME`). */
+    @Volatile private var resumeAtMs = 0L
+    private var unlisten: (() -> Unit)? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    /** The presenter has stopped asking for vsyncs (off screen, nothing to show); [wakePresenter] re-arms it. */
+    private val presenterParked = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** Handed to the writer by [stop] so an off-screen wait on [toWrite] returns at once; never written (epoch -1). */
+    private val stopUnit: AvUnit by lazy { AvUnit(-1L, speechFrames[0], -1, false, -1, ByteArray(0), kind = 'W') }
+
+    private fun noteNoFrame() { if (noFrameSinceMs == 0L) noFrameSinceMs = System.currentTimeMillis() }
+
+    /** Nothing in hand, nothing on its way, nothing the engine still owes. Producer thread (or under [park]). */
+    private fun quiet(heldFrom: Long): Boolean =
+        heldFrom < 0 && !resetPending && inbox.isEmpty() && !avatar.hasPendingTail &&
+            synchronized(audioLock) { head >= audioLen }
+
+    /**
+     * Off screen: wait (no polling) while there is nothing to say — or, once the engine has given no frame
+     * for [REFUSED_PARK_MS], until the app is visible again whatever is in hand. True when it waited.
+     */
+    private fun parkAway(heldFrom: Long): Boolean {
+        val since = noFrameSinceMs
+        val refusedMs = if (since > 0) System.currentTimeMillis() - since else 0L
+        val refused = refusedMs >= REFUSED_PARK_MS
+        if (!refused && !quiet(heldFrom)) return false
+        nParks++
+        Log.i("bhpark", "PARK producer: off screen, ${if (refused) "no frame from the engine for $refusedMs ms" else "nothing to say"} " +
+            "(parks=$nParks idleStall=$nIdleStall backoffWaits=$nBackoffWaits)")
+        val ms = park.await { running && !visibility.visible && (refused || quiet(heldFrom)) }
+        noFrameSinceMs = 0L
+        Log.i("bhpark", "UNPARK producer after $ms ms: ${when { !running -> "stopped"; visibility.visible -> "the app is visible"; else -> "audio to play" }}")
+        return true
+    }
+
+    /** The app's visibility changed (main thread): wake every waiting thread; on screen, ask at the base cadence again. */
+    private fun onVisibility(v: Boolean) {
+        if (v) {
+            idleBackoff.reset(); noFrameSinceMs = 0L
+            resumeAtMs = System.currentTimeMillis()
+            wakePresenter()
+        }
+        park.wakeAll()
+        Log.i("bhpark", if (v) "VISIBLE: the player runs again" else "OFF SCREEN: the player waits once it has nothing to say")
+    }
+
+    /** Re-arms a parked presenter (any thread): the vsync callback is posted on the main looper, once. */
+    private fun wakePresenter() {
+        if (presenterParked.compareAndSet(true, false))
+            mainHandler.post { if (running) Choreographer.getInstance().postFrameCallback(vsync) }
+    }
+
     // ---------------------------------------------------------------- producer
 
     /**
@@ -549,6 +636,10 @@ class AvatarPlayer(
 
         while (running) {
             if (resetGen != seenReset) { seenReset = resetGen; heldFrom = -1L; lastSpeechSlot = -1 }
+            // ★OFF SCREEN (2.6.37): nothing to say, or an engine that has given no frame for 3 s (the SDK's
+            // background end) — the producer waits for the app to come back, or for audio, instead of asking
+            // again every 2 ms. See OffScreen.kt.
+            if (!visibility.visible && parkAway(heldFrom)) continue
             // ★ A unit belongs to the epoch that was current when its content was
             // obtained, not when it is admitted: `e` is read first, `pending` second,
             // and bargeIn() raises `pending` before it moves the epoch — so a cut at
@@ -586,6 +677,7 @@ class AvatarPlayer(
                     }
                 } else {
                     heldFrom = f * BYTES_PER_SAMPLE16
+                    noFrameSinceMs = 0L
                     val hold = starve.refill(System.currentTimeMillis())
                     if (hold != null) {
                         val st = runCatching { avatar.stats() }.getOrNull()
@@ -680,6 +772,7 @@ class AvatarPlayer(
                 if (!more && streamFedGen == playGen) { idleFed = streamFedEnd; idleGen = playGen }
                 more
             })
+            if (speaking) noteNoFrame()
             if (speaking && toWrite.size > IDLE_FLOOR) {
                 where = "await-frames"; nAwait++; Thread.sleep(2); continue
             }
@@ -733,7 +826,18 @@ class AvatarPlayer(
             where = "idle-decode"
             val idx = if (hw) idleLoop.nextSlot()?.let { install(slot, it); it.index } ?: -1
                       else idleLoop.next(speechFrames[slot])
-            if (idx < 0) { nIdleStall++; Thread.sleep(2); continue }
+            if (idx < 0) {
+                // ★A REFUSED IDLE FRAME IS ASKED FOR AGAIN LATER AND LATER (2.6.37). On screen the 2 ms cadence
+                // stands for the first second of refusals (the codec running late is normal); then, or at once
+                // off screen, the wait doubles to 256 ms — the SDK's background end answers -1 / false until the
+                // app is visible, and the person's battery paid ~500 asks a second for it. Audio or the app
+                // coming back ends the wait early.
+                nIdleStall++; noteNoFrame()
+                val wait = idleBackoff.refused(System.currentTimeMillis(), visibility.visible)
+                if (wait <= RefusalBackoff.BASE_MS && visibility.visible) Thread.sleep(wait) else { nBackoffWaits++; park.pause(wait) }
+                continue
+            }
+            idleBackoff.served(); noFrameSinceMs = 0L
             where = "idle-admit"
             nIdle++; stats.idleUnits = nIdle
             val seq = ++admittedSeq
@@ -845,7 +949,11 @@ class AvatarPlayer(
      */
     private fun feed() {
         while (running) {
-            when (val item = inbox.poll() ?: run { Thread.sleep(4); null } ?: continue) {
+            // Off screen (2.6.37) the empty inbox is WAITED on, not polled every 4 ms: an offer (audio, a cut, a
+            // reply's end, the stop's Reset) ends the wait at once.
+            val next = if (visibility.visible) inbox.poll() ?: run { Thread.sleep(4); null }
+                       else inbox.poll(ParkSpot.BELT_MS, TimeUnit.MILLISECONDS)?.also { if (!running) return }
+            when (val item = next ?: continue) {
                 is Reset -> {
                     synchronized(audioLock) {
                         audioHead = 0L; audioLen = 0L; head = 0L; carry = ByteArray(0); replyEnds.clear()
@@ -1015,7 +1123,12 @@ class AvatarPlayer(
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
         while (running) {
             var u = toWrite.poll()
-            if (u == null) { Thread.sleep(1); continue }
+            if (u == null) {
+                if (visibility.visible) { Thread.sleep(1); continue }
+                // Off screen (2.6.37): the empty queue is WAITED on — the producer's next unit (or the stop's
+                // [stopUnit]) ends the wait — instead of being polled every millisecond while the producer is parked.
+                u = toWrite.poll(ParkSpot.BELT_MS, TimeUnit.MILLISECONDS) ?: continue
+            }
             // Tight inner loop: keep handing units to the device until it pushes back.
             // Blocking inside track.write IS the pacing, and it only happens once the
             // device buffer is genuinely full — which is the lead we could never build.
@@ -1135,11 +1248,26 @@ class AvatarPlayer(
                             .format(writes, writeUs / 1000.0 / writes, writeMaxUs / 1000.0,
                                 toWrite.size, toPresent.size, stats.underruns))
                     lastUnderrunSeen = ur
-                    while (running && !toPresent.offer(u)) Thread.sleep(1)
+                    handToPresenter(u)
                 }
                 u = toWrite.poll()
             }
         }
+    }
+
+    /**
+     * The written unit goes to the presenter. On screen a full queue is retried every millisecond, as always;
+     * off screen it is waited on (the presenter's poll or the stop's clear frees a place), and a parked
+     * presenter is started again for the new unit.
+     */
+    private fun handToPresenter(u: AvUnit) {
+        while (running) {
+            val ok = if (visibility.visible) toPresent.offer(u)
+                     else toPresent.offer(u, ParkSpot.BELT_MS, TimeUnit.MILLISECONDS)
+            if (ok) break
+            if (visibility.visible) Thread.sleep(1)
+        }
+        if (presenterParked.get()) wakePresenter()
     }
 
     // --------------------------------------------------------------- presenter
@@ -1152,6 +1280,14 @@ class AvatarPlayer(
         override fun doFrame(frameTimeNanos: Long) {
             if (!running) return
             presentDue(frameTimeNanos)
+            // ★Off screen with nothing left to show (2.6.37), the presenter stops asking for vsyncs. The writer's
+            // next unit or the app coming back re-arms it ([wakePresenter]); exactly one side re-arms (the flag).
+            if (!visibility.visible && toPresent.isEmpty()) {
+                presenterParked.set(true)
+                if (!visibility.visible && toPresent.isEmpty()) { nPresenterParks++; return }
+                // A unit (or the app) came between the look and the flag: re-arm here, unless a wake already did.
+                if (!presenterParked.compareAndSet(true, false)) return
+            }
             Choreographer.getInstance().postFrameCallback(this)
         }
     }
@@ -1181,6 +1317,7 @@ class AvatarPlayer(
                 "catchUp=$nCatchUp await=$nAwait hold=$nHold stale=$nStale back=$nBackwards ringOverrun=$nRingOverrun starve=${starve.count} barges=$nBarge leaks=$nLeak " +
                 "idleStall=$nIdleStall idleAt=${idleLoop?.lastIndex ?: -1}/${idleLoop?.frameCount ?: 0} idleWraps=${idleLoop?.wraps ?: 0} " +
                 "coalesced=$nCoalesced markers=$nMarkers q=${avatar.queuedFrames} inFlight=${toPresent.size} " +
+                "parks=$nParks backoffWaits=$nBackoffWaits presenterParks=$nPresenterParks " +
                 "${avatar.skippedFrames.let { if (it >= 0) "skipped=$it " else "" }}| " +
                 String.format("pull avg %.1fms max %dms over50=%d null=%d calls=%d", avg, pullMaxMs, pullOver50, nullPulls, pullCalls) +
                 " | " + stats.line().replace("\n", " "))
@@ -1211,6 +1348,11 @@ class AvatarPlayer(
         if (u.fedGen == playGen && u.fedEnd > playedFed) playedFed = minOf(u.fedEnd, fedOffered)
         onPlayout?.invoke(playedFed)
         if (u.speech) nPresSpeech++
+        if (resumeAtMs > 0) {
+            // Off screen (2.6.37): how soon the picture came back once the app was visible again.
+            Log.i("bhpark", "RESUME first unit on the texture +${now - resumeAtMs} ms after the app became visible (kind=${u.kind})")
+            resumeAtMs = 0L
+        }
         if (u.speech && replyFirstPending) {
             // The reply's first mouth on the glass: TTFA's end (the transport logs its start).
             replyFirstPending = false
@@ -1297,6 +1439,13 @@ class AvatarPlayer(
         private const val RING = LEAD + DEVICE_UNITS + 4
         /** How often the DAC timestamp is re-read; between reads it is extrapolated. */
         private const val TS_REFRESH_MS = 250L
+        /**
+         * Off screen, how long the engine may give no frame the producer needs before it waits for the app to come
+         * back with audio in hand (2.6.37): the SDK's background end answers "no frame" until the app is visible.
+         * Longer than a reply's first frame can take on a slow phone in the background (a reply that arrives off
+         * screen within the SDK's 60 s still plays), short enough that a refused reply wakes nobody for long.
+         */
+        const val REFUSED_PARK_MS = 3_000L
         /** Longest a speech-start re-base waits for the device's first DAC timestamp of the new run. */
         private const val DAC_WAIT_MS = 300L
         /** The sync marker's click: 12 ms of 2 kHz. */

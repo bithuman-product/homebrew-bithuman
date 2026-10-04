@@ -208,6 +208,8 @@ class Essence2Engine(
     zeroCopy: Boolean = true,
     /** Skip-ahead: the player's clock reaches the engine (see [PlayoutClock.enabled]); false = in-order rendering. */
     val playoutClock: Boolean = SKIP_AHEAD_DEFAULT,
+    /** Off screen (2.6.37): the render thread waits instead of polling (see [renderLoop], OffScreen.kt). */
+    private val visibility: AppVisibility = AppVisibility.process,
 ) : AvatarEngine {
     override val name = "essence2-android"
     /**
@@ -305,6 +307,19 @@ class Essence2Engine(
      * [PlayoutClock] has its own lock: the producer never waits on this monitor.
      */
     private val clock = PlayoutClock({ avatar.setPlayoutPosition(it) }, { open })
+    /**
+     * ★OFF SCREEN THE RENDER THREAD WAITS (2.6.37). It polled every 2 ms with no utterance open, with its ready
+     * queue full and after every refused pull — in the background too, and with the player held (bitHuman Live
+     * holds it off screen), so an Essence 2 character kept a core waking ~500 times a second for as long as the
+     * app was away; and from essence2-android 0.9.5 every pull is refused after the SDK's 60 s background end.
+     * Off screen it now waits on [renderSpot] — woken by audio ([feed]), a pull or a reset (a slot freed), the
+     * app coming back, or [close] — and a refused pull is asked again later and later ([renderBackoff]: on
+     * screen the 2 ms cadence stands for the first second of refusals). On screen nothing else changes.
+     */
+    private val renderSpot = ParkSpot()
+    private val renderBackoff = RefusalBackoff()
+    @Volatile private var renderParks = 0
+    private val unlisten = visibility.listen { v -> if (v) renderBackoff.reset(); renderSpot.wakeAll() }
     private val renderer = Thread(::renderLoop, "e2-render").apply { isDaemon = true; start() }
 
     override fun newFrameBitmap(): Bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -325,6 +340,7 @@ class Essence2Engine(
         uttFed += f16k.size
         open = true
         queued = avatar.available()
+        renderSpot.wake()        // a render thread waiting off screen (or backing off) has audio now
     }
 
     @Synchronized override fun flushTail() {
@@ -341,18 +357,34 @@ class Essence2Engine(
         // Finished frames of the cancelled reply go back to the pool (or to the engine); the
         // one in flight comes back through the gen check in [renderLoop].
         while (true) { val r = ready.poll() ?: break; r.recycle(free) }
+        renderSpot.wake()
     }
 
     /** The render thread: one SDK pull into a free buffer, then hand it to [pull]. */
     private fun renderLoop() {
         while (!shut) {
-            if (!open) { Thread.sleep(2); continue }
+            if (!open) {
+                if (visibility.visible) Thread.sleep(2)
+                else {
+                    renderParks++
+                    Log.i("bhpark", "PARK e2-render: off screen, no utterance open (parks=$renderParks)")
+                    val ms = renderSpot.await { !shut && !open && !visibility.visible }
+                    Log.i("bhpark", "UNPARK e2-render after $ms ms: ${when { shut -> "closed"; visibility.visible -> "the app is visible"; else -> "audio to render" }}")
+                }
+                continue
+            }
             var buf: ByteBuffer? = null
             if (hardwareFrames) {
                 // The engine owns the buffers; [DEPTH] finished frames is this thread's bound.
-                if (ready.size >= DEPTH) { Thread.sleep(2); continue }
+                if (ready.size >= DEPTH) {
+                    if (visibility.visible) Thread.sleep(2)
+                    else { renderParks++; renderSpot.await { !shut && ready.size >= DEPTH && !visibility.visible } }
+                    continue
+                }
             } else {
-                buf = free.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
+                buf = if (visibility.visible) free.poll(10, java.util.concurrent.TimeUnit.MILLISECONDS)
+                      else free.poll() ?: run { renderParks++; renderSpot.await { !shut && free.isEmpty() && !visibility.visible }; null }
+                buf ?: continue
             }
             val g = gen
             val t0 = System.nanoTime()
@@ -384,8 +416,14 @@ class Essence2Engine(
                     }
                 }
             }
-            if (at < 0) { if (buf != null) free.offer(buf); hf?.close(); if (!got) Thread.sleep(2) }
-            else { buf?.rewind(); ready.offer(Rendered(buf, hf, at, g)) }
+            if (at < 0) {
+                if (buf != null) free.offer(buf); hf?.close()
+                if (!got) {
+                    // A refused pull (no audio yet, or the SDK's background end): see [renderBackoff].
+                    val wait = renderBackoff.refused(System.currentTimeMillis(), visibility.visible)
+                    if (wait <= RefusalBackoff.BASE_MS && visibility.visible) Thread.sleep(wait) else renderSpot.pause(wait)
+                } else renderBackoff.served()
+            } else { renderBackoff.served(); buf?.rewind(); ready.offer(Rendered(buf, hf, at, g)) }
         }
     }
 
@@ -422,6 +460,7 @@ class Essence2Engine(
             b.rewind()
             dst.copyPixelsFromBuffer(b)
             free.offer(b)
+            renderSpot.wake()    // a slot is free: a render thread waiting off screen goes on
             return r.at
         }
     }
@@ -432,6 +471,7 @@ class Essence2Engine(
             val r = ready.poll() ?: return null
             if (r.gen != gen) { r.recycle(free); continue }
             val hf = r.hf ?: run { r.recycle(free); return null }
+            renderSpot.wake()    // a slot is free: a render thread waiting off screen goes on
             val bmp = Bitmap.wrapHardwareBuffer(hf.buffer, SRGB) ?: run { hf.close(); return null }
             return HwFrame(bmp, r.at, -1, hf)
         }
@@ -462,6 +502,8 @@ class Essence2Engine(
     override val idle: IdleClip? = if (nt > 0) idleClip else null
     override fun close() {
         shut = true
+        unlisten()
+        renderSpot.wakeAll()
         renderer.join()
         while (true) { val r = ready.poll() ?: break; r.recycle(free) }
         synchronized(this) { avatar.close() }

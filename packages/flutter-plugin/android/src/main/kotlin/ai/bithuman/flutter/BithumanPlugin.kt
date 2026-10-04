@@ -41,6 +41,9 @@ import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -214,6 +217,20 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
 
     // ---------------------------------------------------------------- lifecycle
 
+    /**
+     * ★OFF SCREEN (2.6.37): the process lifecycle sets [AppVisibility.process], which every player and
+     * Essence 2 render thread reads — off screen with nothing to say they wait instead of polling (OffScreen.kt).
+     * ON_START is the first activity started; ON_STOP comes ~0.7 s after the last one stopped (a rotation is
+     * not a trip to the background). ProcessLifecycleOwner ships with Flutter's Android embedding.
+     */
+    private val processLifecycle = LifecycleEventObserver { _, event ->
+        when (event) {
+            Lifecycle.Event.ON_START -> AppVisibility.process.set(true)
+            Lifecycle.Event.ON_STOP -> AppVisibility.process.set(false)
+            else -> {}
+        }
+    }
+
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         textures.attach()
         context = binding.applicationContext
@@ -222,6 +239,17 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         channel = MethodChannel(messenger, "ai.bithuman.avatar")
         channel.setMethodCallHandler(this)
         loadEvents = LoadEvents(messenger, main)
+        // Main thread (as the lifecycle requires). The current state first: an engine attached before any
+        // activity started (a pre-warmed engine) starts off screen; adding the observer then replays ON_START
+        // if the process is already started.
+        // A lifecycle still INITIALIZED was never started (an app that removed androidx.startup's initializer):
+        // it would never say ON_START, so it is not listened to and the app counts as visible, as before 2.6.37.
+        runCatching {
+            val lc = ProcessLifecycleOwner.get().lifecycle
+            check(lc.currentState != Lifecycle.State.INITIALIZED) { "the process lifecycle was never started" }
+            AppVisibility.process.set(lc.currentState.isAtLeast(Lifecycle.State.STARTED))
+            lc.addObserver(processLifecycle)
+        }.onFailure { Log.w(TAG, "process lifecycle unavailable, the player never parks off screen: $it") }
     }
 
     /**
@@ -234,6 +262,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
      * ImageReaderSurfaceProducer.onImage ("FlutterJNI is not attached to native").
      */
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        runCatching { ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycle) }
         channel.setMethodCallHandler(null)
         loadEvents.close()
         val loads = textures.inFlight
