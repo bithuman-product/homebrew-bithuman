@@ -1,4 +1,10 @@
-## Unreleased
+## 2.6.37 — 2026-10-04 — A session nobody watches ends after 60 s (Android, iOS, macOS); Android: off screen the avatar waits instead of polling; iOS floor 16.4, macOS back to 14 (libconverse converse-apple-v2.5.1)
+
+Android: **`essence2-android` 0.9.5** (was 0.9.4) and **`expression2-android` 0.6.1** (was 0.6.0), maven.bithuman.ai,
+meter-only patches. iOS / macOS: Essence 2 **`essence2-v1.15.5`** (was `essence2-v1.15.4`), Expression 2 **`v2.20.4`**
+(was `v2.20.3`), the bytes Swift package 2.20.4 serves; macOS `enginecore-v1.0.2` (unchanged); the on-device brain
+**libconverse `converse-apple-v2.5.1`** (was an unpinned 2026-07-01 build). Read **Behaviour changes** before you
+update: the iOS floor rises to 16.4.
 
 ### Behaviour changes (action needed)
 
@@ -21,6 +27,11 @@ bundle. A clone without access still builds without the on-device brain, as befo
 
 ### Fixed
 
+* **iOS / macOS: a session nobody watches ends after 60 s** (Expression 2 `v2.20.4`, Essence 2 `essence2-v1.15.5`).
+  The app in the background for 60 s, or no frame asked for in 60 s, ends the metered session, billed up to the cut.
+  On iOS the cut comes earlier if the background time iOS grants runs out first. The next frame asked for opens a
+  new session. Both engines name the avatar (`agent_code`) when the session opens. An API secret whose account may
+  not render that avatar is refused (`403 AGENT_NOT_ENTITLED`) before anything is billed. Rendering is unchanged.
 * **Android: a session nobody is watching ends after 60 s** (`essence2-android` 0.9.5, `expression2-android` 0.6.1,
   billing patches; engines and rendering unchanged). When the app has been in the background for more than 60 s, or
   has not asked for a frame for more than 60 s, the session ends and is billed up to that 60 s. After a background
