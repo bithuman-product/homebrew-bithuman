@@ -11,7 +11,9 @@ package ai.bithuman.flutter
  * the extra starves were these sub-frame publish gaps, while the real holds last ~200-550 ms.
  *
  * So an episode counts only when the queue stays empty for at least [MIN_HOLD_MS] before frames come back
- * ([refill]). A shorter gap is not a starve: the caller logs it at debug level only.
+ * ([refill]). A shorter gap is not a starve: the caller logs it at debug level only. A hold that never
+ * refills (the queue still empty when the presenter stops or closes: a real freeze) is closed by [close]
+ * and counts the same way.
  * Plain JVM: no Android imports (StarveCounterTest).
  */
 internal class StarveCounter(private val minHoldMs: Long = MIN_HOLD_MS) {
@@ -37,6 +39,12 @@ internal class StarveCounter(private val minHoldMs: Long = MIN_HOLD_MS) {
         if (counted) count++
         return Hold(ms, counted)
     }
+
+    /**
+     * The presenter stops or closes: an open hold ends here without frames coming back (a freeze until the
+     * end). Returns it (null when none was open), counted when it lasted at least [minHoldMs].
+     */
+    fun close(nowMs: Long): Hold? = refill(nowMs)
 
     /** One closed hold: how long the queue stood empty, and whether that was a starve. */
     data class Hold(val ms: Long, val counted: Boolean)
