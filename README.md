@@ -8,6 +8,20 @@ platform: iOS, iPadOS and macOS on Apple silicon (Swift package); macOS (Apple s
 keywords: avatar, talking-avatar, lip-sync, digital-human, swift, swiftpm, ios, macos, cli, mcp
 -->
 
+
+> [!IMPORTANT]
+> **This repository moved to GitLab, and new releases download from https://downloads.bithuman.ai.**
+> This archived copy stays readable and keeps serving every version released before the move:
+> the release downloads, the Swift package 2.x tags, every `flutter-plugin-v*` tag and the existing
+> `bithuman-product/bithuman` Homebrew tap (frozen at its last formula).
+>
+> - **CLI:** `curl -fsSL https://install.bithuman.ai | sh`, or Homebrew with the tap's URL:
+>   `brew tap bithuman/bithuman https://gitlab.com/bithuman/sdk/homebrew-bithuman && brew install bithuman-cli`
+>   (already on this tap: `brew uninstall bithuman-cli && brew untap bithuman-product/bithuman` first)
+> - **Swift:** `.package(url: "https://gitlab.com/bithuman/sdk/bithuman-swift", from: "3.0.0")`
+> - **Flutter:** `bithuman: ^3.0.0` from pub.dev (source: https://gitlab.com/bithuman/sdk/bithuman-flutter)
+> - **This repository (tap and installers):** https://gitlab.com/bithuman/sdk/homebrew-bithuman
+
 <p align="center">
   <a href="https://www.bithuman.ai">
     <img alt="bitHuman" src="https://docs.bithuman.ai/og-image.jpg" width="220">
