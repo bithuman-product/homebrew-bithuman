@@ -622,8 +622,8 @@ def _mut_dirty_archive(src: str) -> str:
     return re.sub(
         r'(            url: "\\\(expression2Base\)/UnifiedModelHeader\.xcframework\.zip",\n'
         r'            checksum: ")[0-9a-f]{64}(")',
-        lambda m: ('            url: "https://github.com/bithuman-product/homebrew-bithuman/releases/'
-                   'download/v2.6.0/UnifiedModelHeader.xcframework.zip",\n'
+        lambda m: ('            url: "https://downloads.bithuman.ai/homebrew-bithuman/'
+                   'v2.6.0/UnifiedModelHeader.xcframework.zip",\n'
                    '            checksum: "33b7d575ec90055a4894fb1fbbb507b9264694752c6a2a5e35c7bf8c069e180e"'),
         src, count=1,
     )

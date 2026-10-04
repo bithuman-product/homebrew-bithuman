@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local CI for bithuman-product/homebrew-bithuman.
+# Local CI for bithuman/sdk/homebrew-bithuman.
 # GitHub Actions is removed from this org (owner directive 2026-09-29); this
 # script runs locally what the PR/push workflows used to grade. The old YAML is
 # the recipe: ci/github-workflows-disabled/ (ci/wf-step.py replays a job from it).
@@ -50,7 +50,7 @@ MANUAL=(
 )
 
 # ---------------------------------------------------------------------------
-# Runner (shared shape across bithuman-product repos). Nothing below needs
+# Runner (shared shape across bitHuman repos). Nothing below needs
 # editing to add a step: add a row to STEPS / FULL_STEPS / MANUAL above.
 # ---------------------------------------------------------------------------
 usage() {

@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > **Deprecated — use the bitHuman CLI instead.** This server is now built into
-> the [`bithuman` CLI](https://github.com/bithuman-product/homebrew-bithuman):
+> the [`bithuman` CLI](https://gitlab.com/bithuman/sdk/homebrew-bithuman):
 > run **`bithuman mcp`**. It exposes the same tools (identical names) plus local
 > ones (`version`, `doctor`, `inspect_model`, `list_showcase`), so you install
 > **one** tool. Migrate your MCP client config:
@@ -11,7 +11,7 @@
 > { "mcpServers": { "bithuman": { "command": "bithuman", "args": ["mcp"] } } }
 > ```
 >
-> Install the CLI: `brew install bithuman-product/bithuman/bithuman-cli` (macOS) or the universal installer
+> Install the CLI: `brew install bithuman/bithuman/bithuman-cli` (macOS) or the universal installer
 > (macOS + Linux) — see the CLI README. This `bithuman-mcp` package will receive
 > no further updates.
 

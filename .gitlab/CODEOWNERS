@@ -1,0 +1,29 @@
+# CODEOWNERS -- who reviews what in bithuman/sdk/homebrew-bithuman (GitLab).
+#
+# GitLab reads this file from .gitlab/ (moved here from .github/ with the move to GitLab).
+# The LAST matching pattern wins, so the specific rules below override the catch-all.
+#
+# NOTE: the bitHuman group is on GitLab Free, where Code Owner approval rules are not
+# enforced (a Premium feature). The file still names who should review a change, and the
+# local merge gate (rebase on fresh main + exact-head ci/run-local.sh) is what blocks a merge.
+
+# Default: the maintainers (members of the bithuman group).
+*                                       @bithuman
+
+# The Swift package manifest stays here for already-released 2.x builds until it moves to
+# bithuman/sdk/bithuman-swift (release/2.x); the SDK subgroup reviews any change.
+/Package.swift                          @bithuman/sdk
+/Sources/                               @bithuman/sdk
+/Examples/                              @bithuman/sdk
+
+# Release + CI machinery, the installers and the repo guards: maintainer sign-off, so a guard
+# cannot be quietly weakened.
+/.gitlab/                               @bithuman
+/ci/                                    @bithuman
+/scripts/                               @bithuman
+/tools/                                 @bithuman
+/install.sh                             @bithuman
+/install.ps1                            @bithuman
+/workers/                               @bithuman
+/Formula/                               @bithuman
+/Aliases/                               @bithuman

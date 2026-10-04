@@ -2,7 +2,7 @@
 # CLI for macOS. https://www.bithuman.ai
 #
 # Install:
-#   brew tap bithuman-product/bithuman
+#   brew tap bithuman/bithuman https://gitlab.com/bithuman/sdk/homebrew-bithuman
 #   brew install bithuman-cli
 #   bithuman doctor                       # host + auth + cache sanity check
 #   bithuman run avatar.imx               # live browser-served avatar
@@ -54,7 +54,7 @@
 #   with the old name in scripts / muscle memory.
 #
 # This formula installs a prebuilt Rust binary built from the standalone
-# bithuman-product/bithuman (repo renamed from bithuman-cli) against the bithuman-product/bithuman-models
+# bithuman/sdk/bithuman-cli (formerly bithuman-product/bithuman, renamed from bithuman-cli) against the bithuman/models/bithuman-models
 # engine monorepo, models/essence-1 (libessence engine core 3.1.0, ABI 7),
 # published to https://downloads.bithuman.ai/homebrew-bithuman/<tag>/ (until 2026-10, the
 # public tap repo's own GitHub Releases; both upstream repos are private, so anonymous brew
@@ -413,7 +413,7 @@ class BithumanCli < Formula
   # this formula installs is NOT Apache-2.0 and never was:
   #
   #   * the `bithuman` binary STATICALLY LINKS `libessence.a`, built from the
-  #     PRIVATE bithuman-product/bithuman-models — no public source, no
+  #     PRIVATE bithuman/models/bithuman-models — no public source, no
   #     Apache grant;
   #   * the tarball vendors proprietary model weights (`expression2-model`,
   #     `embody.model`, `engines/mac-arm64-1.0.0.engine`);

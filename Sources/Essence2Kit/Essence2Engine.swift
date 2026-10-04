@@ -1278,7 +1278,7 @@ public enum Essence2Download {
 public enum Essence2Resources {
     /// Must equal `essence2Tag` in Package.swift (the tap's check-apple-engine-pin.sh grades it).
     public static let releaseTag = "essence2-v1.15.5"
-    static let base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/"
+    static let base = "https://downloads.bithuman.ai/homebrew-bithuman/"
     static let files: [(name: String, sha256: String)] = [
         ("w2v_ess_fp16_v1.onnx", "7340a0350c340e059f0931d7381fad1ed8aa579cc4440fcc3223f136d9aaa8e5"),
         ("audio_encoder_fp16_window_trunk.onnx", "8cfc2a558236dcb787b46322c906e562e0cb1abe65a8f15f95f50d7cb8c86e88"),

@@ -349,7 +349,7 @@ if [ "${1:-}" = "--self-test" ]; then
   fi
 
   # The formula users install, read from the tap's canonical main (override for a local run).
-  _formula_url="${BITHUMAN_SELFTEST_FORMULA_URL:-https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/Formula/bithuman-cli.rb}"
+  _formula_url="${BITHUMAN_SELFTEST_FORMULA_URL:-https://gitlab.com/bithuman/sdk/homebrew-bithuman/-/raw/main/Formula/bithuman-cli.rb}"
   _formula_tag=$(curl -fsSL "$_formula_url" 2>/dev/null \
     | sed -n 's|.*/\([^/]*\)/bithuman-aarch64-apple-darwin\.tar\.gz".*|\1|p' | head -1)
   if [ -z "$_formula_tag" ]; then

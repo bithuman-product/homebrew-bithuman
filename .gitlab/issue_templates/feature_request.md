@@ -1,9 +1,4 @@
----
-name: Feature request
-about: Suggest an improvement to the examples, docs, or packaging
-title: ''
-labels: enhancement
----
+<!-- Feature request template. Security issues: email hello@bithuman.ai instead (see SECURITY.md). SDK runtime questions: hello@bithuman.ai. Docs: https://docs.bithuman.ai -->
 
 <!--
 This template is for changes we can actually merge from a PR — improvements to
