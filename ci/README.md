@@ -38,7 +38,7 @@ change touches needs the same comment from a host where it ran.
 Tag pushes no longer publish anything. The release recipes are the disabled workflows;
 run their commands by hand on a release host with the named credentials
 (`ci/run-local.sh --list`, section "manual"): `release-pypi.yml` (pypi-v*),
-`publish-mcp.yml` (mcp-v*), `publish-pubdev.yml` (flutter-v*), `publish-cli-wheel.yml`,
+`publish-mcp.yml` (mcp-v*), `publish-cli-wheel.yml`,
 `publish-essence2-apple.yml`. After any release, run
 `python3 tools/verify_latest_badge.py --heal` and `ci/run-local.sh --only release-coverage`
 (these used to run on `release:` events and a schedule). Releases are published to
@@ -52,5 +52,6 @@ GitHub only executes files under `.github/workflows/`.
 
 ## Known reds
 
-None on `main` at the time of the switch. `flutter-plugin-tests` SKIPs on hosts without
-Flutter; `dev-levers-release-arm`, `voice-render-edge` and `swift-package` need macOS.
+None on `main` at the time of the switch. `swift-package` needs macOS. The Flutter plugin's
+steps (flutter test, platform guards, dev levers, voice/render edge, the pod's engine pins) moved
+with the plugin to https://gitlab.com/bithuman/sdk/bithuman-flutter.

@@ -1,1 +1,0 @@
-../../shared/Classes/Essence2PluginEngine.swift

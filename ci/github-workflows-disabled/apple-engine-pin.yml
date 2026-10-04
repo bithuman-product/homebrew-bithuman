@@ -12,22 +12,25 @@
 # `flutter-plugin-v2.6.1` named no engine at all.
 #
 # This is the gate. Offline, no credential, runs on a fork.
+#
+# 2026-10: the Flutter plugin moved to gitlab.com/bithuman/sdk/bithuman-flutter, which runs the pod
+# arms (A1-A6, A8) against this repository's Package.swift. Here only A7 has a subject (Essence2Kit
+# fetches its runtime files from the release essence2Tag names), so the control re-creates A7's
+# defect: a tag roll that moves essence2Tag and not Essence2Resources.releaseTag.
 name: apple engine pin
 
 on:
   pull_request:
     paths:
-      - 'packages/flutter-plugin/scripts/bootstrap.sh'
       - 'Package.swift'
+      - 'Sources/Essence2Kit/Essence2Engine.swift'
       - 'scripts/check-apple-engine-pin.sh'
-      - '.github/workflows/apple-engine-pin.yml'
   push:
     branches: [main]
     paths:
-      - 'packages/flutter-plugin/scripts/bootstrap.sh'
       - 'Package.swift'
+      - 'Sources/Essence2Kit/Essence2Engine.swift'
       - 'scripts/check-apple-engine-pin.sh'
-      - '.github/workflows/apple-engine-pin.yml'
   workflow_dispatch:
 
 jobs:
@@ -36,28 +39,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: A tag names an engine — on both Apple paths
+      - name: Essence2Kit names the engine SwiftPM serves (A7; the pod arms run in the plugin's project)
         run: ./scripts/check-apple-engine-pin.sh
 
-      - name: Negative control — re-create the defect, require a REFUSAL
+      - name: Negative control — re-create the A7 defect, require a REFUSAL
         run: |
-          # A check that cannot fail is not a check. Each arm is the real defect,
-          # not a synthetic one: A4 is literally the 1.2.0-vs-1.7.0 drift and A2
-          # is literally the call site that omitted the ref.
           set -u
-          B=packages/flutter-plugin/scripts/bootstrap.sh
-          cp "$B" "$RUNNER_TEMP/bootstrap.bak"
-          restore() { cp "$RUNNER_TEMP/bootstrap.bak" "$B"; }
+          K=Sources/Essence2Kit/Essence2Engine.swift
+          T="$(mktemp -d)"
+          cp "$K" "$T/kit.bak"
+          restore() { cp "$T/kit.bak" "$K"; }
           arm() {  # $1 = name, $2 = sed program
-            sed -i "$2" "$B"
-            # ★AN ARM THAT CHANGED NO BYTES IS NOT AN ARM. The digest arm below
-            # was spelt `LIBESSENCE2_SHA256:-e` and stopped matching anything the
-            # day the pinned digest stopped starting with `e` (essence2-v1.8.0 is
-            # 06be42fe…): sed edited nothing, the check passed on an UNMUTATED
-            # file, and this step reported the CHECK as blind when the blind thing
-            # was the arm. Assert the subject actually moved before grading it —
-            # for every arm, so the next hard-coded literal cannot hide either.
-            if cmp -s "$B" "$RUNNER_TEMP/bootstrap.bak"; then
+            sed -i.sedbak "$2" "$K" && rm -f "$K.sedbak"
+            if cmp -s "$K" "$T/kit.bak"; then
               echo "::error::the arm '$1' changed no bytes — its sed no longer matches its subject, so it grades nothing"
               restore; exit 1
             fi
@@ -68,34 +62,8 @@ jobs:
             echo "  refused: $1"
             restore
           }
-          # A1 NO-SOURCE (2.6.20): the pod links the published engine binaries; a bootstrap that
-          # clones the private engine repo again is refused.
-          arm "bootstrap clones the private engine repository again" \
-              's|^fetch_tap_zip() {$|git clone --depth 1 https://gitlab.com/bithuman/models/bithuman-models "$TMP/m"\nfetch_tap_zip() {|'
-          # A2 X2-AGREES: the pod's Expression 2 pins drift from Package.swift's.
-          arm "the pod stages an older Expression 2 release" \
-              's|EXPRESSION2_RELEASE:-v[0-9.]*|EXPRESSION2_RELEASE:-v2.7.0|'
-          arm "the Expression 2 digest is a different valid sha256" \
-              's|EXPRESSION2_SHA256:-[0-9a-f]\{64\}|EXPRESSION2_SHA256:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|'
-          arm "the resources digest is deleted" \
-              '/^LIBESSENCE2_RESOURCES_SHA256=/d'
-          arm "the pod rolls back to the superseded essence2-v1.2.0" \
-              's|LIBESSENCE2_RELEASE:-essence2-v[0-9.]*|LIBESSENCE2_RELEASE:-essence2-v1.2.0|'
-          # Value-INDEPENDENT: rewrite the whole digest to a different, still
-          # well-formed sha256, so this arm keeps biting whatever the pin becomes.
-          arm "the engine digest is a different valid sha256" \
-              's|LIBESSENCE2_SHA256:-[0-9a-f]\{64\}|LIBESSENCE2_SHA256:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|'
-          # A6: the UnifiedModelHeader pin drifts from the SDK tag (the real
-          # defect: v2.6.3 staged while Package.swift served v2.6.4).
-          arm "the pod stages an older UnifiedModelHeader release" \
-              's|UMH_RELEASE:-v[0-9.]*|UMH_RELEASE:-v2.6.3|'
-          arm "the UnifiedModelHeader digest is a different valid sha256" \
-              's|UMH_SHA256:-[0-9a-f]\{64\}|UMH_SHA256:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|'
-          # A8: the pod's EngineCore (the macOS link, essence2-v1.15.0+) drifts from the manifest's.
-          arm "the pod stages an older EngineCore release" \
-              's|ENGINECORE_RELEASE:-enginecore-v[0-9.]*|ENGINECORE_RELEASE:-enginecore-v1.0.0|'
-          arm "the EngineCore digest is a different valid sha256" \
-              's|ENGINECORE_SHA256:-[0-9a-f]\{64\}|ENGINECORE_SHA256:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef|'
-          arm "the EngineCore digest is deleted" \
-              '/^ENGINECORE_SHA256=/d'
+          arm "Essence2Kit fetches its runtime files from an older engine release" \
+              's|public static let releaseTag = "essence2-v[0-9.]*"|public static let releaseTag = "essence2-v1.2.0"|'
+          arm "Essence2Kit's releaseTag is deleted" \
+              '/public static let releaseTag = /d'
           ./scripts/check-apple-engine-pin.sh
