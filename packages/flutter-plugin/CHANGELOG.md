@@ -1,5 +1,24 @@
 ## Unreleased
 
+### Behaviour changes (action needed)
+
+1. **iOS: the pod's floor is iOS 16.4** (was 16.0). The on-device brain (libconverse) moves to the pinned release
+   **`converse-apple-v2.5.1`**: llama.cpp b8110 linked statically, and its Accelerate BLAS call
+   (`cblas_sgemm$NEWLAPACK$ILP64`) exists only from iOS 16.4. The earlier library said 16.0 while importing it, so an
+   app at 16.0-16.3 that linked it could not start. Set `platform :ios, '16.4'` in `ios/Podfile` and
+   `IPHONEOS_DEPLOYMENT_TARGET = 16.4` on the Runner target. An app below it fails `pod install` with the floor
+   named, or its build, by name (`BHDeploymentFloor.h`), when `Podfile.lock` already resolves the pod.
+2. **macOS: the pod's floor is back to macOS 14.0** (was 26.0 in 2.6.36). Every object of libconverse
+   `converse-apple-v2.5.1`'s macOS slice is built for macOS 14.0 and libessence2 for 13.0, so the pod (which reads
+   its floor from the binaries it vendors) declares 14.0: Sonoma and Sequoia are supported again. Set
+   `platform :osx, '14.0'` in `macos/Podfile` and `MACOSX_DEPLOYMENT_TARGET = 14.0` on the Runner target. llama.cpp
+   now comes inside libconverse, so the macOS link no longer takes Homebrew's `libllama` (`brew install onnxruntime`
+   is still needed; an app that ships to macOS 14 bundles an ONNX Runtime built for it).
+
+libconverse is now a named, digest-pinned release in `scripts/bootstrap.sh` (`LIBCONVERSE_RELEASE`,
+`LIBCONVERSE_SHA256`; a mismatch is a refusal), where it was the unpinned 2026-07-01 cut inside a 199 MB vendor
+bundle. A clone without access still builds without the on-device brain, as before.
+
 ### Fixed
 
 * **Android: a session nobody is watching ends after 60 s** (`essence2-android` 0.9.5, `expression2-android` 0.6.1,

@@ -31,8 +31,8 @@
 # the app's Runner "Bundle embody models" phase reads.
 #
 # Two modes:
-#   • SELF-CONTAINED (default): download + sha256-verify the libconverse vendor
-#     bundle from the embody Release, then run each engine SDK's bootstrap.
+#   • SELF-CONTAINED (default): download + sha256-verify the embody models, the
+#     pinned libconverse release (LIBCONVERSE_*) and each engine's pinned binaries.
 #   • DEV override: BITHUMAN_SDK_DIR=/path/to/bithuman-models/models/essence-1
 #     symlinks libconverse from that checkout's sdk/swift/vendor surface; embody
 #     models load from ~/embody-ane at runtime; each engine SDK bootstrap runs
@@ -57,6 +57,27 @@ EXPRESSION2_VENDOR_REPO="${EXPRESSION2_VENDOR_REPO:-bithuman-product/bithuman-mo
 # (ORT_XCFRAMEWORK_DIR=/path/to/onnxruntime.xcframework) skips the download.
 ORT_VENDOR_TAG="${ORT_VENDOR_TAG:-essence2-ort-vendor-1.26.0}"
 ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
+
+# ===================================================== THE LIBCONVERSE PIN (2.6.37)
+# The on-device conversation brain (LOCAL mode): llama.cpp b8110 linked statically
+# with its Metal shaders embedded + the Supertonic helper; ONNX Runtime is NOT merged
+# in (the app links it: the vendored onnxruntime.xcframework on iOS, Homebrew's on
+# macOS). Three slices: macos-arm64 (every object minos macOS 14.0), ios-arm64 and
+# ios-arm64-simulator (every object minos iOS 16.4: llama.cpp's Accelerate BLAS imports
+# `cblas_sgemm$NEWLAPACK$ILP64`, iOS 16.4+). The podspecs read those floors from the
+# staged bytes.
+#
+# ★Through 2.6.36 libconverse came UNPINNED from the private `expression2-vendor-v1`
+# combined bundle (embody-vendor.tar.gz, 199 MB downloaded for a 7 MB framework): the
+# 2026-07-01 cut, whose macOS objects say minos 26.0 (so the pod declared macOS 26.0) and
+# whose llama.cpp came from Homebrew at link + run time. Now it is a named, digest-pinned
+# release like the engines; a mismatch is a refusal. The release is private: a clone
+# without access builds WITHOUT the brain (CONVERSE_AVAILABLE unset; localAudioStart /
+# localAudioStop / localPushText refuse by name), exactly as before.
+# LIBCONVERSE_XCF_ZIP=<path to libconverse.xcframework.zip> stages a candidate build.
+LIBCONVERSE_RELEASE="${LIBCONVERSE_RELEASE:-converse-apple-v2.5.1}"
+LIBCONVERSE_SHA256="${LIBCONVERSE_SHA256:-edfe15fac1ef89911322b1b870ab73f3a3d5c79fbed669919b65423c9c6105f8}"
+LIBCONVERSE_REPO="${LIBCONVERSE_REPO:-bithuman-product/bithuman-models}"
 
 # ======================================================= THE APPLE ENGINE PIN
 # ★ A TAG OF THIS REPO MUST NAME AN ENGINE. The Android half already works this
@@ -459,7 +480,7 @@ if fetch_public embody-models.tar.gz "$PUBLIC_SHA_embody_models" "$TMP"; then
     tar -xzf "$TMP/embody-models.tar.gz" -C "$SRC"
     [ -d "$SRC/embody-models" ] || die "embody-models.tar.gz did not contain embody-models/"
 else
-    # Private fallback: the combined bundle, which also carries libconverse.
+    # Private fallback: the combined bundle (its own libconverse, the unpinned 2026-07-01 cut, is not used: 1b).
     command -v gh >/dev/null 2>&1 \
         || die "public fetch failed and gh is unavailable — cannot obtain the embody models"
     log "  public fetch failed — falling back to '$EXPRESSION2_VENDOR_TAG' on $EXPRESSION2_VENDOR_REPO"
@@ -478,33 +499,47 @@ else
     [ -d "$SRC/embody-models" ] || die "bundle missing embody-models/"
 fi
 
-# 1b. libconverse.xcframework — the on-device conversation BRAIN. It is SDK and is
-# NOT published, so a clone without access simply does not get it. That is a
-# SUPPORTED configuration since the pod decides CONVERSE_AVAILABLE from the staged
-# bytes: the cloud realtime path, the avatar, both engines, lipsync, barge-in and
-# the idle loop all work without it; only localAudioStart/Stop/PushText are
-# unavailable, and they refuse by name.
-if [ -d "$SRC/libconverse.xcframework" ]; then
+# 1b. libconverse.xcframework — the on-device conversation BRAIN, from its pinned release
+# (LIBCONVERSE_* above). It is SDK and is NOT public, so a clone without access simply does
+# not get it. That is a SUPPORTED configuration since the pod decides CONVERSE_AVAILABLE from
+# the staged bytes: the cloud realtime path, the avatar, both engines, lipsync, barge-in and
+# the idle loop all work without it; only localAudioStart/Stop/PushText are unavailable, and
+# they refuse by name. Bytes that DO arrive and do not match the pin are a refusal, never a
+# silent degrade. (The combined bundle's own libconverse — 1a's private fallback — is never
+# installed: it is the unpinned 2026-07-01 cut.)
+stage_libconverse() {
+    local dl="$TMP/libconverse" zip
+    rm -rf "$MAC_FW/libconverse.xcframework" "$IOS_FW/libconverse.xcframework"
+    mkdir -p "$dl"
+    if [ -n "${LIBCONVERSE_XCF_ZIP:-}" ]; then
+        log "Staging libconverse from LIBCONVERSE_XCF_ZIP=$LIBCONVERSE_XCF_ZIP (candidate; the pinned digest is not what is staged)"
+        cp "$LIBCONVERSE_XCF_ZIP" "$dl/libconverse.xcframework.zip" || die "no $LIBCONVERSE_XCF_ZIP"
+    else
+        log "Fetching libconverse $LIBCONVERSE_RELEASE (${LIBCONVERSE_SHA256:0:16}…) from $LIBCONVERSE_REPO …"
+        if ! command -v gh >/dev/null 2>&1 || ! gh release download "$LIBCONVERSE_RELEASE" --repo "$LIBCONVERSE_REPO" \
+                --pattern 'libconverse.xcframework.zip' --dir "$dl" --clobber >/dev/null 2>&1; then
+            warn "libconverse $LIBCONVERSE_RELEASE unavailable (no gh, or no access to $LIBCONVERSE_REPO) — building WITHOUT the on-device brain."
+            warn "  Unaffected: cloud realtime, the avatar, both engines, lipsync, barge-in, idle."
+            warn "  Unavailable: localAudioStart / localAudioStop / localPushText."
+            rm -rf "$dl"; return 0
+        fi
+        zip="$dl/libconverse.xcframework.zip"
+        [ -f "$zip" ] || die "release $LIBCONVERSE_RELEASE has no libconverse.xcframework.zip"
+        local got; got="$(shasum -a 256 "$zip" | cut -d' ' -f1)"
+        [ "$got" = "$LIBCONVERSE_SHA256" ] || die "sha256 MISMATCH for libconverse.xcframework.zip ($LIBCONVERSE_RELEASE) — refusing to install
+  expected $LIBCONVERSE_SHA256
+  actual   $got"
+        log "  sha256 verified against the pin ($got)"
+    fi
+    ( cd "$dl" && unzip -q -o libconverse.xcframework.zip ) || die "could not unzip libconverse.xcframework.zip"
+    [ -d "$dl/libconverse.xcframework" ] || die "libconverse.xcframework.zip did not contain libconverse.xcframework/"
     log "Installing libconverse.xcframework → macos/Frameworks (ios → symlink)"
     mkdir -p "$MAC_FW" "$IOS_FW"
-    rm -rf "$MAC_FW/libconverse.xcframework"
-    cp -R "$SRC/libconverse.xcframework" "$MAC_FW/libconverse.xcframework"
+    cp -R "$dl/libconverse.xcframework" "$MAC_FW/libconverse.xcframework"
     relink "$MAC_FW/libconverse.xcframework" "$IOS_FW/libconverse.xcframework"
-elif command -v gh >/dev/null 2>&1 && gh release download "$EXPRESSION2_VENDOR_TAG" \
-        --repo "$EXPRESSION2_VENDOR_REPO" --pattern 'embody-vendor.tar.gz' --dir "$TMP" --clobber >/dev/null 2>&1; then
-    tar -xzf "$TMP/embody-vendor.tar.gz" -C "$TMP"
-    if [ -d "$SRC/libconverse.xcframework" ]; then
-        log "Installing libconverse.xcframework → macos/Frameworks (ios → symlink)"
-        mkdir -p "$MAC_FW" "$IOS_FW"
-        rm -rf "$MAC_FW/libconverse.xcframework"
-        cp -R "$SRC/libconverse.xcframework" "$MAC_FW/libconverse.xcframework"
-        relink "$MAC_FW/libconverse.xcframework" "$IOS_FW/libconverse.xcframework"
-    fi
-else
-    warn "libconverse.xcframework unavailable — building WITHOUT the on-device brain."
-    warn "  Unaffected: cloud realtime, the avatar, both engines, lipsync, barge-in, idle."
-    warn "  Unavailable: localAudioStart / localAudioStop / localPushText."
-fi
+    rm -rf "$dl"
+}
+stage_libconverse
 
 # 1c. onnxruntime.xcframework (static, non-SME2) — the essence2 a2x decoder
 # runtime the iOS pod vendors. Staged to ios/Frameworks (sha256-verified).
@@ -552,8 +587,8 @@ reduce_to_shared_graphs() {  # $1 = extracted embody-models dir
 }
 reduce_to_shared_graphs "$SRC/embody-models"
 
-# 2. N-engine loop. expression2 reuses the bundle we already downloaded for
-# libconverse (EMBODY_VENDOR_SRC → no re-download); essence2 fetches its own
+# 2. N-engine loop. expression2 reuses the embody graphs downloaded in 1a
+# (EMBODY_VENDOR_SRC → no re-download); essence2 fetches its own
 # sha-pinned libessence2 release inside its SDK bootstrap.
 stage_expression2 "$SRC/embody-models"
 stage_enginecore

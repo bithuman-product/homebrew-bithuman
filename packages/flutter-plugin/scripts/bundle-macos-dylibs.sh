@@ -3,8 +3,9 @@
 #
 # The bitHuman macOS engines link heavy C++ deps as DYNAMIC libraries from
 # Homebrew (/opt/homebrew): the podspec's brew_libs links `-lonnxruntime`
-# (a2x w2v frontend) + `-lllama` (the libconverse brain), and llama.cpp
-# runtime-dlopens its `libggml*` Metal backends. As built, the .app loads
+# (a2x w2v frontend, Supertonic) and, only for a libconverse that does not carry
+# llama.cpp itself (before converse-apple-v2.5.1, plugin 2.6.37), `-lllama`, whose
+# llama.cpp runtime-dlopens its `libggml*` Metal backends. As built, the .app loads
 # them from /opt/homebrew at runtime, so it only runs on a machine that has
 # Homebrew + those exact libs. This script copies the whole
 # transitive dylib closure into Contents/Frameworks, rewrites every load command
@@ -74,7 +75,10 @@ def resolve(dep, referrer):
 # openvino pulled its ~200 MB closure into the .app for nothing. Anything
 # actually linked is still bundled by the BFS below from otool -L on the binary.)
 seeds = list(otool_L(BIN))
-seeds += glob.glob('/opt/homebrew/opt/llama.cpp/lib/libggml*.dylib')
+# Only when the app links Homebrew's libllama: libconverse converse-apple-v2.5.1 (plugin 2.6.37) carries
+# llama.cpp statically with its Metal shaders embedded, and then nothing dlopens Homebrew's libggml*.
+if any(os.path.basename(d).startswith('libllama') for d in seeds):
+    seeds += glob.glob('/opt/homebrew/opt/llama.cpp/lib/libggml*.dylib')
 
 # BFS the closure, keyed by the basename used in load commands.
 to_bundle, queue, done = {}, [], set()

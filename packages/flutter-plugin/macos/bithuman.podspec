@@ -16,11 +16,14 @@
 # `Frameworks/libessence2.a` is present; absent it, the essence2 path compiles
 # out and the build stays embody-only, byte-identical, and shippable.
 #
-# libconverse needs llama.cpp from Homebrew at link + runtime via @rpath:
-#   brew install llama.cpp
+# libconverse carries llama.cpp statically (converse-apple-v2.5.1, 2.6.37); only
+# ONNX Runtime (Supertonic) comes from Homebrew at link + runtime via @rpath:
+#   brew install onnxruntime
+# (A staged libconverse that does NOT define llama.cpp — the 2026-07-01 cut — still
+# links Homebrew's: `brew install llama.cpp`. Decided from the staged bytes below.)
 #
 # libconverse.xcframework lands in the plugin tree via scripts/bootstrap.sh
-# (an embody Release vendor bundle, or a sibling bithuman-sdk checkout for
+# (its pinned release, LIBCONVERSE_*, or a sibling bithuman-sdk checkout for
 # SDK contributors). The per-agent embody CoreML models land in Assets/embody.
 #
 # Apache-2.0; (c) bitHuman.
@@ -179,13 +182,14 @@ Pod::Spec.new do |s|
 
   # ★THE DECLARED FLOOR IS THE STAGED BYTES' FLOOR (2.6.36, security) — see the iOS podspec. Until 2.6.35
   # this pod declared macOS 13.0 while libessence2.a (essence2-v1.15.3; v1.15.4 is rebuilt at 13.0) and
-  # libconverse.xcframework's macos-arm64 slice are built for macOS 26.0 (every v1.15.3 libessence2 object,
-  # and 33 libconverse objects, say minos 26.0); an app at 13.0 linking them takes strong imports that exist only from macOS
-  # 15.4 and cannot launch below it. The floor is now read from the binaries this pod vendors (the
-  # highest LC_BUILD_VERSION minos of their macOS objects, never below 13.0): macOS 26.0 with today's
-  # staged files, Essence 2 or not, until libconverse's macOS slice is rebuilt at 13.0 too. Bytes that
-  # cannot be read count as macOS 26.0. The Homebrew dylibs (llama.cpp, onnxruntime) are not vendored
-  # here and are not read.
+  # libconverse.xcframework's macos-arm64 slice were built for macOS 26.0 (every v1.15.3 libessence2 object,
+  # and 33 objects of the 2026-07-01 libconverse cut, say minos 26.0); an app at 13.0 linking them takes strong
+  # imports that exist only from macOS 15.4 and cannot launch below it. The floor is read from the binaries
+  # this pod vendors (the highest LC_BUILD_VERSION minos of their macOS objects, never below 13.0). 2.6.36
+  # declared macOS 26.0 (that libconverse cut). ★2.6.37: libconverse converse-apple-v2.5.1 is built at macOS
+  # 14.0 (every object) and libessence2 at 13.0, so the floor is macOS 14.0 (Sonoma; Sequoia supported
+  # again). Bytes that cannot be read count as macOS 26.0. The Homebrew dylib (onnxruntime) is not vendored
+  # here and is not read: an app shipping to macOS 14 bundles a copy built for it.
   # A binary that names no minimum for macOS (no LC_BUILD_VERSION for platform 1 and no legacy
   # LC_VERSION_MIN_MACOSX) counts as unreadable too (PR #202 review): through the first 2.6.36 commits
   # it left the floor at the base.
@@ -249,16 +253,22 @@ Pod::Spec.new do |s|
     '-framework Security -lcurl'
 
   # Homebrew dylibs libconverse needs at link + runtime via @rpath:
-  #   - llama.cpp: the local LLM brain (ggml/llama).
   #   - onnxruntime: Supertonic TTS (the converse voice).
+  #   - llama.cpp: ONLY for a staged libconverse that does not carry it. converse-apple-v2.5.1 (2.6.37)
+  #     links llama.cpp b8110 statically with its Metal shaders embedded; linking Homebrew's libllama
+  #     beside it would put a second llama.cpp/ggml in the process. Read from the staged bytes, like
+  #     the floor: the macOS slice defines `_llama_decode` or it does not.
   # The example app's xcconfig also wires runtime DYLD paths so they load at
   # launch.
+  converse_mac_lib = File.join(__dir__, 'Frameworks/libconverse.xcframework/macos-arm64/libconverse.a')
+  brew_llama = converse_fw &&
+    !system("nm -gU '#{converse_mac_lib}' 2>/dev/null | grep -q ' T _llama_decode$'")
   brew_libs =
     '-L/opt/homebrew/lib ' \
-    '-L/opt/homebrew/opt/onnxruntime/lib ' \
-    '-L/opt/homebrew/opt/llama.cpp/lib ' \
-    '-lonnxruntime ' \
-    '-lllama'
+    '-L/opt/homebrew/opt/onnxruntime/lib ' +
+    (brew_llama ? '-L/opt/homebrew/opt/llama.cpp/lib ' : '') +
+    '-lonnxruntime' +
+    (brew_llama ? ' -lllama' : '')
 
   pod_xcconfig = {
     'DEFINES_MODULE'              => 'YES',
@@ -308,7 +318,8 @@ Pod::Spec.new do |s|
     # frameworks here.
     'OTHER_LDFLAGS' => "$(inherited) #{brew_libs} #{common_frameworks}",
     # Embed @rpath entries so the Homebrew dylibs resolve at run-time.
-    'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) /opt/homebrew/lib /opt/homebrew/opt/onnxruntime/lib /opt/homebrew/opt/llama.cpp/lib',
+    'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) /opt/homebrew/lib /opt/homebrew/opt/onnxruntime/lib' +
+                                 (brew_llama ? ' /opt/homebrew/opt/llama.cpp/lib' : ''),
   }
   # The staged engines' floor, for Classes/BHDeploymentFloor.h (see "THE DECLARED FLOOR").
   user_xcconfig['GCC_PREPROCESSOR_DEFINITIONS'] = "$(inherited)#{mac_floor_defines}" unless mac_floor_defines.empty?

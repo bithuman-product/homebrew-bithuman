@@ -12,9 +12,10 @@
 // This header is in the pod's umbrella module, so the app's `@import bithuman` (Flutter's
 // GeneratedPluginRegistrant.m on iOS) compiles it with the APP's deployment target. The pod defines
 // BITHUMAN_IOS_FLOOR / BITHUMAN_MACOS_FLOOR (Availability.h format: 26.0 = 260000) in the APP target's
-// preprocessor definitions (user_target_xcconfig), and only while the staged floor is above the base
-// (iOS 16.0 / macOS 13.0); the pod's own target never defines them. An app below the floor fails its
-// build here, by name, instead of shipping a binary that crashes at launch.
+// preprocessor definitions (user_target_xcconfig), and only while the staged floor is above iOS 16.0 /
+// macOS 13.0 (from 2.6.37 always on iOS: the base is 16.4, libconverse converse-apple-v2.5.1; on macOS
+// 14.0 with that libconverse staged); the pod's own target never defines them. An app below the floor
+// fails its build here, by name, instead of shipping a binary that cannot start.
 //
 // The definitions reach the app through `$(inherited)`: an app target that sets
 // GCC_PREPROCESSOR_DEFINITIONS without `$(inherited)` drops them and this check does nothing (the
@@ -30,12 +31,12 @@
 
 #if TARGET_OS_IOS && defined(BITHUMAN_IOS_FLOOR) && defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
 #if __IPHONE_OS_VERSION_MIN_REQUIRED < BITHUMAN_IOS_FLOOR
-#error "bithuman: the engines scripts/bootstrap.sh staged need a newer iOS than this app's deployment target, and an app linking them cannot start below iOS 18.4. Raise the app to the floor `pod install` printed (platform :ios in ios/Podfile and IPHONEOS_DEPLOYMENT_TARGET on the Runner target), or for iOS 16 bootstrap with BITHUMAN_SKIP_ESSENCE2=1 (Expression 2 only) and run pod install again."
+#error "bithuman: the engines scripts/bootstrap.sh staged need a newer iOS than this app's deployment target (iOS 16.4 at least: the on-device brain's llama.cpp needs it), and an app linking them cannot start below their floor. Raise the app to the floor `pod install` printed (platform :ios in ios/Podfile and IPHONEOS_DEPLOYMENT_TARGET on the Runner target) and run pod install again."
 #endif
 #endif
 
 #if TARGET_OS_OSX && defined(BITHUMAN_MACOS_FLOOR) && defined(__MAC_OS_X_VERSION_MIN_REQUIRED)
 #if __MAC_OS_X_VERSION_MIN_REQUIRED < BITHUMAN_MACOS_FLOOR
-#error "bithuman: the engines scripts/bootstrap.sh staged need a newer macOS than this app's deployment target, and an app linking them cannot start on older macOS. Raise the app to the floor `pod install` printed (platform :osx in macos/Podfile and MACOSX_DEPLOYMENT_TARGET on the Runner target; macOS 26.0 with today's engines) and run pod install again."
+#error "bithuman: the engines scripts/bootstrap.sh staged need a newer macOS than this app's deployment target, and an app linking them cannot start on older macOS. Raise the app to the floor `pod install` printed (platform :osx in macos/Podfile and MACOSX_DEPLOYMENT_TARGET on the Runner target; macOS 14.0 with today's engines) and run pod install again."
 #endif
 #endif
