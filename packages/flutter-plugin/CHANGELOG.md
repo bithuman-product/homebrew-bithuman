@@ -1,3 +1,14 @@
+## Unreleased
+
+### Fixed
+
+* **Android: the presenter's starve count ignores sub-frame publish gaps.** A starve (`bhstarve`, `starve=` on the
+  `PROD` line) now counts only when the ready-frame queue stays empty for at least 50 ms
+  (`StarveCounter.MIN_HOLD_MS`) before frames come back. `expression2-android` 0.6.0 publishes a block frame by frame,
+  and the 2-8 ms between two publishes counted as a starve, so the count rose with 0.6.0 while frame coverage stayed
+  the same. The holds a viewer sees last ~200-550 ms and still count. A shorter gap is logged at debug level only.
+  Diagnostics only: rendering is unchanged.
+
 ## 2.6.36 — 2026-10-04 — Security: a kept avatar opens only for a credential bitHuman's door said yes to; iOS / macOS: an app linking Essence 2 starts on every OS the pod declares (essence2-v1.15.4); Android `pushAudio` plays your speech; the public model ids on Android; an unknown engine fails by name on iOS / macOS
 
 iOS / macOS engines: Essence 2 **`essence2-v1.15.4`** (was `essence2-v1.15.3`), Expression 2 **`v2.20.3`** (was

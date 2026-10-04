@@ -191,9 +191,11 @@ class AvatarPlayer(
     @Volatile private var nRingOverrun = 0L
     /** Idle decodes that had no frame ready within a frame's time (the codec runs ahead; this should read 0). */
     @Volatile private var nIdleStall = 0
-    @Volatile private var nStarve = 0
-    private var starveAt = 0L
+    /** Empty-queue holds of at least StarveCounter.MIN_HOLD_MS (a shorter publish gap is not a starve). */
+    private val starve = StarveCounter()
     private var holdAtStarve = 0
+    /** What the queue looked like when the open hold began; logged with the hold once it closes. */
+    private var starveDetail = ""
     @Volatile private var resetGen = 0
     /**
      * A barge-in's Reset is queued behind whatever the feed thread is doing; until it
@@ -570,22 +572,32 @@ class AvatarPlayer(
                 if (f < 0) {
                     nullPulls++
                     // STARVATION: the ready-frame depth reached zero while the engine
-                    // still had an utterance to finish. Counted as episodes, not pulls.
-                    if (lastPullOk && avatar.hasPendingTail) {
-                        nStarve++; starveAt = System.currentTimeMillis(); holdAtStarve = nHold
+                    // still had an utterance to finish. Counted as episodes, not pulls, and only
+                    // when the queue stays empty for StarveCounter.MIN_HOLD_MS (50 ms) before frames
+                    // come back: expression2-android 0.6.0 publishes a block frame by frame, and the
+                    // 2-8 ms between two publishes is no hold anyone sees (StarveCounter.kt).
+                    if (lastPullOk && avatar.hasPendingTail && starve.emptySince < 0) {
+                        val at = System.currentTimeMillis()
+                        starve.empty(at); holdAtStarve = nHold
                         val st = runCatching { avatar.stats() }.getOrNull()
                         val (h, fed) = synchronized(audioLock) { head to audioLen }
-                        Log.i("bhstarve", "STARVE $nStarve hostMs=$starveAt headUnits=${h / BYTES_PER_FRAME} inHandUnits=${(fed - h) / BYTES_PER_FRAME} " +
-                            "toWrite=${toWrite.size} chunks=${st?.chunks} frames=${st?.frames} wallMs=${"%.0f".format(st?.wallMs ?: -1.0)}")
+                        starveDetail = "hostMs=$at headUnits=${h / BYTES_PER_FRAME} inHandUnits=${(fed - h) / BYTES_PER_FRAME} " +
+                            "toWrite=${toWrite.size} chunks=${st?.chunks} frames=${st?.frames} wallMs=${"%.0f".format(st?.wallMs ?: -1.0)}"
                     }
                 } else {
                     heldFrom = f * BYTES_PER_SAMPLE16
-                    if (starveAt > 0) {
+                    val hold = starve.refill(System.currentTimeMillis())
+                    if (hold != null) {
                         val st = runCatching { avatar.stats() }.getOrNull()
                         val h = synchronized(audioLock) { head }
-                        Log.i("bhstarve", "REFILL $nStarve after ${System.currentTimeMillis() - starveAt}ms frameAt=${heldFrom / BYTES_PER_FRAME} headUnits=${h / BYTES_PER_FRAME} " +
-                            "toWrite=${toWrite.size} holdsSince=${nHold - holdAtStarve} chunks=${st?.chunks} frames=${st?.frames} wallMs=${"%.0f".format(st?.wallMs ?: -1.0)}")
-                        starveAt = 0L
+                        val refill = "after ${hold.ms}ms frameAt=${heldFrom / BYTES_PER_FRAME} headUnits=${h / BYTES_PER_FRAME} " +
+                            "toWrite=${toWrite.size} holdsSince=${nHold - holdAtStarve} chunks=${st?.chunks} frames=${st?.frames} wallMs=${"%.0f".format(st?.wallMs ?: -1.0)}"
+                        if (hold.counted) {
+                            Log.i("bhstarve", "STARVE ${starve.count} $starveDetail")
+                            Log.i("bhstarve", "REFILL ${starve.count} $refill")
+                        } else {
+                            Log.d("bhstarve", "gap ${hold.ms}ms < ${StarveCounter.MIN_HOLD_MS}ms, not a starve: $starveDetail | $refill")
+                        }
                     }
                 }
                 lastPullOk = f >= 0
@@ -1160,7 +1172,7 @@ class AvatarPlayer(
             stats.refresh()
             val avg = if (pullCalls > 0) pullNanos / pullCalls / 1_000_000.0 else 0.0
             Log.i("bhav", "PROD where=$where idle=$nIdle speech=$nSpeech tailUnits=$nTailUnits " +
-                "catchUp=$nCatchUp await=$nAwait hold=$nHold stale=$nStale back=$nBackwards ringOverrun=$nRingOverrun starve=$nStarve barges=$nBarge leaks=$nLeak " +
+                "catchUp=$nCatchUp await=$nAwait hold=$nHold stale=$nStale back=$nBackwards ringOverrun=$nRingOverrun starve=${starve.count} barges=$nBarge leaks=$nLeak " +
                 "idleStall=$nIdleStall idleAt=${idleLoop?.lastIndex ?: -1}/${idleLoop?.frameCount ?: 0} idleWraps=${idleLoop?.wraps ?: 0} " +
                 "coalesced=$nCoalesced markers=$nMarkers q=${avatar.queuedFrames} inFlight=${toPresent.size} " +
                 "${avatar.skippedFrames.let { if (it >= 0) "skipped=$it " else "" }}| " +
