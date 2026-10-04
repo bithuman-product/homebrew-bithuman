@@ -77,7 +77,7 @@ public enum Essence2KitError: Error, CustomStringConvertible, Sendable {
     case notReady(seconds: Double)
     /// The identity file is OUT OF DATE: published before the renderer this engine carries,
     /// which refuses it (-4 from `be_essence2_create`: the essence2 engines that carry the refusal;
-    /// essence2-v1.15.4, which this package pins, still opens such a file). A file
+    /// essence2-v1.15.5, which this package pins, still opens such a file). A file
     /// `Essence2Download` fetched is fetched again by `create` itself; this is thrown for a
     /// file your app keeps. Download it again (`Essence2Download.identity(agentCode:)`, or
     /// "Download model" in the agent's studio at bithuman.ai) — retrying the same file never
@@ -107,7 +107,15 @@ public final class Essence2Engine: @unchecked Sendable {
     /// The model's frame clock: Essence 2 renders 25 frames per second of audio.
     public static let framesPerSecond: Double = 25
 
-    private let handle: be_essence2_handle
+    /// The engine's handle. ★2.20.4: released when a session nobody watched is cut, and opened
+    /// again (a new session) for the next frame asked for: see Essence2Unwatched.swift.
+    private var handle: be_essence2_handle
+    /// False while the session is cut: no C call reaches the released handle.
+    private var handleOpen = true
+    /// What `create` opened, to open it again after a cut.
+    private let identityPath: String
+    private let readyTimeout: Double
+    private var unwatched: Essence2UnwatchedBinding?
     private let lock = NSLock()
     private var buffer: [UInt8]
     private var lastSpeech: Int32
@@ -137,7 +145,8 @@ public final class Essence2Engine: @unchecked Sendable {
     /// True once the engine can turn audio into speech frames.
     public var isReady: Bool {
         lock.lock(); defer { lock.unlock() }
-        return !closed && be_essence2_is_ready(handle) == 1
+        guard !closed else { return false }
+        return !handleOpen || be_essence2_is_ready(handle) == 1   // a cut session opens on demand
     }
 
     /// While metering refuses THIS session (its last pull or idle returned -3): the engine's
@@ -148,8 +157,10 @@ public final class Essence2Engine: @unchecked Sendable {
     }
     private var refusedNow = false
 
-    private init(handle: be_essence2_handle) {
+    private init(handle: be_essence2_handle, identityPath: String, readyTimeout: Double) {
         self.handle = handle
+        self.identityPath = identityPath
+        self.readyTimeout = readyTimeout
         self.buffer = []
         self.lastSpeech = be_essence2_pulled_speech_frames(handle)
         fitBuffer()
@@ -258,7 +269,7 @@ public final class Essence2Engine: @unchecked Sendable {
         default: throw Essence2KitError.identityUnreadable(path: identity.path)   // -2 (and -1: bad argument)
         }
         guard let h else { throw Essence2KitError.identityUnreadable(path: identity.path) }
-        let engine = Essence2Engine(handle: h)
+        let engine = Essence2Engine(handle: h, identityPath: identity.path, readyTimeout: readyTimeout)
         let t0 = Date()
         while !engine.isReady {
             if Date().timeIntervalSince(t0) > readyTimeout {
@@ -266,7 +277,72 @@ public final class Essence2Engine: @unchecked Sendable {
             }
             try await Task.sleep(nanoseconds: 40_000_000)
         }
+        engine.installUnwatchedCut()
         return engine
+    }
+
+    // MARK: - ★THE UNWATCHED CUT (2.20.4, Essence2Unwatched.swift)
+
+    /// The cut deciding this engine's session (nil after shutdown).
+    var unwatchedCut: Essence2UnwatchedCut? { lock.lock(); defer { lock.unlock() }; return unwatched?.cut }
+
+    /// Install the cut. `bind`: the 1 s timer and the app's background/foreground notifications.
+    @discardableResult
+    func installUnwatchedCut(clock: @escaping () -> TimeInterval = { Essence2FrameClock.now() },
+                             bind: Bool = true) -> Essence2UnwatchedCut? {
+        lock.lock(); defer { lock.unlock() }
+        if closed { return nil }
+        if let u = unwatched { return u.cut }
+        let cut = Essence2UnwatchedCut(
+            clock: clock,
+            end: { [weak self] r in self?.endSessionForCut(r) },
+            reopen: { [weak self] in self?.reopenAfterCut() ?? false })
+        unwatched = bind ? Essence2UnwatchedBinding(cut: cut) : Essence2UnwatchedBinding(unboundCut: cut)
+        return cut
+    }
+
+    /// End the session as a close does (the handle released; its final beat bills it up to now).
+    /// Queued audio and frames go with it; a reply in progress ends.
+    private func endSessionForCut(_ r: Essence2UnwatchedCut.Reason) {
+        lock.lock()
+        guard !closed, handleOpen else { lock.unlock(); return }
+        handleOpen = false
+        pending.removeAll(); pendingOffset = 0
+        replies.interrupted()
+        clock.endReply()
+        let h = handle
+        lock.unlock()
+        NSLog("[Essence2Kit] nobody watched for 60 s (%@): the session ends here, billed up to now", r.rawValue)
+        be_essence2_destroy(h)
+    }
+
+    /// Open the identity again: a new session. Blocking (runs on the cut's queue); true once ready.
+    private func reopenAfterCut() -> Bool {
+        lock.lock(); let gone = closed; lock.unlock()
+        if gone { return false }
+        var h: be_essence2_handle? = nil
+        let rc = identityPath.withCString { be_essence2_create($0, nil, 0, &h) }
+        guard rc == 0, let h else {
+            lock.lock(); if rc == -3 { refusedNow = true }; lock.unlock()
+            NSLog("[Essence2Kit] a frame was asked for again: the new session was refused (rc %d)", rc)
+            return false
+        }
+        let t0 = Date()
+        while be_essence2_is_ready(h) != 1 {
+            if Date().timeIntervalSince(t0) > readyTimeout { be_essence2_destroy(h); return false }
+            usleep(40_000)
+        }
+        lock.lock()
+        if closed { lock.unlock(); be_essence2_destroy(h); return false }
+        handle = h
+        handleOpen = true
+        refusedNow = false
+        lastSpeech = be_essence2_pulled_speech_frames(h)
+        clock.reset()
+        fitBuffer()
+        lock.unlock()
+        NSLog("[Essence2Kit] a frame was asked for again: a new session opened")
+        return true
     }
 
     /// Feed 16 kHz mono audio as Float in [-1, 1]. Never blocks: what the engine's ring cannot
@@ -276,6 +352,10 @@ public final class Essence2Engine: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !closed else { return }
         pending.append(contentsOf: samples.map { Int16(max(-1, min(1, $0)) * 32767) })
+        if !handleOpen, pending.count - pendingOffset > Essence2Engine.cutPendingCap {
+            // a cut session keeps at most the last 10 s of audio for when it opens again
+            pending.removeFirst(pending.count - Essence2Engine.cutPendingCap); pendingOffset = 0
+        }
         drainPending()
     }
 
@@ -284,8 +364,10 @@ public final class Essence2Engine: @unchecked Sendable {
 
     private var pending: [Int16] = []
     private var pendingOffset = 0
+    private static let cutPendingCap = 10 * 16_000
 
     private func drainPending() {   // caller holds `lock`
+        guard handleOpen else { return }
         while pendingOffset < pending.count {
             let n = min(3200, pending.count - pendingOffset)
             let rc = pending[pendingOffset..<pendingOffset + n].withUnsafeBufferPointer {
@@ -400,7 +482,7 @@ public final class Essence2Engine: @unchecked Sendable {
     /// Audio fed afterwards opens the next reply.
     public func flushTail() {
         lock.lock(); defer { lock.unlock() }
-        guard !closed else { return }
+        guard !closed, handleOpen else { return }
         drainPending()
         _ = be_essence2_end_utterance(handle)
     }
@@ -435,6 +517,8 @@ public final class Essence2Engine: @unchecked Sendable {
         -> (bytes: Int, width: Int, height: Int, kind: Essence2FrameKind, endsReply: Bool,
             index: Int, audioTime: Double?, events: [Essence2Event])? {
         guard !closed else { return nil }
+        // a frame asked for: a cut session opens again here (on the cut's queue; nil this time)
+        guard unwatched?.cut.frameRequested() ?? true, handleOpen else { return nil }
         drainPending()
         let paced = pacingValue == .realtime
         if paced {
@@ -514,6 +598,7 @@ public final class Essence2Engine: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !closed else { return }
         pending.removeAll(); pendingOffset = 0
+        guard handleOpen else { replies.interrupted(); clock.endReply(); return }
         be_essence2_reset(handle)
         lastSpeech = be_essence2_pulled_speech_frames(handle)
         replies.interrupted()
@@ -529,20 +614,25 @@ public final class Essence2Engine: @unchecked Sendable {
         lock.lock()
         if closed { lock.unlock(); return }
         closed = true
+        let open = handleOpen
+        handleOpen = false
+        let u = unwatched
+        unwatched = nil
         lock.unlock()
+        u?.stop()
         listenersLock.lock()
         isClosedForListeners = true
         let ls = Array(listeners.values); listeners.removeAll()
         listenersLock.unlock()
         for c in ls { c.finish() }
-        be_essence2_destroy(handle)
+        if open { be_essence2_destroy(handle) }   // a cut session's handle was released at the cut
     }
 
     /// Set when this engine's own runtime failed and it stopped rather than hand back idle
     /// frames forever (`be_essence2_render_status`); nil while it is healthy.
     public var runtimeFailure: String? {
         lock.lock(); defer { lock.unlock() }
-        guard !closed else { return nil }
+        guard !closed, handleOpen else { return nil }
         var buf = [CChar](repeating: 0, count: 512)
         var failures: Int64 = 0
         guard be_essence2_render_status(handle, &buf, Int32(buf.count), &failures) != 0 else { return nil }
@@ -558,7 +648,7 @@ public final class Essence2Engine: @unchecked Sendable {
     /// until then `width`/`height`/`isReady`/`runtimeFailure` after `shutdown()` read freed memory
     /// and could crash the app).
     private func dimsLocked() -> (w: Int, h: Int) {
-        guard !closed else { return lastDims }
+        guard !closed, handleOpen else { return lastDims }
         var w: Int32 = 0, h: Int32 = 0
         be_essence2_get_info(handle, &w, &h)
         lastDims = (Int(w), Int(h))
@@ -1187,7 +1277,7 @@ public enum Essence2Download {
 /// never against a checksum served beside the file.
 public enum Essence2Resources {
     /// Must equal `essence2Tag` in Package.swift (the tap's check-apple-engine-pin.sh grades it).
-    public static let releaseTag = "essence2-v1.15.4"
+    public static let releaseTag = "essence2-v1.15.5"
     static let base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/"
     static let files: [(name: String, sha256: String)] = [
         ("w2v_ess_fp16_v1.onnx", "7340a0350c340e059f0931d7381fad1ed8aa579cc4440fcc3223f136d9aaa8e5"),
