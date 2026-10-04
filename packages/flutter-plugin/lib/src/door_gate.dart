@@ -76,6 +76,9 @@ class BithumanEntitlementException extends BithumanAvatarException {
   String toString() => 'BithumanEntitlementException: $message';
 }
 
+/// bitHuman's model doors: the platform API and the site (the apex redirects every path to www).
+const Set<String> kBithumanDoorHosts = {'api.bithuman.ai', 'www.bithuman.ai', 'bithuman.ai'};
+
 /// The native stores' credential tag (Essence2Kit / Expression2Download `credentialTag`): 32 hex of
 /// SHA-256 over a fixed salt + the credential ("" when there is none). Never the credential.
 String credentialTag(String? credential) =>
@@ -83,12 +86,11 @@ String credentialTag(String? credential) =>
 
 /// What the door answered ONE request, or that it could not be asked.
 class DoorAnswer {
-  const DoorAnswer(this.status, {this.code, this.answeredByAskedHost = true, this.withdrawn = false}) : error = null;
+  const DoorAnswer(this.status, {this.code, this.answeredByAskedHost = true}) : error = null;
   const DoorAnswer.unreachable(Object this.error)
       : status = null,
         code = null,
-        answeredByAskedHost = false,
-        withdrawn = false;
+        answeredByAskedHost = false;
 
   /// The HTTP status; null when the door could not be asked.
   final int? status;
@@ -103,9 +105,6 @@ class DoorAnswer {
   /// Why the door could not be asked.
   final Object? error;
 
-  /// A public object URL answered 403/404/410: the object was withdrawn, a no for everyone.
-  final bool withdrawn;
-
   /// The door said yes to this credential: 2xx, or its redirect to the signed file URL.
   bool get granted => status != null && answeredByAskedHost && status! >= 200 && status! < 400;
 
@@ -114,14 +113,13 @@ class DoorAnswer {
   bool get denied =>
       status != null &&
       answeredByAskedHost &&
-      (withdrawn || status == 401 || status == 403 || (status == 404 && code == 'NOT_FOUND'));
+      (status == 401 || status == 403 || (status == 404 && code == 'NOT_FOUND'));
 
   @override
   String toString() =>
       status == null
           ? 'no answer ($error)'
-          : 'HTTP $status${code == null ? '' : ' $code'}${withdrawn ? ' (withdrawn)' : ''}'
-              '${answeredByAskedHost ? '' : ' (behind a redirect)'}';
+          : 'HTTP $status${code == null ? '' : ' $code'}${answeredByAskedHost ? '' : ' (behind a redirect)'}';
 }
 
 /// `error.code` of a door error body (`{"error": {"code": "NOT_FOUND", ...}}`), or null.
@@ -159,11 +157,15 @@ class DoorGate {
   DoorGate({
     DateTime Function()? clock,
     Uri Function(String code, String model)? door,
+    this.doorHosts = kBithumanDoorHosts,
     this.allowInsecure = false,
     this.timeout = const Duration(seconds: 20),
     this.log,
   })  : clock = clock ?? DateTime.now,
         door = door ?? bithumanEntitlementDoor;
+
+  /// bitHuman's door hosts: a redirect to one of them is never a door's yes ([ask]).
+  final Set<String> doorHosts;
 
   final DateTime Function() clock;
 
@@ -290,7 +292,7 @@ class DoorGate {
 
   /// Applies the door's [answer] to [credential]'s mark for [entry].
   ///
-  /// A 404 `NOT_FOUND` (or a withdrawn object) also drops [entry]'s PUBLIC mark, whoever asked: the door
+  /// A 404 `NOT_FOUND` also drops [entry]'s PUBLIC mark, whoever asked: the door
   /// serves a public avatar to any credential (a credentialed non-owner falls through to its anonymous
   /// arm), so "not found" for one credential means the avatar is not public now (made private, deleted).
   /// Without this a public mark earned before the owner made the avatar private would keep opening the
@@ -301,16 +303,16 @@ class DoorGate {
       await noteGranted(cacheDir, entry, credential);
     } else if (answer.denied) {
       await noteDenied(cacheDir, entry, credential);
-      if (_norm(credential) != null && (answer.withdrawn || answer.status == 404)) {
+      if (_norm(credential) != null && answer.status == 404) {
         await noteDenied(cacheDir, entry, null);
       }
     }
   }
 
   /// One GET of [u] carrying exactly [credential] (the `api-secret` header), redirects NOT followed:
-  /// the first host's answer. [objectStore]: [u] is a public object URL, not a door, asked with HEAD; its
-  /// 403/404/410 means the object was withdrawn (a no for everyone). Never throws.
-  Future<DoorAnswer> ask(Uri u, String? credential, {bool objectStore = false}) async {
+  /// the first host's answer. A 3xx counts only when it leaves [doorHosts] (and the asked host); any other
+  /// redirect is no answer. Never throws.
+  Future<DoorAnswer> ask(Uri u, String? credential) async {
     if (!(u.scheme == 'https' || (allowInsecure && u.scheme == 'http'))) {
       return DoorAnswer.unreachable(BithumanAvatarException('refusing a non-https door: $u'));
     }
@@ -319,20 +321,29 @@ class DoorGate {
     try {
       return await () async {
         client = HttpClient();
-        // A public object is asked with HEAD: its status is the answer, and a GET would start the file.
-        final req = objectStore ? await client!.headUrl(u) : await client!.getUrl(u);
+        final req = await client!.getUrl(u);
         req.followRedirects = false;
         if (c != null) req.headers.set('api-secret', c);
         final res = await req.close();
         final status = res.statusCode;
         String? code;
-        if (!objectStore && (status == 404 || status == 401 || status == 403)) {
+        if (status == 404 || status == 401 || status == 403) {
           code = doorErrorCode(await readHead(res, 4096));
         } else {
           await res.listen((_) {}).cancel();   // the status is the answer: never the file
         }
-        return DoorAnswer(status,
-            code: code, withdrawn: objectStore && (status == 403 || status == 404 || status == 410));
+        // A redirect is the door's yes only when it points at the signed file URL the door minted: OFF
+        // the asked host and off bitHuman's door hosts. A redirect from one door host to another (the
+        // apex to www, a trailing slash) answers nothing about this credential (PR #202 review).
+        if (status >= 300 && status < 400) {
+          final loc = res.headers.value(HttpHeaders.locationHeader);
+          final next = (loc == null || loc.isEmpty) ? null : u.resolve(loc);
+          if (next == null || next.host == u.host || doorHosts.contains(next.host)) {
+            return DoorAnswer.unreachable(BithumanAvatarException(
+                'HTTP $status to ${next?.host ?? 'no location'}: a redirect within bitHuman\'s door hosts is no answer'));
+          }
+        }
+        return DoorAnswer(status, code: code);
       }()
           .timeout(timeout);
     } catch (e) {
@@ -344,17 +355,42 @@ class DoorGate {
 
   /// The rule for a KEPT copy whose door is a separate request ([doorUrl]): returns when [credential]
   /// may open it, throws [BithumanEntitlementException] when it may not. With a fresh mark the open is
-  /// immediate and the door is asked in the background; without one the door is asked first.
+  /// immediate and (with [checkLater]) the door is asked in the background; without one the door is
+  /// asked first.
   Future<void> openKept(String cacheDir, String entry, Uri doorUrl, String? credential,
-      {required String what, bool objectStore = false}) async {
+      {required String what, bool checkLater = true}) async {
     if (await mayOpenWithoutDoor(cacheDir, entry, credential)) {
-      _checkLater(cacheDir, entry, doorUrl, credential, what: what, objectStore: objectStore);
+      if (checkLater) _checkLater(cacheDir, entry, doorUrl, credential, what: what);
       return;
     }
-    final a = await ask(doorUrl, credential, objectStore: objectStore);
+    final a = await ask(doorUrl, credential);
     await note(cacheDir, entry, credential, a);
     if (a.granted) return;
     throw refusal(what, a, kept: true);
+  }
+
+  /// A path an app hands straight to `BithumanAvatar.load` (or `setExpression2AgentDir`), which no
+  /// installer here sees (2.6.36, defence in depth). The installers return predictable paths
+  /// (`<cacheDir>/<id>.imx`, `<cacheDir>/<id>.elevatedir`, `<cacheDir>/<code>`), so an app that saved one
+  /// and loads it later would skip every gate. When [path] sits in a directory that holds this package's
+  /// marks (`.door-auth/`), it opens only as an installer would open it: a fresh mark for [credential], or
+  /// the platform door's yes asked now (fail closed). A path anywhere else is the app's own file: not gated.
+  Future<void> openPath(String path, String? credential) async {
+    var p = path;
+    while (p.length > 1 && (p.endsWith('/') || p.endsWith(r'\'))) {
+      p = p.substring(0, p.length - 1);
+    }
+    final cut = p.lastIndexOf(RegExp(r'[/\\]'));
+    if (cut <= 0) return;   // an agent code (Android), or a bare name: not a kept path
+    final dir = p.substring(0, cut), name = p.substring(cut + 1);
+    if (name.isEmpty || !Directory('$dir/$_dir').existsSync()) return;
+    final (String code, String model) = name.endsWith('.imx')
+        ? (name.substring(0, name.length - 4), '')                      // downloadAgentImx: the agent's own model
+        : name.endsWith('.elevatedir')
+            ? (name.substring(0, name.length - 11), 'essence-2')        // downloadEssence2Bundle
+            : (name, 'expression-2');                                     // the Expression 2 installers
+    if (code.isEmpty) return;
+    await openKept(dir, name, door(code, model), credential, what: 'load:$name', checkLater: false);
   }
 
   /// Before a download whose bytes come from somewhere other than the door: the door says yes to
@@ -365,12 +401,11 @@ class DoorGate {
     if (!a.granted) throw refusal(what, a, kept: false);
   }
 
-  void _checkLater(String cacheDir, String entry, Uri doorUrl, String? credential,
-      {required String what, bool objectStore = false}) {
+  void _checkLater(String cacheDir, String entry, Uri doorUrl, String? credential, {required String what}) {
     final k = _key(cacheDir, entry, credential);
     if (_checking.containsKey(k)) return;
     final run = () async {
-      final a = await ask(doorUrl, credential, objectStore: objectStore);
+      final a = await ask(doorUrl, credential);
       await note(cacheDir, entry, credential, a);
       if (a.denied) log?.call('door-auth:$what the door refused this credential ($a): the next open is refused');
     }();
@@ -398,9 +433,10 @@ class DoorGate {
 }
 
 /// The platform door for [code] and [model], asked for a JSON grant (`redirect=false`): one request, no
-/// file. The door is owner-scoped: it answers another account's key 404 NOT_FOUND.
+/// file. The door is owner-scoped: it answers another account's key 404 NOT_FOUND. An empty [model] asks
+/// about the agent's own model (an `.imx`, whatever its family), as [downloadAgentImx]'s door does.
 Uri bithumanEntitlementDoor(String code, String model) => Uri.https('api.bithuman.ai',
-    '/v1/agent/${Uri.encodeComponent(code)}/model/download', {'model': model, 'redirect': 'false'});
+    '/v1/agent/${Uri.encodeComponent(code)}/model/download', {if (model.isNotEmpty) 'model': model, 'redirect': 'false'});
 
 DoorGate _entitlementGate = DoorGate();
 
