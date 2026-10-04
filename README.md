@@ -34,13 +34,20 @@ Real-time, lip-synced avatars rendered on iPhone, iPad and Mac: Essence 2 (a pho
 Expression 2 (any character). Pass in 16 kHz speech from any voice stack; draw the frames.
 
 ```swift
-.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "2.20.4")
+.package(url: "https://gitlab.com/bithuman/sdk/homebrew-bithuman.git", from: "2.20.5")
 ```
 
 The Swift package lives in this repository, which is also our Homebrew tap, so Xcode and
 SwiftPM show its identity as `homebrew-bithuman`. That name is expected; in `Package.swift`
 dependencies write `.product(name: "Expression2", package: "homebrew-bithuman")` (or
 `Essence2Kit`).
+
+**Moving from the GitHub URL (2.20.4 and earlier).** This repository moved from
+`github.com/bithuman-product/homebrew-bithuman` to `gitlab.com/bithuman/sdk/homebrew-bithuman`, and
+from 2.20.5 the package's binary frameworks and runtime files download from
+`downloads.bithuman.ai`, so nothing resolves through GitHub. Replace the package URL with the one
+above (in Xcode: remove the package, then add it again by the new URL) and resolve again. The
+package name (`homebrew-bithuman`), your `.product(...)` lines and the code you import do not change.
 
 Resolving the package downloads all of its binary frameworks, about 125 MB today (the
 legacy `bitHumanKit` is 56 MB of that), even for an app that imports only `Expression2`.
