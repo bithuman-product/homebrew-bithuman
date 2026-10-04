@@ -15,9 +15,9 @@ or `printf %s "$KEY" | bithuman login --with-token`. Full contract:
 https://docs.bithuman.ai/platforms/cli/reference
 
 ## Install
-- macOS (Apple Silicon): `brew install bithuman-product/bithuman/bithuman-cli`
+- macOS (Apple Silicon): `brew install bithuman/bithuman/bithuman-cli`
   (the full name implies the tap; the installed command is `bithuman`)
-- macOS + Linux (x86_64/aarch64): `curl -fsSL https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/install.sh | sh`
+- macOS + Linux (x86_64/aarch64): `curl -fsSL https://install.bithuman.ai | sh`
 - No package manager: the per-target tarball from the newest `cli-v*` release,
   https://downloads.bithuman.ai/homebrew-bithuman/<tag>/<asset> (today `cli-v2.8.8`;
   https://downloads.bithuman.ai/homebrew-bithuman/latest.json names the newest) —
@@ -53,7 +53,7 @@ login`). No `pip install` needed for chat.
 
 ## Swift package (Apple SDK)
 This repository is also the bitHuman Apple SDK, a Swift package for iPhone, iPad
-and Mac apps: `.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "<version>")`,
+and Mac apps: `.package(url: "https://gitlab.com/bithuman/sdk/bithuman-swift", from: "3.0.0")`,
 with the version from https://docs.bithuman.ai/versions.json ("swift"). Products:
 `Expression2` (iOS 16 / macOS 13) and `Essence2Kit` (iOS 26 / macOS 26), or `Essence2`
 for the C interface. `bitHumanKit` is legacy. The SDK renders only: pass in 16 kHz

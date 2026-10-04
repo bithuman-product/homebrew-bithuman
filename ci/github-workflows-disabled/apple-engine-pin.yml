@@ -71,7 +71,7 @@ jobs:
           # A1 NO-SOURCE (2.6.20): the pod links the published engine binaries; a bootstrap that
           # clones the private engine repo again is refused.
           arm "bootstrap clones the private engine repository again" \
-              's|^fetch_tap_zip() {$|git clone --depth 1 https://github.com/bithuman-product/bithuman-models "$TMP/m"\nfetch_tap_zip() {|'
+              's|^fetch_tap_zip() {$|git clone --depth 1 https://gitlab.com/bithuman/models/bithuman-models "$TMP/m"\nfetch_tap_zip() {|'
           # A2 X2-AGREES: the pod's Expression 2 pins drift from Package.swift's.
           arm "the pod stages an older Expression 2 release" \
               's|EXPRESSION2_RELEASE:-v[0-9.]*|EXPRESSION2_RELEASE:-v2.7.0|'

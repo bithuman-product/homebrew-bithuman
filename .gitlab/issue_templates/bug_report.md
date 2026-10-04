@@ -1,9 +1,4 @@
----
-name: Bug report
-about: Something in this repo (the binary distribution, examples, or docs) is broken
-title: ''
-labels: bug
----
+<!-- Bug report template. Security issues: email hello@bithuman.ai instead (see SECURITY.md). SDK runtime questions: hello@bithuman.ai. Docs: https://docs.bithuman.ai -->
 
 <!--
 Heads up: the bitHumanKit *source* is private. This template is for problems

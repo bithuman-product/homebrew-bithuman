@@ -1,8 +1,8 @@
 <!--
-Thanks for sending a PR! A few notes before you submit:
+Thanks for sending a merge request! A few notes before you submit:
 
-- This repo accepts PRs for Examples/, docs/, README, and packaging metadata.
-- PRs that bump SDK versions, edit binaryTarget URLs, or change release
+- This project accepts merge requests for Examples/, docs/, README, and packaging metadata.
+- Merge requests that bump SDK versions, edit binaryTarget URLs, or change release
   artifacts will usually be closed — those are managed by release automation.
 - See CONTRIBUTING.md for the full picture.
 -->
@@ -25,10 +25,9 @@ What problem does this solve, or what gap does it fill?
 
 ## How I tested it
 
-- [ ] `ci/run-local.sh` on the PR head — output pasted in a PR comment (GitHub Actions is off)
+- [ ] `ci/run-local.sh` on the exact MR head — output pasted in an MR comment (CI runs locally)
 - [ ] Built locally (Xcode version: ____)
 - [ ] Ran the example end-to-end on (hardware: ____)
-- [ ] Verified docs render with `mintlify dev`
 - [ ] N/A — docs/text-only change
 
 ## Checklist

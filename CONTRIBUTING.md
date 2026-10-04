@@ -49,9 +49,9 @@ comment (see `ci/README.md`). Red = no merge.
 
 ```sh
 ci/run-local.sh
-brew tap bithuman-product/bithuman ./
-brew audit --strict bithuman-product/bithuman/bithuman-cli
-brew install --build-from-source bithuman-product/bithuman/bithuman-cli  # for local formula edits
+brew tap bithuman/bithuman ./
+brew audit --strict bithuman/bithuman/bithuman-cli
+brew install --build-from-source bithuman/bithuman/bithuman-cli  # for local formula edits
 ```
 
 `brew audit` should be clean (or fail in a way that's clearly preexisting). `brew install` should complete without warnings on a fresh machine.

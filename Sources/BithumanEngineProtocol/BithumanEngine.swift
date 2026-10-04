@@ -1,6 +1,6 @@
 // BithumanEngine.swift — the COMMON ENGINE INTERFACE (Layer 0).
 //
-// Canonical home: github.com/bithuman-product/homebrew-bithuman
+// Canonical home: gitlab.com/bithuman/sdk/homebrew-bithuman
 // (Sources/BithumanEngineProtocol — the `BithumanEngineProtocol` SwiftPM
 // product, zero native deps; builds macOS + iOS; inlined from the archived
 // bithuman-engine-protocol repo). Depended on by BOTH engine SDKs

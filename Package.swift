@@ -40,22 +40,22 @@ import PackageDescription
 
 // The legacy bitHumanKit archive.
 let releaseTag = "v2.4.0"
-let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(releaseTag)"
+let releaseBase = "https://downloads.bithuman.ai/homebrew-bithuman/\(releaseTag)"
 
 // The Expression 2 archives.
 let expression2Tag = "v2.20.4"
-let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
+let expression2Base = "https://downloads.bithuman.ai/homebrew-bithuman/\(expression2Tag)"
 
 // The Essence 2 archives. Essence2Kit fetches its runtime files from this release too.
 let essence2Tag = "essence2-v1.15.5"
-let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
+let essence2Base = "https://downloads.bithuman.ai/homebrew-bithuman/\(essence2Tag)"
 
 // EngineCore (macOS engine core) ships on its OWN tap tag: essence2-v1.15.0's EngineCore had
 // its internal C++ symbols linkable (a .a exposes private externs); enginecore-v1.0.1 is the
 // restricted rebuild (bithuman-models #1636). enginecore-v1.0.2 is the same core built for
 // macOS 13.0, this package's floor (bithuman-models #1723). libessence2 and Expression 2 are unchanged.
 let enginecoreTag = "enginecore-v1.0.2"
-let enginecoreBase = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(enginecoreTag)"
+let enginecoreBase = "https://downloads.bithuman.ai/homebrew-bithuman/\(enginecoreTag)"
 
 let package = Package(
     name: "bithuman",
