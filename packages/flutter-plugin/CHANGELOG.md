@@ -80,6 +80,21 @@ worked before changes, except that iOS and macOS now refuse an engine name they 
 
 ### Fixed and added
 
+* **Android, Essence 2: a cached private avatar opens only for the account it was downloaded for** (`essence2-android`
+  0.9.4, a security patch). Another API secret on the same phone gets the refusal a download would (`404 Agent not
+  found`). After the update, the first open of each cached avatar asks bitHuman once (nothing is downloaded again), so
+  that open needs the network. Engine, rendering and billing are unchanged.
+* **Android, Expression 2: an installed avatar picks up updates** (`expression2-android` 0.6.0). Opening an
+  avatar already on the phone returns at once and checks for a newer published version in the background, at most
+  once an hour; a changed file (for example a repaired idle clip) is installed beside the old one and used from the
+  next `load`. Opening an installed avatar no longer depends on the network. If the app is closed while the phone
+  prepares an avatar for the first time, the preparation finishes in the background and the next open is fast. Your
+  app's merged manifest gains the engine's job service (only the system can bind it). A session bills from its first
+  frame, idle frames included.
+* **Android, Expression 2: a cached private avatar opens only for the account it was downloaded for.** Another
+  API secret on the same phone gets the refusal a download would (`404 Agent not found`). After the update, the first
+  open of each cached avatar asks bitHuman once (nothing is downloaded again), so that open needs the network.
+
 * **`pushAudio` works on Android.** Until now Android had no `pushAudio`, the call the docs taught for your own
   speech: it threw `MissingPluginException`. It now takes the 16 kHz speech, converts it to 24 kHz and plays it through
   the same path as `playSpeakerPCM`, so it is heard and the lips follow it; call `notifyTurnEnd()` after the last chunk.
