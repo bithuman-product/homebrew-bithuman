@@ -87,7 +87,10 @@ void main() {
     final a = _agent('A52DHS2219', door.url('127.0.0.1', '/api/agents/A52DHS2219/model/download').toString());
     final p = await dl().download(a, tmp.path, allowedHosts: trustedLoopback);
     expect(await File(p).length(), published.length);
-    expect(door.keys, [null]);
+    // 2.6.36: then the PLATFORM door for the code, with the same (absent) credential: ITS answer is the mark,
+    // never the row's model_url's (PR #202 review: bitHuman's hosts redirect any code).
+    expect(door.keys, [null, null]);
+    expect(door.hits.map((r) => r.uri.path), ['/api/agents/A52DHS2219/model/download', '/v1/agent/A52DHS2219/model/download']);
   });
 
   test('a redirect from a host that is not a door, to a host not allowed, is refused; nothing is written', () async {

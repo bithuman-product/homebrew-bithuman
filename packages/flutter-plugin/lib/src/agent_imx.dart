@@ -28,12 +28,17 @@
 // refusal, or a door that cannot be asked, fails the call with [BithumanEntitlementException] (the kept
 // file stays). The door asked about a kept file is always the platform door for the agent's code
 // (owner-scoped, as the native stores ask it), with this call's credential, never the catalog's
-// `model_url`. Whether the kept file is still the published one is asked in the background afterwards
+// `model_url`, and only that door's answer writes or drops a mark: a row's model_url on one of
+// bitHuman's hosts can redirect for ANY code (the apex to www, a trailing slash, www's /embed/<code>), so
+// a download from it marks nothing by itself; the platform door is then asked once, with the same (absent)
+// credential. A door's yes is its redirect OFF bitHuman's door hosts (the signed file URL); a redirect
+// from one door host to another is followed and is no answer. Whether the kept file is still the published one is asked in the background afterwards
 // (its published length; the same request renews or drops the mark), and a different file is
 // downloaded then, for the NEXT open. Every Essence 2 character was re-published on 2026-10-01 (the
 // mouth-corner fix) and the pinned engine refuses the old files, so a kept Essence 2 file older than
 // [kImxStaleBefore] is fetched again ONCE before it opens — the old file stays in place until the new
-// one is complete, and opens if that download fails while a door said yes (or the mark is fresh). The
+// one is complete, and opens if that download fails only for a fresh mark or the PLATFORM door's yes to
+// this call's credential (never the row's model_url's answer). The
 // new file is stamped with the current time, so the rule never fires for it again. On a device whose
 // clock reads before the cutoff the rule is off (old and new cannot be told apart).
 import 'dart:async';
@@ -46,11 +51,7 @@ import 'door_gate.dart';
 
 /// bitHuman's model doors: the platform API and the site. A redirect a door issues is followed (it
 /// points at the signed file URL the door just minted); so is a redirect to one of these hosts.
-const Set<String> kBithumanModelHosts = {
-  'api.bithuman.ai',
-  'www.bithuman.ai',
-  'bithuman.ai',
-};
+const Set<String> kBithumanModelHosts = kBithumanDoorHosts;
 
 /// The platform's model door for [code] (it redirects to a signed file URL).
 Uri bithumanModelDoor(String code) =>
@@ -77,7 +78,8 @@ class AgentImxDownloader {
         staleBefore = staleBefore ?? kImxStaleBefore,
         door = door ?? bithumanModelDoor,
         doorHosts = doorHosts ?? kBithumanModelHosts,
-        gate = gate ?? DoorGate(clock: clock, allowInsecure: allowInsecure, log: log);
+        gate = gate ??
+            DoorGate(clock: clock, doorHosts: doorHosts ?? kBithumanDoorHosts, allowInsecure: allowInsecure, log: log);
 
   final DateTime Function() clock;
 
@@ -134,13 +136,14 @@ class AgentImxDownloader {
     final trusted = {...doorHosts, ...?allowedHosts};
     final entry = markEntry(agent.id);
     final what = 'imx:${agent.id}';
-    // A download's own answer counts for the mark only when its first host is one of bitHuman's doors
-    // AND the request names THIS code (the platform door with a key; without one the catalog's www door,
-    // `/api/agents/<code>/model/download`): any other host's yes is not about an entitlement, and a
-    // door's yes about ANOTHER code (a stale or tampered row whose model_url names a public avatar) must
-    // never become a public mark for this code's kept file.
-    final markable =
-        src == entDoor || (doorHosts.contains(src.host) && src.pathSegments.contains(agent.id));
+    // A download's own answer counts for the mark only when it IS the platform door for this code
+    // (always, with a key). A catalog row's model_url is not: a stale or tampered row can name this code
+    // with a URL on one of bitHuman's hosts that answers ANY code with a redirect (production, measured
+    // 2026-10-03: the apex 307s every path to www, www 308s a trailing slash, and www's /embed/<code>
+    // 307s to agent.viewer.bithuman.ai), and a redirect is not a yes about this code. Without a key the
+    // file comes from the row's model_url as before, and the platform door is then asked (no credential)
+    // for the mark: [_markFromDoor].
+    final markable = src == entDoor;
 
     if (await local.exists() && await local.length() > _kMinImxBytes) {
       // ★ONE CREDENTIAL PER CALL (2.6.36): [key] is the only credential this call asks with, and the
@@ -160,13 +163,15 @@ class AgentImxDownloader {
         final a = said ?? DoorAnswer.unreachable(failed ?? 'no answer');
         if (markable) await gate.note(cacheDir, entry, key, a);
         if (failed == null) {
+          if (!markable) await _markFromDoor(cacheDir, entry, key, entDoor);
           log?.call('$what the kept file predates ${staleBefore.toIso8601String()}: downloaded again');
           return local.path;
         }
         if (markable && a.denied) throw gate.refusal(what, a, kept: true);
-        // The download failed: the kept (older) file opens only for an entitlement: a fresh mark, a
-        // door's yes just now, or the platform door's yes to this credential (asked now).
-        if (!(markable && a.granted) && !marked) {
+        // The download failed: the kept (older) file opens only for an entitlement: a fresh mark, or the
+        // PLATFORM door's yes to this credential (its answer to this download, or asked now). Never the
+        // row's model_url's answer: the kept file may be another account's.
+        if (!marked && !(src == entDoor && a.granted)) {
           final d = src == entDoor ? a : (await _check(entDoor, trusted, key)).door;
           if (src != entDoor) await gate.note(cacheDir, entry, key, d);
           if (!d.granted) throw gate.refusal(what, d, kept: true);
@@ -204,8 +209,19 @@ class AgentImxDownloader {
       if (markable && said != null) await gate.note(cacheDir, entry, key, said!);
       rethrow;
     }
-    if (markable) await gate.note(cacheDir, entry, key, said ?? const DoorAnswer(200));
+    if (markable) {
+      await gate.note(cacheDir, entry, key, said ?? const DoorAnswer(200));
+    } else {
+      await _markFromDoor(cacheDir, entry, key, entDoor);
+    }
     return local.path;
+  }
+
+  /// After a download from a catalog row's model_url (no key): the platform door for this code is asked
+  /// with the same (absent) credential, and ITS answer marks the file (a yes: public, 7 days) or not. One
+  /// request, redirect not followed. Best effort: no answer leaves no mark, and the next open asks first.
+  Future<void> _markFromDoor(String cacheDir, String entry, String? key, Uri entDoor) async {
+    await gate.note(cacheDir, entry, key, await gate.ask(entDoor, key));
   }
 
   bool _isStale(File f, BithumanAgent agent) {
@@ -241,7 +257,6 @@ class AgentImxDownloader {
       final res = await req.close();
       final code = res.statusCode;
       if (code >= 300 && code < 400) {
-        door ??= DoorAnswer(code);
         final loc = res.headers.value(HttpHeaders.locationHeader);
         await res.drain<void>().catchError((_) {});
         if (loc == null || loc.isEmpty) {
@@ -252,6 +267,10 @@ class AgentImxDownloader {
         if (!doorHosts.contains(u.host) && !trusted.contains(next.host)) {
           throw BithumanAvatarException('.imx download: refusing a redirect to an untrusted host: ${next.host}');
         }
+        // A door's yes is its redirect OFF bitHuman's door hosts (the signed file URL it minted). A
+        // redirect from one door host to another (the apex to www, a trailing slash) is not an answer:
+        // it is followed, and the next door's answer counts.
+        if (door == null && doorHosts.contains(u.host) && !doorHosts.contains(next.host)) door = DoorAnswer(code);
         u = next;
         continue;
       }
