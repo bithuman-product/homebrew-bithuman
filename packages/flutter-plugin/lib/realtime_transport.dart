@@ -367,7 +367,7 @@ class WebRTCTransport implements RealtimeTransport {
   }
 }
 
-/// LOCAL mode (macOS): the on-device converse brain via the plugin, no cloud.
+/// LOCAL mode (macOS, iOS, Android): the on-device converse brain via the plugin, no cloud.
 /// Status + captions come from the plugin's converse EventChannel; the avatar
 /// + VP-IO audio are driven natively, so this transport is thin.
 class LocalConverseTransport implements RealtimeTransport {
@@ -378,6 +378,9 @@ class LocalConverseTransport implements RealtimeTransport {
     this.voice,
     this.vadThreshold = 0,
     this.systemPrompt = '',
+    this.replySource,
+    this.sttDir,
+    this.maxSentences = 0,
   });
   final VoiceHost avatar;
   final String ggufPath;
@@ -385,6 +388,17 @@ class LocalConverseTransport implements RealtimeTransport {
   final String? voice;
   final int vadThreshold;
   final String systemPrompt;
+
+  /// The hybrid brain (Android): speech in and the voice stay on the device,
+  /// and the reply comes from here — e.g. a cheap cloud text model behind the
+  /// app's server, streamed. Given the conversation (`role`/`content` maps:
+  /// the bounded history and the user's turn), it returns the reply text as a
+  /// stream of pieces; the subscription is cancelled when the user cuts in.
+  /// Null = the on-device model at [ggufPath].
+  final Stream<String> Function(List<Map<String, String>> messages)? replySource;
+  final String? sttDir;
+  final int maxSentences;
+  final _replies = <int, StreamSubscription<String>>{};
 
   final _status = StreamController<TransportStatus>.broadcast();
   final _bot = StreamController<String>.broadcast();
@@ -440,6 +454,9 @@ class LocalConverseTransport implements RealtimeTransport {
         voice: voice,
         vadThreshold: vadThreshold,
         systemPrompt: systemPrompt,
+        replyMode: replySource == null ? 'local' : 'host',
+        sttDir: sttDir,
+        maxSentences: maxSentences,
       );
       _evSub = avatar.converseEvents.listen(_onEvent);
       // The native mic only exists after localAudioStart, so a mute requested
@@ -493,11 +510,42 @@ class LocalConverseTransport implements RealtimeTransport {
         _interrupt.add(null); // new user turn → flush the bot caption
       case 'bot':
         _bot.add(ev['text'] as String? ?? '');
+      case 'reply_request':
+        _startReply(ev['id'] as int, ev['messages'] as List<dynamic>? ?? const []);
+      case 'reply_cancel':
+        _replies.remove(ev['id'] as int)?.cancel();
     }
+  }
+
+  void _startReply(int id, List<dynamic> raw) {
+    final source = replySource;
+    if (source == null) return;
+    final messages = [
+      for (final m in raw)
+        {
+          'role': '${(m as Map)['role']}',
+          'content': '${m['content']}',
+        },
+    ];
+    _replies[id] = source(messages).listen(
+      (piece) => avatar.localReplyText(id, piece),
+      onError: (Object _) {
+        _replies.remove(id);
+        avatar.localReplyText(id, '', done: true, result: 3);
+      },
+      onDone: () {
+        if (_replies.remove(id) != null) avatar.localReplyText(id, '', done: true);
+      },
+      cancelOnError: true,
+    );
   }
 
   @override
   Future<void> stop() async {
+    for (final s in _replies.values) {
+      await s.cancel();
+    }
+    _replies.clear();
     await avatar.localAudioStop();
     await _evSub?.cancel();
     _evSub = null;
@@ -540,7 +588,7 @@ class LocalConverseTransport implements RealtimeTransport {
 /// what the A/B measures). Local mode is unaffected — no cloud transport.
 const String _kTransportDefine = DevLevers.transport;
 
-/// Platform-conditional factory. Local mode (macOS/iOS) → on-device
+/// Platform-conditional factory. Local mode (macOS/iOS/Android) → on-device
 /// converse; EVERY cloud platform — Android, iOS, macOS — → WebSocket + the
 /// plugin's native audio (unless [_kTransportDefine] opts into WebRTC — see
 /// above). Adding a new transport = one branch here, no UI change.
@@ -659,9 +707,9 @@ RealtimeTransport pickTransport({
 ///
 ///   1. LOCAL is a request for a CAPABILITY, not a name. An explicit
 ///      `localMode` that carries a brain on disk wins over any override — and
-///      is refused where the registry says the brain cannot run (Apple only:
-///      it binds Apple SpeechAnalyzer), falling through to a cloud transport
-///      rather than failing.
+///      is refused where the registry says the brain cannot run (anything but
+///      macOS, iOS and Android), falling through to a cloud transport rather
+///      than failing.
 ///   2. A NAMED transport (`transportOverride`, else `BITHUMAN_TRANSPORT`),
 ///      matched case-insensitively against the registry. A name that needs the
 ///      local brain is not reachable this way — the brain has no path here — and

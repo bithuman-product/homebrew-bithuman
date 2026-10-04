@@ -26,6 +26,13 @@ const Map<String, Map<String, String>> unsupported = {
     // Load progress is an Android channel; iOS and macOS send no load events yet.
     'ai.bithuman.avatar/load cancel':
         'no load events on iOS / macOS; BithumanAvatar.cancelLoad answers false on MissingPluginException',
+    // The Android hybrid brain (replyMode 'host'). LocalConverseTransport calls it only for a
+    // `reply_request` event, which the Apple brain (libconverse, its own reply) never emits.
+    'ai.bithuman.avatar localReplyText':
+        'Android hybrid brain only; sent only in answer to a reply_request event, which iOS / macOS never emit',
+    // Measurement: recorded speech into the Android brain on a debuggable build.
+    'ai.bithuman.avatar localInjectWav':
+        'Android measurement call (debuggable builds); not used by any transport, a caller gets MissingPluginException',
   },
 };
 

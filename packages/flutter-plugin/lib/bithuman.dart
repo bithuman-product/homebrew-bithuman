@@ -468,12 +468,13 @@ class BithumanAvatar implements VoiceHost {
   }
 
   /// Whether LOCAL mode (the on-device converse brain) can run on this OS.
-  /// The brain binds Apple's SpeechAnalyzer, which is `@available(macOS 26.0,
+  /// On Apple the brain binds SpeechAnalyzer, which is `@available(macOS 26.0,
   /// iOS 26.0)`, so on older systems [localAudioStart] would fail with
-  /// UNSUPPORTED_OS at session start. Probe this once at startup and disable the
-  /// LOCAL-mode toggle (with a clear reason) when it returns false, rather than
-  /// surfacing a cryptic runtime error. False on non-Apple platforms and on
-  /// older plugin builds without the probe.
+  /// UNSUPPORTED_OS at session start. On Android it needs an arm64 device on
+  /// Android 10+ whose brain libraries load. Probe this once at startup and
+  /// disable the LOCAL-mode toggle (with a clear reason) when it returns false,
+  /// rather than surfacing a cryptic runtime error. False on other platforms and
+  /// on older plugin builds without the probe.
   static Future<bool> isLocalModeSupported() async {
     try {
       return await _channel.invokeMethod<bool>('isLocalModeSupported') ?? false;
@@ -482,13 +483,24 @@ class BithumanAvatar implements VoiceHost {
     }
   }
 
-  /// LOCAL mode (macOS): run the on-device converse brain (Apple SpeechAnalyzer
-  /// → Qwen → Supertonic) instead of the cloud Realtime WebSocket. Reuses the
-  /// same VP-IO audio + avatar Texture as [audioStart]; the brain feeds the
-  /// avatar lipsync + speaker directly on-device. [ggufPath] is the local LLM
-  /// .gguf; [supertonicAssets] is the Supertonic ONNX assets dir. The metered
-  /// avatar render still needs your API secret — the `apiSecret:` passed to
-  /// [load] (or BITHUMAN_API_SECRET in the process environment).
+  /// LOCAL mode: run the on-device converse brain instead of the cloud Realtime
+  /// WebSocket — on macOS/iOS Apple SpeechAnalyzer → Qwen → Supertonic
+  /// (libconverse), on Android Moonshine → llama.cpp → Supertonic. Reuses the
+  /// same audio + avatar Texture as [audioStart]; the brain feeds the avatar
+  /// lipsync + speaker directly on-device. [ggufPath] is the local LLM .gguf;
+  /// [supertonicAssets] is the Supertonic ONNX assets dir. On Android the
+  /// Supertonic dir holds sherpa-onnx's int8 layout and the speech-in models sit
+  /// in `stt/` next to the .gguf (see the plugin README, "Android LOCAL mode").
+  /// The metered avatar render still needs your API secret — the `apiSecret:`
+  /// passed to [load] (or BITHUMAN_API_SECRET in the process environment).
+  ///
+  /// Android, [replyMode] `'host'` (the hybrid brain): speech-to-text and the
+  /// Supertonic voice stay on the device and the app supplies the reply — for
+  /// every `{"kind":"reply_request","id":int,"messages":[{role,content}...]}`
+  /// event it streams text back with [localReplyText], and it drops the stream
+  /// on `{"kind":"reply_cancel","id":int}` (the user cut in). No GGUF is loaded;
+  /// [sttDir] names the speech-to-text model directory (default `stt/` beside
+  /// the Supertonic dir) and [maxSentences] caps a spoken reply (0 = default 3).
   @override
   Future<void> localAudioStart({
     required String ggufPath,
@@ -496,6 +508,9 @@ class BithumanAvatar implements VoiceHost {
     String? voice,
     int vadThreshold = 0,
     String systemPrompt = '',
+    String replyMode = 'local',
+    String? sttDir,
+    int maxSentences = 0,
   }) async {
     if (_disposed) throw const BithumanAvatarException('avatar is disposed');
     await _channel.invokeMethod('localAudioStart', {
@@ -505,7 +520,28 @@ class BithumanAvatar implements VoiceHost {
       'voice': ?voice,
       'vadThreshold': vadThreshold,
       'systemPrompt': systemPrompt,
+      'replyMode': replyMode,
+      'sttDir': ?sttDir,
+      'maxSentences': maxSentences,
     });
+  }
+
+  /// replyMode `'host'`: one piece of the reply to `reply_request` [id] (any
+  /// split; [done] ends the reply, [result] 0 ok / 1 refused / 3 error).
+  @override
+  Future<void> localReplyText(int id, String text,
+      {bool done = false, int result = 0}) async {
+    if (_disposed) return;
+    await _channel.invokeMethod('localReplyText',
+        {'id': id, 'text': text, 'done': done, 'result': result});
+  }
+
+  /// Measurement only (a debuggable Android app): play a 16 kHz mono PCM16 WAV
+  /// on the device into the local brain as if spoken into the microphone, in
+  /// real time; the microphone is ignored from then on.
+  Future<void> localInjectWav(String path, {String tag = ''}) async {
+    if (_disposed) return;
+    await _channel.invokeMethod('localInjectWav', {'path': path, 'tag': tag});
   }
 
   /// Tear down the local converse brain + audio engine.

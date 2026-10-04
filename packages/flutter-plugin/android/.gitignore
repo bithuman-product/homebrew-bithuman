@@ -1,0 +1,2 @@
+# Native build output (externalNativeBuild): llama.cpp and sherpa-onnx sources and their build trees.
+.cxx/

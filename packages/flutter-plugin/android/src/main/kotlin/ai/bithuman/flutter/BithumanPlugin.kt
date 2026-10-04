@@ -25,6 +25,13 @@
 // on the person's headset when one is connected. From audioStart to audioStop the session
 // holds audio focus, and a phone call or another app taking the sound is pushed to Dart as
 // `audioInterruption` (AudioInterruptions.kt).
+//
+// LOCAL mode (localAudioStart): the on-device brain (LocalConverseController ->
+// brain/ConverseEngine: VAD + speech-to-text, the reply, Supertonic voice) takes the same
+// microphone and feeds the same player, and reports over the same converse EventChannel the
+// Apple half uses — so Dart's LocalConverseTransport runs unchanged. The reply comes from
+// llama.cpp on the device, or (replyMode "host") from the app, which streams the text in with
+// localReplyText — e.g. from a cloud text model — while speech in and voice out stay on-device.
 
 package ai.bithuman.flutter
 
@@ -115,6 +122,11 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         var interruptions: AudioInterruptions? = null
         var micSink: EventChannel.EventSink? = null
         var micChannel: EventChannel? = null
+        var local: LocalConverseController? = null
+        var converseChannel: EventChannel? = null
+        var converseSink: EventChannel.EventSink? = null
+        /** Brain events emitted before Dart subscribed (it subscribes after localAudioStart returns). */
+        val conversePending = ArrayList<Map<String, Any?>>()
         var framesDrawn = 0L
 
         // Captions (2.6.27): `speechPlayout` {played, fed}, 24 kHz samples since audioStart.
@@ -324,17 +336,34 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 result.success(null)
             }
 
+            // --- LOCAL mode: the on-device brain ---
+            "isLocalModeSupported" -> result.success(LocalBrainSupport.available())
+            "localAudioStart" -> localAudioStart(call, result)
+            "localAudioStop" -> { session(call)?.let { stopLocal(it) }; result.success(null) }
+            // Dart sends these without a textureId (one local session at a time).
+            "localPushText" -> { activeLocal()?.pushText(call.argument<String>("text") ?: ""); result.success(null) }
+            "localSetMuted" -> { activeLocal()?.muted = call.argument<Boolean>("muted") ?: false; result.success(null) }
+            // replyMode "host": one piece of the reply the app streams in for `reply_request` {id}.
+            "localReplyText" -> {
+                val id = call.argument<Number>("id")?.toInt() ?: -1
+                activeLocal()?.replyText(id, call.argument<String>("text") ?: "",
+                    call.argument<Boolean>("done") ?: false, call.argument<Number>("result")?.toInt() ?: 0)
+                result.success(null)
+            }
+            // A debuggable host only (measurement): a 16 kHz mono PCM16 WAV into the brain as if
+            // spoken into the microphone, at real-time pace; the microphone is ignored from then on.
+            "localInjectWav" -> {
+                val ctl = activeLocal()
+                val path = call.argument<String>("path")
+                if (ctl == null || path.isNullOrBlank()) result.error("bad_args", "no local session or no path", null)
+                else if (!debuggableHost()) result.error("unsupported", "localInjectWav needs a debuggable app", null)
+                else { ctl.injectWav(path, call.argument<String>("tag") ?: ""); result.success(null) }
+            }
+
             // --- Apple-only surface, answered honestly ---
-            "pipAvailable", "isLocalModeSupported", "setDisplayMode" -> result.success(false)
+            "pipAvailable", "setDisplayMode" -> result.success(false)
             "pipStart", "pipStop", "fitWindowToCanvas", "setExpression2AgentDir",
             "attachWebrtcRemoteAudio", "detachWebrtcRemoteAudio" -> result.success(null)
-
-            // The on-device brain (local mode) runs on iOS and macOS only; isLocalModeSupported says
-            // false here. Answered by name (2.6.36) instead of notImplemented: a start is refused,
-            // and a stop or a mute has nothing to act on.
-            "localAudioStart", "localPushText" -> result.error("unsupported",
-                "local mode runs on iOS and macOS only (BithumanAvatar.isLocalModeSupported() is false on Android)", null)
-            "localAudioStop", "localSetMuted" -> result.success(null)
 
             // A container FILE is not expanded on Android: the SDK fetches an identity's
             // members by code through the download door (see load). `isModelContainer`
@@ -658,8 +687,90 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     private fun destroy(id: Long, done: (() -> Unit)? = null) {
         val s = sessions.remove(id) ?: run { done?.invoke(); return }
         s.stopped.set(true)
+        stopLocal(s)
         stopMic(s)
         closeSession(s, done)
+    }
+
+    // ---------------------------------------------------------------- local mode
+
+    private fun activeLocal(): LocalConverseController? = sessions.values.firstNotNullOfOrNull { it.local }
+
+    private fun debuggableHost() =
+        (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+    private fun localAudioStart(call: MethodCall, result: Result) {
+        val s = session(call) ?: return result.error("no_session", "unknown textureId", null)
+        val replyMode = call.argument<String>("replyMode") ?: "local"
+        val gguf = call.argument<String>("ggufPath")
+        if (replyMode != "host" && gguf.isNullOrBlank()) return result.error("bad_args", "ggufPath is required", null)
+        if (!LocalBrainSupport.available()) return result.error("unsupported",
+            "the on-device brain needs an arm64 Android 10+ device: ${LocalBrainSupport.reason}", null)
+        stopLocal(s); stopMic(s)          // local mode owns the microphone
+        // Registered BEFORE returning: Dart subscribes right after this call completes.
+        val ch = EventChannel(messenger, "ai.bithuman.avatar.converse/${s.entry.id()}")
+        ch.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(args: Any?, sink: EventChannel.EventSink) {
+                s.converseSink = sink
+                val held = synchronized(s.conversePending) { s.conversePending.toList().also { s.conversePending.clear() } }
+                held.forEach { sink.success(it) }
+            }
+            override fun onCancel(args: Any?) { s.converseSink = null }
+        })
+        s.converseChannel = ch
+        val ctl = LocalConverseController(context,
+            player = { s.player },
+            emit = { ev -> main.post {
+                if (s.stopped.get() || s.converseChannel !== ch) return@post
+                val sink = s.converseSink
+                if (sink != null) sink.success(ev)
+                else synchronized(s.conversePending) { if (s.conversePending.size < 64) s.conversePending.add(ev) }
+            } },
+            openMic = { onChunk -> main.post { openLocalMic(s, ch, onChunk) }; null })
+        s.local = ctl
+        ctl.start(LocalConverseController.Options(
+            ggufPath = gguf ?: "",
+            supertonicAssets = call.argument<String>("supertonicAssets"),
+            sttDir = call.argument<String>("sttDir"),
+            voice = call.argument<String>("voice"),
+            systemPrompt = call.argument<String>("systemPrompt"),
+            replyMode = replyMode,
+            maxSentences = call.argument<Number>("maxSentences")?.toInt() ?: 0,
+            enableMic = call.argument<Boolean>("enableMic") ?: true,
+        ))
+        result.success(null)
+    }
+
+    /** The same capture the cloud path opens (on its mode thread), behind the same permission flow. Platform thread. */
+    private fun openLocalMic(s: AvatarSession, ch: EventChannel, onChunk: (ByteArray, Int) -> Unit) {
+        val go = {
+            if (!s.stopped.get() && s.converseChannel === ch && !detached) {
+                val mic = MicCapture(context) { buf, n -> onChunk(buf, n) }
+                s.pendingMic = mic
+                MicCapture.onModeThread {
+                    val ok = mic.start()
+                    main.post {
+                        if (s.pendingMic === mic) s.pendingMic = null
+                        if (!ok) { Log.w(TAG, "local mode: the microphone did not open"); return@post }
+                        if (s.stopped.get() || s.converseChannel !== ch || detached) { mic.stop(); return@post }
+                        s.mic = mic
+                    }
+                }
+            }
+        }
+        if (micGranted()) go() else requestMic { granted ->
+            if (granted) go() else Log.w(TAG, "microphone permission denied — local mode is text-only")
+        }
+    }
+
+    private fun stopLocal(s: AvatarSession) {
+        val ctl = s.local ?: return
+        s.local = null
+        stopMic(s)
+        runCatching { ctl.stop() }
+        s.converseChannel?.setStreamHandler(null); s.converseChannel = null
+        s.converseSink = null
+        synchronized(s.conversePending) { s.conversePending.clear() }
     }
 
     /**
