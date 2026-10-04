@@ -46,17 +46,18 @@ set -euo pipefail
 PLUGIN_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 EXPRESSION2_VENDOR_TAG="${EXPRESSION2_VENDOR_TAG:-expression2-vendor-v1}"
-EXPRESSION2_VENDOR_REPO="${EXPRESSION2_VENDOR_REPO:-bithuman-product/bithuman-models}"
+EXPRESSION2_VENDOR_REPO="${EXPRESSION2_VENDOR_REPO:-bithuman-models}"
 
 # The STATIC, non-SME2 ONNX Runtime 1.26.0 the essence2 (a2x) decoder's le_a2x
 # GEMM runs on. Built from source so it never emits SME2 instructions (those
 # SIGILL on the A19 / iPhone 17 CPU). The iOS pod vendors it as
 # Frameworks/onnxruntime.xcframework; macOS resolves ORT from libconverse's
-# bundled dylibs, so it is staged to the iOS Frameworks dir ONLY. Published as a
-# GitHub release (onnxruntime.xcframework.zip + .sha256). A dev override
-# (ORT_XCFRAMEWORK_DIR=/path/to/onnxruntime.xcframework) skips the download.
+# bundled dylibs, so it is staged to the iOS Frameworks dir ONLY. The public copy is
+# in the flutter-plugin-vendor release on https://downloads.bithuman.ai (below); the
+# private fallback is the engine release in the downloads host's private area (below).
+# A dev override (ORT_XCFRAMEWORK_DIR=/path/to/onnxruntime.xcframework) skips the download.
 ORT_VENDOR_TAG="${ORT_VENDOR_TAG:-essence2-ort-vendor-1.26.0}"
-ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
+ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-models}"
 
 # ===================================================== THE LIBCONVERSE PIN (2.6.37)
 # The on-device conversation brain (LOCAL mode): llama.cpp b8110 linked statically
@@ -77,7 +78,50 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # LIBCONVERSE_XCF_ZIP=<path to libconverse.xcframework.zip> stages a candidate build.
 LIBCONVERSE_RELEASE="${LIBCONVERSE_RELEASE:-converse-apple-v2.5.1}"
 LIBCONVERSE_SHA256="${LIBCONVERSE_SHA256:-edfe15fac1ef89911322b1b870ab73f3a3d5c79fbed669919b65423c9c6105f8}"
-LIBCONVERSE_REPO="${LIBCONVERSE_REPO:-bithuman-product/bithuman-models}"
+LIBCONVERSE_REPO="${LIBCONVERSE_REPO:-bithuman-models}"
+
+# ===================================================== WHERE THE BYTES COME FROM (2026-10)
+# Nothing in this script contacts GitHub. Every download comes from https://downloads.bithuman.ai,
+# under the same pinned digests as before (the bytes are the same; only the host changed):
+#   public:  $BITHUMAN_DOWNLOADS_BASE/homebrew-bithuman/<tag>/<asset>   (no credential)
+#   private: $BITHUMAN_DOWNLOADS_PRIVATE_BASE/<repo>/<tag>/<asset>      with   Authorization: Bearer <token>
+# The private area holds the releases that are not public (the onnxruntime build's private twin,
+# the combined embody bundle, the on-device brain libconverse). It is read ONLY when a token is
+# set: $BITHUMAN_DOWNLOADS_TOKEN (developers and release hosts with access; never a customer; e.g.
+# export BITHUMAN_DOWNLOADS_TOKEN="$(cat ~/.config/bithuman-release/downloads.token)"). The token goes to curl through a
+# config on stdin, never on argv, and is never printed. Without a token nothing private is fetched.
+#   BITHUMAN_REQUIRE_LOCAL_BRAIN=1   a build that must ship the on-device brain (a Live app release
+#                                    build) FAILS when libconverse cannot be staged, instead of
+#                                    building without it.
+# (Through 2.6.36 the public bytes came from GitHub Releases of the tap and the private ones from
+# `gh release download`; the downloads host serves the identical files, verified by sha256.)
+BITHUMAN_DOWNLOADS_BASE="${BITHUMAN_DOWNLOADS_BASE:-https://downloads.bithuman.ai}"
+BITHUMAN_DOWNLOADS_PRIVATE_BASE="${BITHUMAN_DOWNLOADS_PRIVATE_BASE:-$BITHUMAN_DOWNLOADS_BASE}"
+TAP_DOWNLOADS="${BITHUMAN_DOWNLOADS_BASE%/}/homebrew-bithuman"
+have_private() {
+    [ -n "$BITHUMAN_DOWNLOADS_PRIVATE_BASE" ] && [ -n "${BITHUMAN_DOWNLOADS_TOKEN:-}" ]
+}
+# private_fetch <repo> <tag> <asset> <dest-dir> [<pinned sha256>] -> 0 when the asset was fetched and
+# its digest agrees: with the PINNED digest when one is given, else with the release's own .sha256
+# sidecar. Fails closed: no token, a 401/403/404, or a digest mismatch is never an install.
+private_fetch() {
+    local repo="$1" tag="$2" name="$3" dir="$4" pin="${5:-}" f want got
+    have_private || return 1
+    command -v curl >/dev/null 2>&1 || return 1
+    local files=("$name"); [ -n "$pin" ] || files+=("$name.sha256")
+    for f in "${files[@]}"; do
+        printf 'header = "Authorization: Bearer %s"\n' "$BITHUMAN_DOWNLOADS_TOKEN" \
+            | curl -fsSL --retry 2 --proto '=https' -K - -o "$dir/$f" \
+                "${BITHUMAN_DOWNLOADS_PRIVATE_BASE%/}/$repo/$tag/$f" || return 1
+    done
+    if [ -n "$pin" ]; then want="$pin"; else want="$(awk '{print $1; exit}' "$dir/$name.sha256")"; fi
+    got="$(shasum -a 256 "$dir/$name" | cut -d' ' -f1)"
+    [ -n "$want" ] && [ "$want" = "$got" ] || die "sha256 MISMATCH for $name ($repo $tag, private area) — refusing to install
+  expected $want
+  actual   $got"
+    return 0
+}
+PRIVATE_HINT="developers and release hosts with access: set BITHUMAN_DOWNLOADS_TOKEN for the private area of $BITHUMAN_DOWNLOADS_PRIVATE_BASE"
 
 # ======================================================= THE APPLE ENGINE PIN
 # ★ A TAG OF THIS REPO MUST NAME AN ENGINE. The Android half already works this
@@ -208,7 +252,7 @@ UMH_SHA256="${UMH_SHA256:-c2a0e1c14dd6ad6136c7f50068b0641577484dd1408ba41ad2d314
 # asset + the tar's full member list) for a human to verify against; this script
 # trusts the pin below.
 PUBLIC_VENDOR_TAG="${PUBLIC_VENDOR_TAG:-flutter-plugin-vendor-v1}"
-PUBLIC_VENDOR_BASE="${PUBLIC_VENDOR_BASE:-https://github.com/bithuman-product/homebrew-bithuman/releases/download/$PUBLIC_VENDOR_TAG}"
+PUBLIC_VENDOR_BASE="${PUBLIC_VENDOR_BASE:-$TAP_DOWNLOADS/$PUBLIC_VENDOR_TAG}"
 PUBLIC_SHA_embody_models="c224f7174479db913fabe8823029e9bdeb70bde6efc49f11bfd0495010b8031f"
 PUBLIC_SHA_onnxruntime="7d631c161ae0d9c6f01095bcb5556d0b4f0205dc5111e6d2ddae82cc7050a7ed"
 
@@ -266,7 +310,7 @@ relink() {
 # fetch_tap_zip <release> <file> <sha256> <dest dir>: a public tap release asset, sha256-checked.
 fetch_tap_zip() {
     local rel="$1" name="$2" want="$3" dir="$4"
-    local url="https://github.com/bithuman-product/homebrew-bithuman/releases/download/$rel/$name"
+    local url="$TAP_DOWNLOADS/$rel/$name"
     curl -fsSL --retry 2 -o "$dir/$name" "$url" || die "could not fetch $url"
     local got; got="$(shasum -a 256 "$dir/$name" | cut -d' ' -f1)"
     [ "$got" = "$want" ] || die "sha256 MISMATCH for $name ($rel) — refusing to install
@@ -381,8 +425,8 @@ IOS_FW="$PLUGIN_ROOT/ios/Frameworks"
 # ----------------------------------- ORT (essence2 / a2x decoder) for iOS slice
 # Stage the static, non-SME2 onnxruntime.xcframework into ios/Frameworks (the iOS
 # pod vendors it unconditionally, so a fresh clone MUST have it or `pod install`
-# fails). Fetched from the GitHub release (sha256-verified like libconverse), or
-# from a local ORT_XCFRAMEWORK_DIR dev override. iOS only — macOS gets ORT from
+# fails). Fetched from the public vendor release (digest pinned here), else the private
+# area (sha256-verified, token only), or from a local ORT_XCFRAMEWORK_DIR dev override. iOS only — macOS gets ORT from
 # libconverse's bundled dylibs. A download failure FAILS LOUD (the iOS pod can't
 # build without it); re-running is safe.
 stage_onnxruntime_ios() {
@@ -403,23 +447,13 @@ stage_onnxruntime_ios() {
         log "  staged onnxruntime.xcframework → ios/Frameworks (public $PUBLIC_VENDOR_TAG)"
         return 0
     fi
+    have_private \
+        || die "public fetch of onnxruntime.xcframework failed ($PUBLIC_VENDOR_BASE) — retry, or set ORT_XCFRAMEWORK_DIR=/path/to/onnxruntime.xcframework ($PRIVATE_HINT)"
     warn "  public fetch failed — falling back to the private release"
-    command -v gh >/dev/null 2>&1 \
-        || die "gh CLI required to fetch onnxruntime.xcframework ($ORT_VENDOR_TAG) — or set ORT_XCFRAMEWORK_DIR"
-    log "Fetching onnxruntime.xcframework '$ORT_VENDOR_TAG' from $ORT_VENDOR_REPO …"
-    gh release download "$ORT_VENDOR_TAG" --repo "$ORT_VENDOR_REPO" \
-        --pattern 'onnxruntime.xcframework.zip' --pattern 'onnxruntime.xcframework.zip.sha256' \
-        --dir "$dl" --clobber \
-        || die "gh release download failed (tag $ORT_VENDOR_TAG, repo $ORT_VENDOR_REPO)"
-    [ -f "$dl/onnxruntime.xcframework.zip" ] && [ -f "$dl/onnxruntime.xcframework.zip.sha256" ] \
-        || die "release $ORT_VENDOR_TAG missing onnxruntime.xcframework.zip(.sha256)"
-    local expect actual
-    expect="$(awk '{print $1}' "$dl/onnxruntime.xcframework.zip.sha256")"
-    actual="$(shasum -a 256 "$dl/onnxruntime.xcframework.zip" | cut -d' ' -f1)"
-    [ "$expect" = "$actual" ] || die "sha256 MISMATCH for onnxruntime.xcframework.zip — refusing to install
-  expected $expect
-  actual   $actual"
-    log "  sha256 verified ($actual)"
+    log "Fetching onnxruntime.xcframework '$ORT_VENDOR_TAG' from the private area ($ORT_VENDOR_REPO) …"
+    private_fetch "$ORT_VENDOR_REPO" "$ORT_VENDOR_TAG" onnxruntime.xcframework.zip "$dl" \
+        || die "private fetch failed (tag $ORT_VENDOR_TAG, repo $ORT_VENDOR_REPO): check the downloads token"
+    log "  sha256 verified"
     ( cd "$dl" && unzip -q -o onnxruntime.xcframework.zip )
     [ -d "$dl/onnxruntime.xcframework" ] || die "onnxruntime.xcframework.zip did not contain onnxruntime.xcframework/"
     rm -rf "$dest"; mkdir -p "$IOS_FW"; cp -R "$dl/onnxruntime.xcframework" "$dest"
@@ -481,20 +515,12 @@ if fetch_public embody-models.tar.gz "$PUBLIC_SHA_embody_models" "$TMP"; then
     [ -d "$SRC/embody-models" ] || die "embody-models.tar.gz did not contain embody-models/"
 else
     # Private fallback: the combined bundle (its own libconverse, the unpinned 2026-07-01 cut, is not used: 1b).
-    command -v gh >/dev/null 2>&1 \
-        || die "public fetch failed and gh is unavailable — cannot obtain the embody models"
-    log "  public fetch failed — falling back to '$EXPRESSION2_VENDOR_TAG' on $EXPRESSION2_VENDOR_REPO"
-    gh release download "$EXPRESSION2_VENDOR_TAG" --repo "$EXPRESSION2_VENDOR_REPO" \
-        --pattern 'embody-vendor.tar.gz*' --dir "$TMP" --clobber \
-        || die "gh release download failed (tag $EXPRESSION2_VENDOR_TAG, repo $EXPRESSION2_VENDOR_REPO)"
-    [ -f "$TMP/embody-vendor.tar.gz" ] && [ -f "$TMP/embody-vendor.tar.gz.sha256" ] \
-        || die "release $EXPRESSION2_VENDOR_TAG is missing embody-vendor.tar.gz(.sha256)"
-    EXPECT="$(tr -d '[:space:]' < "$TMP/embody-vendor.tar.gz.sha256")"
-    ACTUAL="$(shasum -a 256 "$TMP/embody-vendor.tar.gz" | cut -d' ' -f1)"
-    [ "$EXPECT" = "$ACTUAL" ] || die "sha256 MISMATCH for embody-vendor.tar.gz — refusing to install
-  expected $EXPECT
-  actual   $ACTUAL"
-    log "  sha256 verified ($ACTUAL)"
+    have_private \
+        || die "public fetch of the embody models failed ($PUBLIC_VENDOR_BASE) — retry later ($PRIVATE_HINT)"
+    log "  public fetch failed — falling back to '$EXPRESSION2_VENDOR_TAG' in the private area ($EXPRESSION2_VENDOR_REPO)"
+    private_fetch "$EXPRESSION2_VENDOR_REPO" "$EXPRESSION2_VENDOR_TAG" embody-vendor.tar.gz "$TMP" \
+        || die "private fetch failed (tag $EXPRESSION2_VENDOR_TAG, repo $EXPRESSION2_VENDOR_REPO): check the downloads token"
+    log "  sha256 verified"
     tar -xzf "$TMP/embody-vendor.tar.gz" -C "$TMP"
     [ -d "$SRC/embody-models" ] || die "bundle missing embody-models/"
 fi
@@ -507,6 +533,16 @@ fi
 # they refuse by name. Bytes that DO arrive and do not match the pin are a refusal, never a
 # silent degrade. (The combined bundle's own libconverse — 1a's private fallback — is never
 # installed: it is the unpinned 2026-07-01 cut.)
+# brain_unavailable <why>: EVERY way libconverse can be missing ends here, so
+# BITHUMAN_REQUIRE_LOCAL_BRAIN=1 is fatal on all of them.
+brain_unavailable() {
+    [ "${BITHUMAN_REQUIRE_LOCAL_BRAIN:-0}" != "1" ] \
+        || die "BITHUMAN_REQUIRE_LOCAL_BRAIN=1 and libconverse $LIBCONVERSE_RELEASE could not be staged ($1) — this build must ship the on-device brain ($PRIVATE_HINT)"
+    warn "libconverse $LIBCONVERSE_RELEASE unavailable ($1) — building WITHOUT the on-device brain."
+    warn "  Unaffected: cloud realtime, the avatar, both engines, lipsync, barge-in, idle."
+    warn "  Unavailable: localAudioStart / localAudioStop / localPushText."
+    have_private || warn "  ($PRIVATE_HINT; BITHUMAN_REQUIRE_LOCAL_BRAIN=1 makes this fatal)"
+}
 stage_libconverse() {
     local dl="$TMP/libconverse" zip
     rm -rf "$MAC_FW/libconverse.xcframework" "$IOS_FW/libconverse.xcframework"
@@ -515,21 +551,15 @@ stage_libconverse() {
         log "Staging libconverse from LIBCONVERSE_XCF_ZIP=$LIBCONVERSE_XCF_ZIP (candidate; the pinned digest is not what is staged)"
         cp "$LIBCONVERSE_XCF_ZIP" "$dl/libconverse.xcframework.zip" || die "no $LIBCONVERSE_XCF_ZIP"
     else
-        log "Fetching libconverse $LIBCONVERSE_RELEASE (${LIBCONVERSE_SHA256:0:16}…) from $LIBCONVERSE_REPO …"
-        if ! command -v gh >/dev/null 2>&1 || ! gh release download "$LIBCONVERSE_RELEASE" --repo "$LIBCONVERSE_REPO" \
-                --pattern 'libconverse.xcframework.zip' --dir "$dl" --clobber >/dev/null 2>&1; then
-            warn "libconverse $LIBCONVERSE_RELEASE unavailable (no gh, or no access to $LIBCONVERSE_REPO) — building WITHOUT the on-device brain."
-            warn "  Unaffected: cloud realtime, the avatar, both engines, lipsync, barge-in, idle."
-            warn "  Unavailable: localAudioStart / localAudioStop / localPushText."
-            rm -rf "$dl"; return 0
+        log "Fetching libconverse $LIBCONVERSE_RELEASE (${LIBCONVERSE_SHA256:0:16}…) from the private area ($LIBCONVERSE_REPO) …"
+        if ! have_private; then
+            brain_unavailable "no downloads token"; rm -rf "$dl"; return 0
+        fi
+        if ! private_fetch "$LIBCONVERSE_REPO" "$LIBCONVERSE_RELEASE" libconverse.xcframework.zip "$dl" "$LIBCONVERSE_SHA256"; then
+            brain_unavailable "the private area refused $LIBCONVERSE_REPO/$LIBCONVERSE_RELEASE"; rm -rf "$dl"; return 0
         fi
         zip="$dl/libconverse.xcframework.zip"
-        [ -f "$zip" ] || die "release $LIBCONVERSE_RELEASE has no libconverse.xcframework.zip"
-        local got; got="$(shasum -a 256 "$zip" | cut -d' ' -f1)"
-        [ "$got" = "$LIBCONVERSE_SHA256" ] || die "sha256 MISMATCH for libconverse.xcframework.zip ($LIBCONVERSE_RELEASE) — refusing to install
-  expected $LIBCONVERSE_SHA256
-  actual   $got"
-        log "  sha256 verified against the pin ($got)"
+        log "  sha256 verified against the pin (${LIBCONVERSE_SHA256:0:16}…)"
     fi
     ( cd "$dl" && unzip -q -o libconverse.xcframework.zip ) || die "could not unzip libconverse.xcframework.zip"
     [ -d "$dl/libconverse.xcframework" ] || die "libconverse.xcframework.zip did not contain libconverse.xcframework/"
