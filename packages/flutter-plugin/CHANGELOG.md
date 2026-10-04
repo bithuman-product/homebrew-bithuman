@@ -2,6 +2,12 @@
 
 ### Fixed
 
+* **Android: a session nobody is watching ends after 60 s** (`essence2-android` 0.9.5, `expression2-android` 0.6.1,
+  billing patches; engines and rendering unchanged). When the app has been in the background for more than 60 s, or
+  has not asked for a frame for more than 60 s, the session ends and is billed up to that 60 s. After a background
+  end the SDK hands out no frames until the app is visible again (the idle producer sees `-1` / `false` and waits);
+  the next frame shown on screen starts a new session. An API secret whose account may not render the agent is
+  refused at open (`403 AGENT_NOT_ENTITLED`) before anything is billed.
 * **Android: the presenter's starve count ignores sub-frame publish gaps.** A starve (`bhstarve`, `starve=` on the
   `PROD` line) now counts only when the ready-frame queue stays empty for at least 50 ms
   (`StarveCounter.MIN_HOLD_MS`) before frames come back. `expression2-android` 0.6.0 publishes a block frame by frame,
