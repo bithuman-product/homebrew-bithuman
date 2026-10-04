@@ -1,6 +1,7 @@
 // The presenter's starve counter (StarveCounter.kt): only an empty-queue hold of at least MIN_HOLD_MS (50 ms)
 // before frames come back is a starve. The 2-8 ms gaps between expression2-android 0.6.0's per-block
-// publishes are not counted; holds of ~200-550 ms are.
+// publishes are not counted; holds of ~200-550 ms are, and so is a hold still open when the presenter stops
+// or closes (it never refilled: a freeze).
 //
 // Plain JVM, no device:
 //   (cd <app>/android && ./gradlew :bithuman:testDebugUnitTest --tests 'ai.bithuman.flutter.StarveCounterTest')
@@ -46,6 +47,25 @@ class StarveCounterTest {
         assertFalse(s.refill(10_000L + StarveCounter.MIN_HOLD_MS - 1)!!.counted)
         assertEquals(3, s.count)
         assertEquals(50L, StarveCounter.MIN_HOLD_MS)
+    }
+
+    @Test
+    fun aHoldThatNeverRefillsCountsWhenThePresenterStops() {
+        val s = StarveCounter()
+        // A real freeze: the queue goes empty and stays empty until the session stops.
+        s.empty(1_000L)
+        val h = s.close(1_000L + 3_000L)!!
+        assertEquals(3_000L, h.ms)
+        assertTrue("a freeze until the stop is a starve", h.counted)
+        assertEquals(1, s.count)
+        assertEquals(-1L, s.emptySince)
+        assertNull("closed once", s.close(5_000L))
+        // A publish gap that happens to be open at the stop is still not a starve.
+        s.empty(6_000L)
+        assertFalse(s.close(6_000L + 4)!!.counted)
+        assertEquals(1, s.count)
+        // Nothing open: nothing to count.
+        assertNull(StarveCounter().close(10L))
     }
 
     @Test

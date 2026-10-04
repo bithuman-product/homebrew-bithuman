@@ -750,6 +750,12 @@ class AvatarPlayer(
             if (idx == 0 && nIdle > 1)
                 Log.i("bhav", "IDLE wrap ${idleLoop.wraps}: frame ${idleLoop.frameCount - 1} -> 0 (clip ${idleLoop.frameCount} frames, idle units=$nIdle)")
         }
+        // A hold still open now never refilled (the queue stayed empty until the stop or close: a freeze):
+        // it counts like any other of at least StarveCounter.MIN_HOLD_MS.
+        starve.close(System.currentTimeMillis())?.let { hold ->
+            if (hold.counted) Log.i("bhstarve", "STARVE ${starve.count} $starveDetail held ${hold.ms}ms (unrefilled)")
+            else Log.d("bhstarve", "gap ${hold.ms}ms < ${StarveCounter.MIN_HOLD_MS}ms at stop, not a starve: $starveDetail")
+        }
         // The engine's frames go back to it: nothing will present them now.
         for (i in slotHw.indices) { slotHw[i]?.release(); slotHw[i] = null }
         // ★ THE PLAYER DOES NOT CLOSE THE ENGINE IT DID NOT CREATE. It used to, here,
