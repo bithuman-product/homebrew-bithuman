@@ -378,7 +378,7 @@ class WebRTCTransport implements RealtimeTransport {
 /// `content`; [0] is the system prompt, the last is the user's turn). Typically
 /// a cheap cloud text model behind the app's own server. Cancelled (the
 /// subscription) when the user barges in.
-typedef HostReplyStream = Stream<String> Function(List<Map<String, String>> messages, int maxTokens);
+typedef HostReplyStream = Stream<String> Function(List<Map<String, String>> messages);
 
 class LocalConverseTransport implements RealtimeTransport {
   LocalConverseTransport({
@@ -390,7 +390,7 @@ class LocalConverseTransport implements RealtimeTransport {
     this.systemPrompt = '',
     this.llm = LocalBrainLlm.auto,
     this.refusalReply = '',
-    this.reply,
+    this.replySource,
     this.sttDir,
     this.minSilenceMs = 0,
     this.bargeOnSpeech = false,
@@ -401,7 +401,7 @@ class LocalConverseTransport implements RealtimeTransport {
   /// THE HYBRID BRAIN: when set, the on-device brain asks this for its replies
   /// (speech-to-text and the voice stay on the device); [ggufPath] / [llm] are
   /// then unused.
-  final HostReplyStream? reply;
+  final HostReplyStream? replySource;
   /// A sherpa-onnx speech-to-text model directory (iOS builds that staged it);
   /// null = Apple's SpeechAnalyzer.
   final String? sttDir;
@@ -410,7 +410,7 @@ class LocalConverseTransport implements RealtimeTransport {
   final bool bargeOnSpeech;
   /// Speak a greeting when the brain is ready.
   final bool greet;
-  /// Testing: no microphone; feed files with [VoiceHost.localInjectAudio].
+  /// Testing: no microphone; feed files with [VoiceHost.localInjectWav].
   final bool injectAudio;
   /// The Llama GGUF. Null is fine when Apple's on-device model runs the brain
   /// (see [llm] and [AppleIntelligenceStatus]).
@@ -487,7 +487,7 @@ class LocalConverseTransport implements RealtimeTransport {
         systemPrompt: systemPrompt,
         llm: llm.name,
         refusalReply: refusalReply,
-        replyMode: reply != null ? 'host' : 'local',
+        replyMode: replySource != null ? 'host' : 'local',
         sttDir: sttDir,
         minSilenceMs: minSilenceMs,
         bargeOnSpeech: bargeOnSpeech,
@@ -557,7 +557,7 @@ class LocalConverseTransport implements RealtimeTransport {
 
   void _startReply(Map<dynamic, dynamic> ev) {
     final id = ev['id'] as int? ?? -1;
-    final provider = reply;
+    final provider = replySource;
     if (provider == null || id < 0) {
       unawaited(avatar.localReplyText(id, '', done: true, result: 3));
       return;
@@ -566,7 +566,6 @@ class LocalConverseTransport implements RealtimeTransport {
       for (final m in (ev['messages'] as List? ?? const []))
         {'role': '${(m as Map)['role'] ?? ''}', 'content': '${m['content'] ?? ''}'},
     ];
-    final maxTokens = ev['maxTokens'] as int? ?? 256;
     var ended = false;
     void end(int result) {
       if (ended) return;
@@ -574,7 +573,7 @@ class LocalConverseTransport implements RealtimeTransport {
       _replies.remove(id);
       unawaited(avatar.localReplyText(id, '', done: true, result: result));
     }
-    _replies[id] = provider(msgs, maxTokens).listen(
+    _replies[id] = provider(msgs).listen(
       (piece) {
         if (!ended && piece.isNotEmpty) unawaited(avatar.localReplyText(id, piece));
       },

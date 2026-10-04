@@ -188,6 +188,7 @@ class RecordingVoiceHost implements VoiceHost {
     bool bargeOnSpeech = false,
     bool injectAudio = false,
     double injectNoiseDb = -65,
+    int maxSentences = 0,
   }) async {
     calls.add('localAudioStart:$ggufPath');
   }
@@ -197,8 +198,8 @@ class RecordingVoiceHost implements VoiceHost {
       calls.add('localReplyText:$id');
 
   @override
-  Future<bool> localInjectAudio(String path, {String? tag, double? speechStart, double? speechEnd}) async {
-    calls.add('localInjectAudio');
+  Future<bool> localInjectWav(String path, {String? tag, double? speechStart, double? speechEnd}) async {
+    calls.add('localInjectWav');
     return false;
   }
 

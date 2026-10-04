@@ -508,6 +508,7 @@ class BithumanAvatar implements VoiceHost {
     bool bargeOnSpeech = false,
     bool injectAudio = false,
     double injectNoiseDb = -65,
+    int maxSentences = 0,
   }) async {
     if (_disposed) throw const BithumanAvatarException('avatar is disposed');
     await _channel.invokeMethod('localAudioStart', {
@@ -525,6 +526,7 @@ class BithumanAvatar implements VoiceHost {
       if (bargeOnSpeech) 'bargeOnSpeech': true,
       if (injectAudio) 'injectAudio': true,
       if (injectAudio) 'injectNoiseDb': injectNoiseDb,
+      if (maxSentences > 0) 'maxSentences': maxSentences,
     });
   }
 
@@ -539,10 +541,10 @@ class BithumanAvatar implements VoiceHost {
   /// Testing: speak a 16 kHz WAV into the local session's speech-to-text
   /// (see [localAudioStart] `injectAudio: true`).
   @override
-  Future<bool> localInjectAudio(String path, {String? tag, double? speechStart, double? speechEnd}) async {
+  Future<bool> localInjectWav(String path, {String? tag, double? speechStart, double? speechEnd}) async {
     if (_disposed) return false;
     try {
-      return await _channel.invokeMethod<bool>('localInjectAudio', {
+      return await _channel.invokeMethod<bool>('localInjectWav', {
             'path': path,
             'tag': ?tag,
             'speechStart': ?speechStart,

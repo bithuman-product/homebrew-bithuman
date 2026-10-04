@@ -26,8 +26,8 @@ const Map<String, Map<String, String>> unsupported = {
         "Apple's Foundation Models only; the static call answers notBuilt on MissingPluginException",
     'ai.bithuman.avatar localReplyText':
         'sent only in answer to a reply_request event, which only the Apple hybrid brain emits',
-    'ai.bithuman.avatar localInjectAudio':
-        'testing API of the Apple local session; localInjectAudio answers false on MissingPluginException',
+    'ai.bithuman.avatar localInjectWav':
+        'testing API of the Apple local session; localInjectWav answers false on MissingPluginException',
   },
   'apple': {
     // Load progress is an Android channel; iOS and macOS send no load events yet.

@@ -45,7 +45,7 @@ struct HybridOptions {
     /// Barge when the speech-to-text hears the user start talking while the character is audible
     /// (the on-device VAD barge). Off = the energy barge of RealtimeAudioIO only (the mic path).
     var bargeOnSpeech = false
-    /// DEV / harness: the microphone is replaced by prerecorded audio (`localInjectAudio`), paced in
+    /// DEV / harness: the microphone is replaced by prerecorded audio (`localInjectWav`), paced in
     /// real time under a noise floor; the session's audio unit then runs without a mic.
     var injected = false
     /// The injected stream's noise floor between and under the files (dBFS RMS; nil = digital silence).
@@ -209,7 +209,7 @@ final class LocalConverseController: @unchecked Sendable {
         // user's interruption is transcribed live for the brain. VP-IO AEC keeps
         // the bot's own voice out of ch0; the energy VAD (above) drives the barge.
         if options.injected {
-            // DEV / harness: prerecorded speech replaces the microphone (localInjectAudio).
+            // DEV / harness: prerecorded speech replaces the microphone (localInjectWav).
             let inj = AudioInjector(noiseDb: options.noiseDb) { [weak self] buf in self?.micCont.yield(buf) }
             inj.onMark = { [weak self] m in self?.metric(m) }
             injector = inj

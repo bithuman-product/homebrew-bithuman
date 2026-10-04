@@ -859,7 +859,7 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       if let ms = args["minSilenceMs"] as? Int, ms > 0 { options.minSilence = Float(ms) / 1000 }
       options.bargeOnSpeech = (args["bargeOnSpeech"] as? Bool) ?? false
       // Testing API (an explicit app argument, not an environment lever): prerecorded speech
-      // replaces the microphone, which is then never opened (localInjectAudio).
+      // replaces the microphone, which is then never opened (localInjectWav).
       options.injected = (args["injectAudio"] as? Bool) ?? false
       if let nd = args["injectNoiseDb"] as? Double { options.noiseDb = nd < -120 ? nil : nd }
       let injected = options.injected
@@ -944,11 +944,11 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       #endif
       result(nil)
 
-    case "localInjectAudio":
+    case "localInjectWav":
       // DEV / harness: speak a 16 kHz WAV into the session's speech-to-text instead of the mic
       // (the session must have been started with injectAudio: true).
       guard let args = call.arguments as? [String: Any], let path = args["path"] as? String else {
-        result(FlutterError(code: "BAD_ARGS", message: "localInjectAudio requires path", details: nil)); return
+        result(FlutterError(code: "BAD_ARGS", message: "localInjectWav requires path", details: nil)); return
       }
       #if CONVERSE_AVAILABLE
       if #available(macOS 26.0, iOS 26.0, *) {

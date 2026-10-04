@@ -1,4 +1,4 @@
-// DEV / harness only (`localAudioStart(injectAudio: true)` + `localInjectAudio`): stands in for the
+// DEV / harness only (`localAudioStart(injectAudio: true)` + `localInjectWav`): stands in for the
 // microphone of a LOCAL / hybrid session, so the on-device speech-to-text, the VAD barge and every
 // latency after them are measured on PRERECORDED speech — muted, no speaker-to-mic cross-talk, the
 // same words every run. It hands the speech-to-text 16 kHz mono buffers of 20 ms in real time (a

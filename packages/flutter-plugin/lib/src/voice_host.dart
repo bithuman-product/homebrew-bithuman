@@ -141,9 +141,10 @@ abstract class VoiceHost {
   /// builds that staged sherpa-onnx); [minSilenceMs] is the pause that ends the
   /// user's turn there. [bargeOnSpeech]: barge when the speech-to-text hears the
   /// user start talking while the character speaks (the on-device VAD barge).
-  /// [injectAudio] (testing): the microphone is never opened; [localInjectAudio]
+  /// [injectAudio] (testing): the microphone is never opened; [localInjectWav]
   /// speaks prerecorded files into the speech-to-text instead, in real time,
-  /// under a noise floor of [injectNoiseDb] dBFS.
+  /// under a noise floor of [injectNoiseDb] dBFS. [maxSentences] caps a spoken
+  /// reply on Android (0 = its default); the Apple brain speaks the whole reply.
   Future<void> localAudioStart({
     String? ggufPath,
     String? supertonicAssets,
@@ -158,6 +159,7 @@ abstract class VoiceHost {
     bool bargeOnSpeech,
     bool injectAudio,
     double injectNoiseDb,
+    int maxSentences,
   });
 
   /// The hybrid brain ([localAudioStart] `replyMode: 'host'`): a piece of the
@@ -170,7 +172,7 @@ abstract class VoiceHost {
   /// [path] into the speech-to-text as if from the microphone. [speechStart] /
   /// [speechEnd] (seconds into the file) are reported as `inject_speech_start` /
   /// `inject_speech_end` metric events when the stream passes them.
-  Future<bool> localInjectAudio(String path, {String? tag, double? speechStart, double? speechEnd});
+  Future<bool> localInjectWav(String path, {String? tag, double? speechStart, double? speechEnd});
 
   /// Tear down the local brain and its audio unit.
   Future<void> localAudioStop();
