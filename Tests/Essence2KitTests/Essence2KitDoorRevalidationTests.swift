@@ -301,8 +301,12 @@ final class Essence2KitDoorRevalidationTests: XCTestCase {
         try FileManager.default.createDirectory(at: meta, withIntermediateDirectories: true)
         try Data((Self.sha(v1) + "\n").utf8).write(to: meta.appendingPathComponent(key + ".current"))
         XCTAssertFalse(try excluded(file(v1)), "a copy from before 2.20.2 carries no flag")
-        let door = Door(.status(503))                    // the door is down: the copy is served
+        // ★2.20.2 (security): a copy from before 2.20.2 carries no entitlement mark, so its first
+        // open asks the door (Essence2KitCrossAccountTests); the door serves the same file, nothing
+        // is downloaded, and the copy is served.
+        let door = Door(.serve(v1))
         let again = try await open(door)
+        XCTAssertEqual(door.counts.files, 0, "the copy was used, nothing downloaded")
         XCTAssertEqual(again.standardizedFileURL, file(v1).standardizedFileURL)
         XCTAssertTrue(try excluded(again), "flagged on its next open")
     }

@@ -8,7 +8,8 @@
   covers the binary xcframeworks (static libraries, which cannot carry a bundle of their own).
 
   Required-reason APIs, found by scanning the shipped binaries (nm -u / strings, 2026-10-03:
-  Expression2 v2.20.1, libessence2 + onnxruntime essence2-v1.15.3, EngineCore enginecore-v1.0.2)
+  Expression2 v2.20.1 and v2.20.3, libessence2 essence2-v1.15.3 and v1.15.4, onnxruntime,
+  EngineCore enginecore-v1.0.2; the same categories in each)
   and the Swift sources:
   - File timestamp: stat / fstat / lstat (libessence2, onnxruntime, EngineCore),
     NSFileModificationDate and contentModificationDateKey (Expression2's compiled-model cache and

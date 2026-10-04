@@ -43,11 +43,11 @@ let releaseTag = "v2.4.0"
 let releaseBase = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(releaseTag)"
 
 // The Expression 2 archives.
-let expression2Tag = "v2.20.1"
+let expression2Tag = "v2.20.3"
 let expression2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(expression2Tag)"
 
 // The Essence 2 archives. Essence2Kit fetches its runtime files from this release too.
-let essence2Tag = "essence2-v1.15.3"
+let essence2Tag = "essence2-v1.15.4"
 let essence2Base = "https://github.com/bithuman-product/homebrew-bithuman/releases/download/\(essence2Tag)"
 
 // EngineCore (macOS engine core) ships on its OWN tap tag: essence2-v1.15.0's EngineCore had
@@ -100,23 +100,23 @@ let package = Package(
         .binaryTarget(
             name: "Expression2Binary",
             url: "\(expression2Base)/Expression2.xcframework.zip",
-            checksum: "7e3f6c6619cd2a0408b234ac0aadee56526306825e40c1acd2c8f29f45ef4864"
+            checksum: "59601d603d57296b8bd2b49bd3d41c8ff5db1b21458c4d473469fdd5946365b4"
         ),
         .binaryTarget(
             name: "BithumanEngineProtocolBinary",
             url: "\(expression2Base)/BithumanEngineProtocol.xcframework.zip",
-            checksum: "f26841e3753f4dfab79f2d0579835135010aa0e1a703dcc4360a0a9f295dd43f"
+            checksum: "0f5c1ff16e604781a351c86ec9d7a224f62e1888c5a505bca6d4e0938d078fbc"
         ),
         .binaryTarget(
             name: "UnifiedModelHeaderBinary",
             url: "\(expression2Base)/UnifiedModelHeader.xcframework.zip",
-            checksum: "45f5911496afebe9bdb56b5238d5ce7cc5af359fb436c6aa0b8fed6ab75b3055"
+            checksum: "7896efbcc62287d896caede41a608e791891d0981559cec8da4e09f6ddd0c92e"
         ),
         // The Essence 2 engine. Its module map declares `Essence2` and `CLibEssence2`.
         .binaryTarget(
             name: "libessence2",
             url: "\(essence2Base)/libessence2.xcframework.zip",
-            checksum: "564b9fa2c8b74c48d8b637ff347df23fbe674b8f057f77cceb747b78f98a5a05"
+            checksum: "830497febf38d439446c88b04412fce2947d12e79404b434a167a95b052aef78"
         ),
         // The Apple libraries libessence2.a calls, passed to the app's final link.
         .target(
