@@ -6,10 +6,10 @@
 // answers for an engine it cannot run (`unsupported`) and a message that says what to do.
 //
 // The same holds for an engine this build carries on an OS it does not run on (2.6.36): Essence 2
-// renders on iOS 26 / macOS 26 and later. While the staged libessence2 is built for 26 the pod declares
-// that floor and no older OS runs the app; a libessence2 rebuilt at the package floor (Swift package
-// 2.20.2, bithuman-models #1826) lets the app run on iOS 16 again, and there `load(engine: 'essence2')`
-// fails here, by name, instead of reaching the engine.
+// renders on iOS 26 / macOS 26 and later. While the staged libessence2 was built for 26 (essence2-v1.15.3)
+// the pod declared that floor and no older OS ran the app; essence2-v1.15.4, rebuilt at the package floor
+// (Swift package 2.20.3, bithuman-models #1826) and staged since 2.6.36, lets the app run on iOS 16 again,
+// and there `load(engine: 'essence2')` fails here, by name, instead of reaching the engine.
 //
 // Foundation and EngineId only, so test/swift/engine_selection_test.swift runs it with swiftc alone
 // (scripts/test_swift_unit.sh). EngineRegistry.select(_:) applies it to the registered engines.

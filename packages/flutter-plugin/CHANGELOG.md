@@ -1,8 +1,10 @@
-## Unreleased (2.6.36) — Security: a kept avatar opens only for a credential bitHuman's door said yes to; iOS / macOS declare the staged engines' real floor; Android `pushAudio` plays your speech; the public model ids on Android; an unknown engine fails by name on iOS / macOS
+## Unreleased (2.6.36) — Security: a kept avatar opens only for a credential bitHuman's door said yes to; iOS / macOS: an app linking Essence 2 starts on every OS the pod declares (essence2-v1.15.4); Android `pushAudio` plays your speech; the public model ids on Android; an unknown engine fails by name on iOS / macOS
 
-No engine change yet: the engine fixes named under Security are pinned before this version is tagged. Two defaults
-change (below). Apart from the Security changes, nothing that worked before changes, except that iOS and macOS now
-refuse an engine name they used to replace with Expression 2.
+iOS / macOS engines: Essence 2 **`essence2-v1.15.4`** (was `essence2-v1.15.3`), Expression 2 **`v2.20.3`** (was
+`v2.20.1`), the bytes Swift package 2.20.3 serves; macOS `enginecore-v1.0.2` (unchanged). Android: `essence2-android`
+0.9.4 and `expression2-android` 0.6.0 are pinned before this version is tagged (`test/release_pins_test.dart` fails the
+suite at pubspec 2.6.36 without them). Two defaults change (below). Apart from the Security changes, nothing that
+worked before changes, except that iOS and macOS now refuse an engine name they used to replace with Expression 2.
 
 ### Security
 
@@ -25,29 +27,46 @@ refuse an engine name they used to replace with Expression 2.
     is asked first, and the call throws the new `BithumanEntitlementException` (a `BithumanAvatarException`) unless
     it says yes: `refused: true` when the door said no, `refused: false` when it could not be asked (fail closed).
     The kept files are never deleted by a refusal, and nothing is downloaded again when the door says yes.
-  * `downloadAgentImx` asks about a kept file at the platform door for the agent's code, never at the row's
-    `modelUrl`. `downloadExpression2Avatar` and `downloadExpression2Agent` take `apiSecret` and ask the door
-    (`?model=expression-2`) before they download, so another account's private avatar is never downloaded or
-    installed. `downloadEssence2Bundle`'s catalog is public: a kept bundle opens for 7 days after its URL last
-    answered and is refused once the URL says it is gone.
+  * Only the platform door's answer for the avatar's own code marks it
+    (`GET https://api.bithuman.ai/v1/agent/<code>/model/download`, owner-scoped). `downloadAgentImx` asks about a
+    kept file there, never at the row's `modelUrl`; a download without a key still comes from the row's `modelUrl`,
+    and the platform door is then asked once, with no credential, for the mark. A redirect between bitHuman's own
+    hosts is never a yes (bitHuman's apex redirects every path to www, and www redirects a trailing slash, for any
+    code): only a door's redirect to the signed file URL is. `downloadExpression2Avatar` and
+    `downloadExpression2Agent` take `apiSecret` and ask the door (`?model=expression-2`) before they download, so
+    another account's private avatar is never downloaded or installed.
+  * `downloadEssence2Bundle` takes `apiSecret` and asks the platform door for the entry's `agentId`
+    (`?model=essence-2`), before it downloads and for a kept bundle, never the entry's `url` (which you pass and
+    which is not bound to the agent). The public catalog's avatars answer with no key, as before; an account's own
+    bundle needs its `apiSecret`.
+  * `BithumanAvatar.load` checks a path one of these functions returned (a `.door-auth` folder beside it), and the
+    folder `setExpression2AgentDir` named, with the `apiSecret` you pass to `load`, as the installer would: an app
+    that saved the path cannot skip the check. Your app's own files elsewhere are not checked.
   * Behaviour change: the first open of each kept avatar after updating asks the door once (a cache from an earlier
     version has no marks), and with the door down that one open fails. A code bitHuman's door does not know is
     refused.
-* **iOS / macOS: the pod declares the floor of the engines it links (high).** The pods declared iOS 16.0 and macOS
-  13.0 while the staged Essence 2 engine (`essence2-v1.15.3`'s `libessence2.a`) is built for iOS 26 and macOS 26
-  (and the on-device brain's macOS library for macOS 26). An app at the declared floor that linked Essence 2 could
-  not start on iOS below 18.4 or macOS below 15.4, whether it used Essence 2 or not. Each pod now reads the floor
-  from the binaries it vendors: iOS 26.0 and macOS 26.0 with today's engines, so a Podfile below that fails
-  `pod install` with the floor named, instead of building an app that crashes at launch. An app whose `Podfile.lock`
-  already resolves this pod gets only a CocoaPods warning there, so its build now fails by name instead: the pod
-  puts the floor in the app target's preprocessor definitions and `BHDeploymentFloor.h`, in the pod's module,
-  stops an app compiled below it (on macOS Swift already refuses the import). An iOS app for iOS 16 to
-  25 bootstraps with `BITHUMAN_SKIP_ESSENCE2=1` (Expression 2 only; the pod then declares iOS 16.0). Essence 2 now
-  also refuses by name below iOS 26 / macOS 26 at `load` (`unsupported`), ready for an Essence 2 engine rebuilt at
-  the package floor.
-* **Android:** the same cross-account gap exists in the native stores this plugin opens on Android
-  (`essence2-android` 0.9.3, `expression2-android` 0.5.2). It is closed by `essence2-android` 0.9.4 and
-  `expression2-android` 0.6.0, which this version pins before it is tagged.
+* **iOS / macOS: an app that links Essence 2 starts on every OS the pod declares (high).** Through 2.6.35 the pods
+  declared iOS 16.0 and macOS 13.0 while the staged Essence 2 engine (`essence2-v1.15.3`'s `libessence2.a`) was
+  built for iOS 26 and macOS 26: an app at the declared floor could not start on iOS below 18.4 or macOS below 15.4,
+  whether it used Essence 2 or not. This version stages `essence2-v1.15.4`, the same engine built at the package
+  floor (iOS 16, macOS 13); Essence 2 renders on iOS 26 / macOS 26 and later and refuses by name below that at
+  `load` (`unsupported`). Each pod also reads its floor from the binaries it vendors (the highest minimum of every
+  device slice; a binary it cannot read counts as 26.0): iOS 16.0 and macOS 26.0 with today's engines (the
+  on-device brain's macOS library is built for macOS 26). An app below the floor fails `pod install` with the floor
+  named, and an app whose `Podfile.lock` already resolves the pod fails its build by name (`BHDeploymentFloor.h`;
+  keep `$(inherited)` in your target's `GCC_PREPROCESSOR_DEFINITIONS`).
+* **Android: the same rules (high).** The native stores this plugin opens on Android had the same cross-account gap
+  through `essence2-android` 0.9.3 and `expression2-android` 0.5.2; 0.9.4 and 0.6.0 close it in the stores, and are
+  pinned before this version is tagged. The plugin applies the owner's offline rule on top, which the stores'
+  marks do not: `load` asks bitHuman's door for the code with the load's `apiSecret` when that credential's last
+  yes is more than 24 hours old (otherwise at once, and the door is asked in the background). A refusal, or a door
+  that cannot be asked then, fails the load with `BithumanEntitlementException`. On the current pins this also
+  refuses another account before the store's cache is asked.
+* **A load runs as its own credential (medium).** On Android a load of Expression 2 without `apiSecret` built a
+  store whose door fell back to the process-wide credential an earlier load had set, so it could open, and bill,
+  an earlier account's avatar in the same process (also after a Dart hot restart). It is now refused by name, as
+  Essence 2 already was. On iOS and macOS a load without `apiSecret` clears the engines' credential instead of
+  keeping the last one. New: `BithumanAvatar.clearCredentials()` for sign-out.
 
 ### Changed
 

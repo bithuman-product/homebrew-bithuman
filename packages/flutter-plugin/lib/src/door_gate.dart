@@ -9,7 +9,7 @@
 // was never asked before a kept file opened, and the session meter checks the key, not the avatar.
 //
 // THE GATE: the same model as the native stores' fix (essence2-android 0.9.4, expression2-android 0.6.0,
-// Essence2Kit and Expression2Download in Swift 2.20.2):
+// Essence2Kit and Expression2Download in Swift 2.20.3):
 //  * A kept avatar opens only for a credential that holds an ENTITLEMENT MARK for it:
 //    `<cacheDir>/.door-auth/<entry>/<tag>`, where <tag> is the native stores' credential tag (32 hex
 //    of SHA-256 over "bithuman.door.auth.v1\0" + the credential, "" without one; the Swift stores hash

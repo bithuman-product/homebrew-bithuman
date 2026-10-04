@@ -11,8 +11,8 @@ connect it to a voice conversation through bitHuman's realtime relay. Full guide
 | Platform | Status |
 | --- | --- |
 | Android (arm64-v8a phone, API 29+) | Supported: Expression 2 and Essence 2 on the device. `load` takes the agent code and downloads the avatar. Emulators cannot load the engines. |
-| iOS (arm64 device) | Supported: Expression 2 and Essence 2 on the device. Run `scripts/bootstrap.sh` once; your app supplies the avatar files. iOS 26.0+ with Essence 2 (the staged Essence 2 engine is built for iOS 26); iOS 16.0+ for Expression 2 alone (`BITHUMAN_SKIP_ESSENCE2=1 scripts/bootstrap.sh`). |
-| macOS (Apple silicon) | Supported, as iOS; macOS 26.0+ (the staged engines are built for macOS 26). Also `brew install llama.cpp onnxruntime`, which the plugin links. |
+| iOS (arm64 device) | Supported: Expression 2 and Essence 2 on the device. Run `scripts/bootstrap.sh` once; your app supplies the avatar files. iOS 16.0+. Essence 2 renders on iOS 26 and later; below that `load(engine: 'essence2')` fails with `unsupported`. |
+| macOS (Apple silicon) | Supported, as iOS; macOS 26.0+ (the on-device brain's staged library is built for macOS 26). Also `brew install llama.cpp onnxruntime`, which the plugin links. |
 
 ## Install
 
@@ -40,13 +40,12 @@ android {
 
 On iOS and macOS, run `scripts/bootstrap.sh` once in the plugin's folder (for a git dependency,
 `packages/flutter-plugin` under `~/.pub-cache/git/homebrew-bithuman-…`). It downloads the published engines and
-checks their sha256. Then raise the deployment targets to the floor of the engines it staged: the pod reads it from
-the files and `pod install` names it (`platform :ios, '26.0'` in `ios/Podfile` and `platform :osx, '26.0'` in
-`macos/Podfile` with today's engines, and the Runner targets to match). For an iOS app that supports iOS 16 to 25,
-bootstrap with `BITHUMAN_SKIP_ESSENCE2=1` (Expression 2 only, `platform :ios, '16.0'`): an app that links the
-current Essence 2 engine cannot start on iOS below 18.4. An app below the floor does not build: a fresh `pod install`
-refuses it, and an app whose `Podfile.lock` already has the pod fails at compile time with a `bithuman:` message
-naming the fix.
+checks their sha256. Then set the deployment targets to at least the floor of the engines it staged: the pod reads it
+from the files and `pod install` names it (`platform :ios, '16.0'` in `ios/Podfile` and `platform :osx, '26.0'` in
+`macos/Podfile` with today's engines, and the Runner targets to match). An app below the floor does not build: a fresh
+`pod install` refuses it, and an app whose `Podfile.lock` already has the pod fails at compile time with a `bithuman:`
+message naming the fix. That compile-time check reaches your app through `$(inherited)`: if your Runner target sets
+`GCC_PREPROCESSOR_DEFINITIONS`, keep `$(inherited)` in it.
 
 ## Show an avatar
 
@@ -229,6 +228,7 @@ A 3rd engine appends one `EngineDescriptor` here (and one line in
 | `audioInterruptions` | The platform took the session's sound away (`began`: a phone call ringing or answered, also from its banner or notification; Siri or an assistant; another app's call) or gave it back, as `BithumanAudioInterruption`s with a `reason` (`call`, `focus`, `system`). iOS and Android; macOS never. |
 | `dispose()` | Drop the native runtime. Idempotent. |
 | `static loadEvents` | Android: what a running `load` is doing, as `BithumanLoadEvent`s — `fetch` (exact bytes of the identity's download), `fetched`, `prepare`, `prepared`. Filter on `code`. iOS/macOS send none. |
+| `static clearCredentials()` | Sign-out: the engines forget the API secret the last `load` set (2.6.36). |
 | `static cancelLoad(code)` | Android: stop a running `load` of `code`; it throws `PlatformException` `load_cancelled`, and the download keeps what it has for next time. |
 
 Plus catalog helpers (anonymous, no auth):
@@ -244,13 +244,19 @@ Avatar downloads (iOS / macOS; Android's `load` downloads by code itself):
 | --- | --- |
 | `downloadAgentImx(agent, cacheDir, {apiSecret, allowedHosts})` | An Essence 2 character's `.imx` into `cacheDir`; returns its path for `load`. |
 | `downloadExpression2Avatar(code, avatarUrl, cacheDir, {apiSecret, allowedHosts})` | An Expression 2 avatar, verified and expanded into `cacheDir/<code>/`; returns the directory. |
+| `downloadEssence2Bundle(entry, cacheDir, {apiSecret, allowedHosts})` | An Essence 2 `.elevatedir` from `fetchEssence2Catalog`, verified and expanded into `cacheDir`; returns the directory. |
 
 `cacheDir` belongs to your app, not to an account. Since 2.6.36 a kept avatar is returned only to a credential
 bitHuman's door has said yes to for it: pass the signed-in account's `apiSecret` (none: public avatars only). With
 that yes on the device the kept copy opens at once, also offline: for 24 hours after the door last answered for an
 account's own avatar, 7 days for a public one. Otherwise the door is asked first, and a refusal (another account's
 private avatar) or a door that cannot be asked throws `BithumanEntitlementException` (`refused` says which). The key
-is sent only to bitHuman's door and is never written to disk.
+is sent only to bitHuman's door and is never written to disk. The same rule holds for `downloadEssence2Bundle` (pass
+`apiSecret`), for a path one of these functions returned that you pass to `load` later (`load` checks it with its own
+`apiSecret`), and on Android, where `load` asks the door when the credential's last yes is more than 24 hours old.
+
+Each `load` runs as the `apiSecret` you pass it, never as an earlier load's: Android refuses a load without one, and
+iOS / macOS clear the engines' credential. When an account signs out, call `BithumanAvatar.clearCredentials()`.
 
 ### `BithumanRealtimeSession`
 

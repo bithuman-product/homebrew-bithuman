@@ -101,6 +101,11 @@ ORT_VENDOR_REPO="${ORT_VENDOR_REPO:-bithuman-product/bithuman-models}"
 # (Through 2.6.19 a BITHUMAN_MODELS_REF pinned the private repository revision whose engine
 # ADAPTER SOURCE this pod compiled. Since 2.6.20 no engine source is fetched: see below.)
 
+# ★MOVED 2026-10-03 to essence2-v1.15.4 (bithuman-models #1826 + #1833, Swift package 2.20.3 / #200): the same engine
+# rebuilt at the package floor (every iOS device object minos 16.0, macOS 13.0) and refusing below iOS / macOS 26 at
+# be_essence2_create. With v1.15.3 (built for 26.0) an app at iOS 16 that linked it could not start below iOS 18.4.
+# Expression 2 / UnifiedModelHeader v2.20.3 with it (Expression2Download opens a cached avatar per credential).
+# The C interface is unchanged.
 # ★MOVED 2026-09-28 to essence2-v1.15.0 (bithuman-models #1621 @ 225c63782): on macOS the engine's licensing
 # and metering core leaves the archive for EngineCore (ENGINECORE_* below, staged by stage_enginecore). The C
 # interface gains ADDITIVE calls the adapter does not use, so BITHUMAN_MODELS_REF stays.
