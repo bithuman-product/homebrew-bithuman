@@ -195,7 +195,13 @@ class RecordingVoiceHost implements VoiceHost {
 
   @override
   Future<void> localReplyText(int id, String text, {bool done = false, int result = 0}) async =>
-      calls.add('localReplyText:$id');
+      calls.add('localReplyText:$id:${done ? 'done:$result' : text}');
+
+  @override
+  Future<bool> localSpeakText(String text) async {
+    calls.add('localSpeakText:$text');
+    return true;
+  }
 
   @override
   Future<bool> localInjectWav(String path, {String? tag, double? speechStart, double? speechEnd}) async {

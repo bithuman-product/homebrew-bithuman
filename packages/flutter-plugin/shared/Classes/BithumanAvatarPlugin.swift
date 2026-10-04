@@ -641,6 +641,16 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
             "textureId": textureId, "micGen": playoutGen, "played": played, "fed": fed,
           ])
         }
+        // Measurement (debugArmFirstHeard): when the first sample of the next reply will be HEARD
+        // (avatar start-up hold and output latency included) — the same probe the on-device brain's
+        // `heard` metric uses, so the two paths are timed alike.
+        io.onFirstHeard = { [weak self] at, lat in
+          DispatchQueue.main.async {
+            self?.channel?.invokeMethod("firstHeard", arguments: [
+              "textureId": textureId, "micGen": playoutGen, "heardAtMs": at, "outputLatencyMs": lat,
+            ])
+          }
+        }
       }
       let enableMic = args["enableMic"] as? Bool ?? true
       let vadThreshold = args["vadThreshold"] as? Int
@@ -877,12 +887,19 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
         // The brain blocks in HostReplyLlm.stream while the app streams the reply back:
         // reply_request → Dart (its HTTP stream) → localReplyText; reply_cancel on barge-in.
         options.hostReply = HostReplyLlm(
-          request: { [weak handler] id, msgs, maxTokens in
+          request: { [weak handler] id, msgs, maxTokens, continuation in
+            // `text`: the user's turn (the whole utterance on a continuation) — what a server that
+            // holds the memory (the relay's text brain) needs; `messages` is for one that does not.
+            let text = msgs.last(where: { $0["role"] == "user" })?["content"] ?? ""
             handler?.emit(["kind": "reply_request", "id": id, "messages": msgs, "maxTokens": maxTokens,
+                           "text": text, "continuation": continuation,
                            "hostMs": Int64(Date().timeIntervalSince1970 * 1000)])
           },
-          cancelRequest: { [weak handler] id in
-            handler?.emit(["kind": "reply_cancel", "id": id, "hostMs": Int64(Date().timeIntervalSince1970 * 1000)])
+          cancelRequest: { [weak handler] id, heard in
+            var ev: [String: Any] = ["kind": "reply_cancel", "id": id,
+                                     "hostMs": Int64(Date().timeIntervalSince1970 * 1000)]
+            if let heard { ev["heardChars"] = heard }
+            handler?.emit(ev)
           })
       }
       #endif
@@ -957,6 +974,30 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       }
       #endif
       result(nil)
+
+    case "debugArmFirstHeard":
+      // Measurement: report (firstHeard) when the next audio handed to the player will be heard.
+      if let args = call.arguments as? [String: Any], let textureId = args["textureId"] as? Int64 {
+        audioIOs[textureId]?.armFirstHeard()
+      }
+      result(nil)
+
+    case "localSpeakText":
+      // The hybrid brain: the character's own line, spoken verbatim (the server's greeting).
+      guard let args = call.arguments as? [String: Any], let text = args["text"] as? String else {
+        result(FlutterError(code: "BAD_ARGS", message: "localSpeakText requires text", details: nil)); return
+      }
+      #if CONVERSE_AVAILABLE
+      if #available(macOS 26.0, iOS 26.0, *) {
+        var ok = false
+        for (_, ctrl) in converseControllers {
+          ok = ((ctrl as? LocalConverseController)?.speak(text) ?? false) || ok
+        }
+        result(ok)
+        return
+      }
+      #endif
+      result(false)
 
     case "localReplyText":
       // The hybrid brain: a piece of the app's reply to request `id` (see HostReplyLlm).

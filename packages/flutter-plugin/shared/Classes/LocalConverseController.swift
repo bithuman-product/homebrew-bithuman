@@ -90,6 +90,18 @@ final class LocalConverseController: @unchecked Sendable {
     private var replyAudibleAt: Date?           // first TTS audio of the reply to that turn
     private var segmentStartAt: Date?           // first partial of the segment now being recognized
     private static let continuationMaxSecs: TimeInterval = 10
+    // ── What the person heard of the current reply (the hybrid brain's barge report) ──
+    // The relay keeps only what was heard in its memory (response.cancel heard_chars). The voice
+    // plays the reply's text in order at a steady rate, so heard ≈ chars × played / total audio:
+    // the reply's text so far (BOT_CHUNK, Unicode scalars), the audio handed to the speaker for it,
+    // and when it became audible (the first-heard probe, which includes the output latency).
+    // All guarded by `lock`; reset at each commit / spoken line.
+    private var replyChars = 0
+    private var replyAudioSecs: Double = 0
+    private var replyHeardAt: Date?
+    /// Supertonic's speaking rate (characters per second), used only for the part of a reply not
+    /// synthesized yet when the person cuts in (English, the default speed).
+    private static let voiceCharsPerSec = 15.0
     /// Barge-latency instrumentation. Set BITHUMAN_DEBUG_BARGE=1 to log the
     /// timeline (bot-speaking edge, each ASR partial/final with word count, and
     /// the stop) so we can pinpoint the stop-the-moment-I-talk delay.
@@ -137,6 +149,7 @@ final class LocalConverseController: @unchecked Sendable {
             io?.playSpeakerPCM24k(data)
             let secs = Double(data.count / 2) / 24000.0
             self.lock.lock()
+            self.replyAudioSecs += secs
             let wasSilent = self.botAudibleUntil < Date()
             let base = max(self.botAudibleUntil, Date())
             self.botAudibleUntil = base.addingTimeInterval(secs)
@@ -160,9 +173,15 @@ final class LocalConverseController: @unchecked Sendable {
         }
         converse.onMetric = { [weak self] m in self?.metric(m) }
         io.onFirstHeard = { [weak self] at, lat in
-            self?.metric(["ev": "heard", "heardAtMs": at, "outputLatencyMs": lat])
+            guard let self else { return }
+            self.lock.lock(); self.replyHeardAt = Date(timeIntervalSince1970: Double(at) / 1000); self.lock.unlock()
+            self.metric(["ev": "heard", "heardAtMs": at, "outputLatencyMs": lat])
         }
-        converse.onBotChunk  = { [weak self] t in self?.onEvent?(["kind": "bot", "text": t]) }
+        converse.onBotChunk  = { [weak self] t in
+            guard let self else { return }
+            self.lock.lock(); self.replyChars += t.unicodeScalars.count; self.lock.unlock()
+            self.onEvent?(["kind": "bot", "text": t])
+        }
         converse.onUserFinal = { [weak self] t in self?.onEvent?(["kind": "user", "text": t]) }
         converse.onState     = { [weak self] s in
             guard let self else { return }
@@ -197,6 +216,15 @@ final class LocalConverseController: @unchecked Sendable {
         // held across a callback into io), so there is no re-entrancy or deadlock.
         io.onBarge = { [weak self] in
             guard let self else { return }
+            #if CONVERSE_HOST_LLM
+            // The hybrid brain: tell the app what the person heard BEFORE the brain drops the reply
+            // (reply_cancel heardChars), also when its text had already finished streaming.
+            if let host = self.options.hostReply as? HostReplyLlm {
+                let (heard, speaking) = self.heardSoFar()
+                host.barge(heard: heard, stillSpeaking: speaking)
+                self.metric(["ev": "barge_heard", "heardChars": heard, "speaking": speaking])
+            }
+            #endif
             self.converse.interrupt()
             self.lock.lock(); self.botAudibleUntil = .distantPast; self.lock.unlock()
         }
@@ -311,12 +339,17 @@ final class LocalConverseController: @unchecked Sendable {
                         // let the brain answer the whole utterance.
                         if busy || self.botSpeaking() { self.io?.barge(reason: "asr-continuation") }
                         self.lock.lock(); self.lastAsrCommitAt = Date(); self.replyAudibleAt = nil; self.lock.unlock()
+                        self.resetHeard()
                         self.metric(["ev": "commit", "text": t, "continuation": true])
                         self.io?.armFirstHeard()
+                        #if CONVERSE_HOST_LLM
+                        (self.options.hostReply as? HostReplyLlm)?.markContinuation()
+                        #endif
                         self.converse.pushText(t, continuation: true)
                         self.onEvent?(["kind": "state", "state": 2])
                     } else if !self.botSpeaking() {
                         self.lock.lock(); self.lastAsrCommitAt = Date(); self.replyAudibleAt = nil; self.lock.unlock()
+                        self.resetHeard()
                         self.metric(["ev": "commit", "text": t, "continuation": false])
                         self.io?.armFirstHeard()
                         self.converse.pushText(t)
@@ -390,9 +423,42 @@ final class LocalConverseController: @unchecked Sendable {
         io?.barge()
         // A typed turn (or the greeting directive) is never continued by speech.
         lock.lock(); lastAsrCommitAt = nil; replyAudibleAt = nil; lock.unlock()
+        resetHeard()
         metric(["ev": "commit", "text": t, "typed": true])
         io?.armFirstHeard()
         converse.pushText(t)
+    }
+
+    /// The hybrid brain: speak [t] as the character's own line, verbatim (`localSpeakText`: the
+    /// server's greeting). No reply_request, no user turn. False when the staged brain cannot.
+    func speak(_ t: String) -> Bool {
+        let line = t.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty else { return false }
+        if botSpeaking() { io?.barge(reason: "speak") }
+        lock.lock(); lastAsrCommitAt = nil; replyAudibleAt = nil; lock.unlock()
+        resetHeard()
+        io?.armFirstHeard()
+        let ok = converse.pushSpeak(line)
+        metric(["ev": "speak", "chars": line.unicodeScalars.count, "ok": ok])
+        return ok
+    }
+
+    private func resetHeard() {
+        lock.lock(); replyChars = 0; replyAudioSecs = 0; replyHeardAt = nil; lock.unlock()
+    }
+
+    /// (characters of the current reply the person has heard, whether its voice is still playing).
+    /// heard = chars × played / total, the total audio being the synthesized audio or, for text not
+    /// synthesized yet, the text at the voice's rate. Nothing audible yet → 0.
+    private func heardSoFar() -> (Int, Bool) {
+        lock.lock(); defer { lock.unlock() }
+        let now = Date()
+        let speaking = now < botAudibleUntil
+        guard replyChars > 0, let at = replyHeardAt, now > at else { return (0, speaking) }
+        let played = min(now.timeIntervalSince(at), replyAudioSecs)
+        let total = max(replyAudioSecs, Double(replyChars) / Self.voiceCharsPerSec)
+        guard total > 0 else { return (0, speaking) }
+        return (min(replyChars, Int((Double(replyChars) * played / total).rounded())), speaking)
     }
 
     // MARK: - the hybrid brain (host reply) + the harness

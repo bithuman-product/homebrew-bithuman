@@ -329,6 +329,23 @@ final class ConverseSession: @unchecked Sendable {
         #endif
     }
 
+    /// Speak [t] as the CHARACTER's own line, verbatim — no model call, no user turn (the hybrid
+    /// brain's greeting, written by the app's server). False when the staged libconverse has no
+    /// BC_PUSH_SPEAK (the caller then says nothing rather than make it a paid user turn).
+    func pushSpeak(_ t: String) -> Bool {
+        #if CONVERSE_PUSH_SPEAK
+        outputLock.lock()
+        if discardOutput { armResume = true }
+        firstPullPending = true
+        outputLock.unlock()
+        let rc = t.withCString { bc_session_push_text_ex(handle, $0, UInt32(BC_PUSH_SPEAK)) }
+        return rc == BC_OK
+        #else
+        _ = t
+        return false
+        #endif
+    }
+
     /// Barge: cancel the in-flight reply immediately and flush everything it
     /// produced, mirroring cloud (response.cancel + drop queued audio).
     ///   1. Bump turnGen so any chunk already pulled-but-not-yet-FORWARDED is

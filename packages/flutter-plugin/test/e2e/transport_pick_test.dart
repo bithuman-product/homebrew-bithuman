@@ -20,7 +20,8 @@
 // means the whole file is adopted and NONE of it is executed — a test that
 // exists and does not run. Read against `pickTransport`, that guard is true
 // for exactly ONE of them: the factory's single platform branch is
-// `localMode && (isMacOS || isIOS)`. The cloud default, the webrtc override
+// `localMode && (isMacOS || isIOS || isAndroid)` (Android since the plugin's own
+// on-device brain). The cloud default, the webrtc override
 // and the unknown-override fallback have no platform branch at all and now
 // run on every host. The LOCAL case keeps its guard, with the branch it
 // needs named in the reason instead of a bare boolean.
@@ -95,9 +96,9 @@ void main() {
     // No dispose: LocalConverseTransport.dispose() calls stop() →
     // localAudioStop on a session that never started; keep the test inert.
   },
-      skip: (Platform.isMacOS || Platform.isIOS)
+      skip: (Platform.isMacOS || Platform.isIOS || Platform.isAndroid)
           ? false
-          : 'pickTransport routes LOCAL only on macOS/iOS — the converse brain '
-              'binds Apple SpeechAnalyzer; off Apple the factory correctly falls '
+          : 'pickTransport routes LOCAL only on macOS/iOS/Android — the platforms '
+              'with an on-device brain; elsewhere the factory correctly falls '
               'through to the cloud transport');
 }

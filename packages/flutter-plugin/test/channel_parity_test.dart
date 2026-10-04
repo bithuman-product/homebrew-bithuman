@@ -21,13 +21,22 @@ const Map<String, Map<String, String>> unsupported = {
     'ai.bithuman.window startDrag': 'macOS window chrome only; the Dart call ignores the error',
     'ai.bithuman.window enterBubble': 'macOS window chrome only; the Dart call ignores the error',
     'ai.bithuman.window exitBubble': 'macOS window chrome only; the Dart call ignores the error',
-    // The on-device brain's Apple-only calls (Android's local brain is LocalBrain / #147).
+    // Apple's Foundation Models: no Android counterpart.
     'ai.bithuman.avatar appleIntelligenceStatus':
         "Apple's Foundation Models only; the static call answers notBuilt on MissingPluginException",
+    // The hybrid brain's calls. One Dart surface for both platforms; the Android native side is the
+    // Android hybrid brain (homebrew-bithuman #205), which removes these three entries when it lands.
+    // Until then Android answers localAudioStart 'unsupported' and isLocalModeSupported false, so no
+    // reply_request is ever emitted there and none of these is reached.
     'ai.bithuman.avatar localReplyText':
-        'sent only in answer to a reply_request event, which only the Apple hybrid brain emits',
+        'sent only in answer to a reply_request event, which Android emits once its hybrid brain (#205) lands',
+    'ai.bithuman.avatar localSpeakText':
+        'the hybrid greeting; localSpeakText answers false on MissingPluginException (no line is spoken)',
     'ai.bithuman.avatar localInjectWav':
-        'testing API of the Apple local session; localInjectWav answers false on MissingPluginException',
+        'testing API of a local session; localInjectWav answers false on MissingPluginException',
+    // Measurement probe (debug / profile harnesses), Apple's playout clock.
+    'ai.bithuman.avatar debugArmFirstHeard':
+        'measurement only; debugArmFirstHeard ignores MissingPluginException (no probe on Android)',
   },
   'apple': {
     // Load progress is an Android channel; iOS and macOS send no load events yet.

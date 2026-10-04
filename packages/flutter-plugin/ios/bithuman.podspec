@@ -301,6 +301,8 @@ Pod::Spec.new do |s|
     # libconverse >= 2.5.0 adds bc_session_create_with_llm: the brain can run
     # Apple's on-device model (Foundation Models) instead of llama.cpp.
     conds << 'CONVERSE_HOST_LLM' if hdr && File.read(hdr).include?('bc_session_create_with_llm')
+    # BC_PUSH_SPEAK (the hybrid brain's greeting: the character's own line, spoken verbatim).
+    conds << 'CONVERSE_PUSH_SPEAK' if hdr && File.read(hdr).include?('BC_PUSH_SPEAK')
   end
   conds << 'SHERPA_ASR_AVAILABLE' if sherpa_lib
   pod_xcconfig['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = conds.join(' ')

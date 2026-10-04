@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'dart:io' show Directory, File, HttpClient, HttpClientResponse, Process;
 import 'dart:typed_data' show Int16List, Uint8List;
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/services.dart';
 
 import 'src/agent_imx.dart';
@@ -81,6 +82,11 @@ class BithumanAvatar implements VoiceHost {
           if (e != null && !avatar._interruptionController.isClosed) {
             avatar._interruptionController.add(e);
           }
+        case 'firstHeard':
+          // Measurement (debugArmFirstHeard): when the next reply's first sample is heard.
+          if (args?['micGen'] != avatar._micGen) return null;
+          final at = args?['heardAtMs'];
+          if (at is int && !avatar._firstHeardController.isClosed) avatar._firstHeardController.add(at);
         case 'speechPlayout':
           // How much of the agent's audio has been heard (captions follow it). A push from an
           // earlier audio unit (another micGen) counts samples of a coordinate that is gone.
@@ -500,12 +506,13 @@ class BithumanAvatar implements VoiceHost {
   }
 
   /// Whether LOCAL mode (the on-device converse brain) can run on this OS.
-  /// The brain binds Apple's SpeechAnalyzer, which is `@available(macOS 26.0,
+  /// On Apple the brain binds SpeechAnalyzer, which is `@available(macOS 26.0,
   /// iOS 26.0)`, so on older systems [localAudioStart] would fail with
-  /// UNSUPPORTED_OS at session start. Probe this once at startup and disable the
-  /// LOCAL-mode toggle (with a clear reason) when it returns false, rather than
-  /// surfacing a cryptic runtime error. False on non-Apple platforms and on
-  /// older plugin builds without the probe.
+  /// UNSUPPORTED_OS at session start. On Android it needs a native side that
+  /// carries the brain (the Android hybrid brain) on an arm64 device. Probe this
+  /// once at startup and disable the LOCAL-mode toggle (with a clear reason)
+  /// when it returns false, rather than surfacing a cryptic runtime error. False
+  /// on other platforms and on older plugin builds without the probe.
   static Future<bool> isLocalModeSupported() async {
     try {
       return await _channel.invokeMethod<bool>('isLocalModeSupported') ?? false;
@@ -514,17 +521,21 @@ class BithumanAvatar implements VoiceHost {
     }
   }
 
-  /// LOCAL mode (macOS): run the on-device converse brain (Apple SpeechAnalyzer
-  /// → Qwen → Supertonic) instead of the cloud Realtime WebSocket. Reuses the
-  /// same VP-IO audio + avatar Texture as [audioStart]; the brain feeds the
-  /// avatar lipsync + speaker directly on-device. [ggufPath] is the local LLM
-  /// .gguf; [supertonicAssets] is the Supertonic ONNX assets dir. The metered
-  /// avatar render still needs your API secret — the `apiSecret:` passed to
-  /// [load] (or BITHUMAN_API_SECRET in the process environment).
+  /// LOCAL mode: run the on-device converse brain instead of the cloud Realtime
+  /// WebSocket. Reuses the same audio + avatar Texture as [audioStart]; the
+  /// brain feeds the avatar lipsync + speaker directly on-device. [ggufPath] is
+  /// the local LLM .gguf; [supertonicAssets] is the Supertonic ONNX assets dir.
+  /// The metered avatar render still needs your API secret — the `apiSecret:`
+  /// passed to [load] (or BITHUMAN_API_SECRET in the process environment).
   ///
-  /// [llm]: `auto` (default) runs Apple's on-device model where
+  /// [llm] (Apple): `auto` (default) runs Apple's on-device model where
   /// [appleIntelligenceStatus] is `available` and the GGUF otherwise; `apple` /
   /// `llama` force one. [ggufPath] may be null when Apple's model is used.
+  ///
+  /// [replyMode] `'host'` is THE HYBRID BRAIN (iOS and Android): see
+  /// [VoiceHost.localAudioStart] for the event contract; most apps pass a
+  /// `HostReplySource` to `LocalConverseTransport(replySource:)` instead of
+  /// calling this. [injectAudio] is ignored in release builds.
   @override
   Future<void> localAudioStart({
     String? ggufPath,
@@ -552,13 +563,14 @@ class BithumanAvatar implements VoiceHost {
       'systemPrompt': systemPrompt,
       'llm': llm,
       if (refusalReply.isNotEmpty) 'refusalReply': refusalReply,
-      if (replyMode != 'local') 'replyMode': replyMode,
+      'replyMode': replyMode,
       'sttDir': ?sttDir,
       if (minSilenceMs > 0) 'minSilenceMs': minSilenceMs,
       if (bargeOnSpeech) 'bargeOnSpeech': true,
-      if (injectAudio) 'injectAudio': true,
-      if (injectAudio) 'injectNoiseDb': injectNoiseDb,
-      if (maxSentences > 0) 'maxSentences': maxSentences,
+      // Testing only: a release build never replaces the microphone.
+      if (injectAudio && !kReleaseMode) 'injectAudio': true,
+      if (injectAudio && !kReleaseMode) 'injectNoiseDb': injectNoiseDb,
+      'maxSentences': maxSentences,
     });
   }
 
@@ -570,11 +582,25 @@ class BithumanAvatar implements VoiceHost {
     await _channel.invokeMethod('localReplyText', {'id': id, 'text': text, 'done': done, 'result': result});
   }
 
+  /// The hybrid brain: speak [text] as the character's own line, verbatim (see
+  /// [VoiceHost.localSpeakText]). False where the native brain cannot.
+  @override
+  Future<bool> localSpeakText(String text) async {
+    if (_disposed || text.trim().isEmpty) return false;
+    try {
+      return await _channel.invokeMethod<bool>('localSpeakText', {'text': text}) ?? false;
+    } on MissingPluginException {
+      return false; // a native side without the call (Android until its hybrid brain lands)
+    } on PlatformException {
+      return false; // e.g. an older libconverse without BC_PUSH_SPEAK
+    }
+  }
+
   /// Testing: speak a 16 kHz WAV into the local session's speech-to-text
-  /// (see [localAudioStart] `injectAudio: true`).
+  /// (see [localAudioStart] `injectAudio: true`). Always false in release builds.
   @override
   Future<bool> localInjectWav(String path, {String? tag, double? speechStart, double? speechEnd}) async {
-    if (_disposed) return false;
+    if (_disposed || kReleaseMode) return false;
     try {
       return await _channel.invokeMethod<bool>('localInjectWav', {
             'path': path,
@@ -584,7 +610,7 @@ class BithumanAvatar implements VoiceHost {
           }) ??
           false;
     } on MissingPluginException {
-      return false; // Android: no Apple local session here
+      return false; // a native side without the call
     }
   }
 
@@ -822,6 +848,24 @@ class BithumanAvatar implements VoiceHost {
     return _playoutController.stream;
   }
 
+  final StreamController<int> _firstHeardController = StreamController<int>.broadcast();
+
+  /// Measurement (debug / profile builds; iOS and macOS): after [debugArmFirstHeard], the wall
+  /// clock (ms since 1970) at which the first sample of the next audio handed to the player is
+  /// HEARD — the avatar's start-up hold and the output latency included. The hybrid brain's
+  /// `heard` metric is the same probe, so a harness times the cloud and on-device paths alike.
+  Stream<int> get debugFirstHeard => _firstHeardController.stream;
+
+  /// Arms [debugFirstHeard] once (a no-op in release builds and on Android).
+  Future<void> debugArmFirstHeard() async {
+    if (_disposed || kReleaseMode) return;
+    try {
+      await _channel.invokeMethod('debugArmFirstHeard', {'textureId': textureId});
+    } on MissingPluginException {
+      // Android: no probe
+    }
+  }
+
   final StreamController<BithumanModelRejected> _rejectionController =
       StreamController<BithumanModelRejected>.broadcast();
   BithumanModelRejected? _modelRejection;
@@ -863,6 +907,7 @@ class BithumanAvatar implements VoiceHost {
     unawaited(_interruptionController.close());
     unawaited(_playoutController.close());
     unawaited(_rejectionController.close());
+    unawaited(_firstHeardController.close());
     await _channel.invokeMethod('dispose', {'textureId': textureId});
   }
 }
