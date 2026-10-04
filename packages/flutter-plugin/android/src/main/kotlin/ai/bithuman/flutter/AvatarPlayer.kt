@@ -840,7 +840,12 @@ class AvatarPlayer(
                     if (cutAtMs > 0) Log.i("bhbarge", "RESET landed sinceCutMs=${t0 - cutAtMs} resetMs=${System.currentTimeMillis() - t0} leaks=$nLeak")
                 }
                 is Tail -> {
-                    replyBoundary = true; replyFirstPending = false
+                    // The boundary moves, but a reply whose first mouth is not on the glass yet
+                    // keeps its pending mark: a reply fed as a burst (LOCAL mode hands the whole
+                    // synthesized reply over at once, then ends it) reaches Tail BEFORE its first
+                    // frame is presented, and clearing the mark here silenced `bhttfa` for every
+                    // such reply. Only a Reset (a cut) discards it.
+                    replyBoundary = true
                     // Where this reply's audio stops. Used for one thing only: bounding the
                     // end-of-conversation drain above. Never to place a frame in time.
                     synchronized(audioLock) { if (replyEnds.lastOrNull() != audioLen) replyEnds.addLast(audioLen) }

@@ -180,9 +180,17 @@ class RecordingVoiceHost implements VoiceHost {
     String? voice,
     int vadThreshold = 0,
     String systemPrompt = '',
+    String replyMode = 'local',
+    String? sttDir,
+    int maxSentences = 0,
   }) async {
     calls.add('localAudioStart:$ggufPath');
   }
+
+  @override
+  Future<void> localReplyText(int id, String text,
+          {bool done = false, int result = 0}) async =>
+      calls.add('localReplyText:$id:${done ? 'done' : text}');
 
   @override
   Future<void> localAudioStop() async => calls.add('localAudioStop');

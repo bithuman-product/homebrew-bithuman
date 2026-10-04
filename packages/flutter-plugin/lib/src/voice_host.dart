@@ -123,13 +123,24 @@ abstract class VoiceHost {
   /// Run the on-device converse brain (ASR → LLM → TTS) instead of a cloud
   /// provider. Registers the event channel synchronously and returns promptly;
   /// the model load runs off-thread and reports through [converseEvents].
+  /// [replyMode] `'host'` (Android): speech in and the voice stay on-device and
+  /// the app streams the reply text in ([localReplyText]) for each
+  /// `reply_request` event — [ggufPath] is then unused.
   Future<void> localAudioStart({
     required String ggufPath,
     String? supertonicAssets,
     String? voice,
     int vadThreshold,
     String systemPrompt,
+    String replyMode,
+    String? sttDir,
+    int maxSentences,
   });
+
+  /// replyMode `'host'`: one piece of the reply to the `reply_request` event
+  /// [id]; [done] ends it ([result] 0 ok, 1 refused, 3 error). Pieces for a
+  /// request the brain cancelled (`reply_cancel`) are dropped.
+  Future<void> localReplyText(int id, String text, {bool done, int result});
 
   /// Tear down the local brain and its audio unit.
   Future<void> localAudioStop();

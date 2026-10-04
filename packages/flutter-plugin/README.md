@@ -283,6 +283,135 @@ macOS needs two Homebrew dylibs at link + runtime via `@rpath`:
 `brew install llama.cpp onnxruntime` (the app's xcconfig wires the `@rpath`). The
 cloud OpenAI-Realtime mode needs neither — it's pure Swift.
 
+## Android LOCAL mode (the on-device brain)
+
+`localAudioStart` works on Android (arm64, Android 10+): speech in, the reply and the voice
+all run on the phone, with no cloud and no OpenAI key. The Dart side is the same
+`LocalConverseTransport` that drives Apple's libconverse, with the same channel names and events,
+so an app that runs LOCAL mode on iPhone runs it on a Galaxy unchanged.
+
+| stage | Android | Apple (libconverse) |
+| --- | --- | --- |
+| speech in | silero VAD (400 ms endpoint) + **Moonshine tiny** (sherpa-onnx) | Apple SpeechAnalyzer |
+| reply | **llama.cpp** on the CPU, any chat GGUF (Llama-3.2-1B-Instruct Q4_K_M measured) | llama.cpp (Metal), Qwen2.5-0.5B |
+| voice | **Supertonic** (sherpa-onnx int8 export), voice `M1` by default | Supertonic (fp32) |
+
+The contract is Apple's `libconverse.h` (BC_ABI_VERSION 2) mirrored member for member in
+`android/.../brain/ConverseEngine.kt`: push_audio / push_text / pull_audio / interrupt / reset /
+state, and the same event kinds and states. What the Apple measurements taught is built in from the
+start: reply audio goes to the avatar **as fast as it is synthesized** with an in-order
+end-of-reply flush (no real-time pacing); endpointing is the VAD's own trailing silence (no forced
+finalize); history is capped and the KV cache is reused turn to turn (the prompt prefix is kept,
+and a trimmed history is slid down in the cache instead of re-prefilled); emoji, markdown and
+*stage directions* are stripped; a turn the VAD splits in two is merged; a self-harm mention
+gets a fixed crisis-line reply without asking the model, and the persona's house rules (never
+claims to be human, no romance) are appended to any app prompt.
+
+### Measured (Galaxy S25+, Expression 2 Wise Pup rendering on the NPU at the same time)
+
+Prompts injected as recorded speech. The first-audible-word rows are six ~20 s sessions (6 spoken
+turns per arm); the rest is one 12-minute session (30 spoken + 6 typed turns). The first reply
+frame is shown when the reply's first sample plays, so it counts the silence Supertonic opens
+every synthesis with; the first audible word adds that lead.
+
+| | p50 | p90 |
+| --- | --- | --- |
+| end of speech → **first audible word** (leading-silence trim on) | **2.55 s** | 2.74 s |
+| same without the trim (Supertonic's own ~0.3 s lead silence left in) | 2.87 s | 3.65 s |
+| end of speech → first reply frame (12-min session, before the trim) | 2.46 s | 2.89 s |
+| typed message → first reply frame (same session) | 2.05 s | 2.86 s |
+| end of speech → first reply audio handed to the avatar | 1.21 s | 1.44 s |
+| … of which VAD endpoint + Moonshine / LLM first token / Supertonic first sentence | 0.52 / 0.12 / 0.57 s | |
+| reply audio → first mouth frame (the avatar's own onset; 1.15 s with no brain running) | 1.29 s | 1.63 s |
+
+Avatar health with the brain working vs idle: 19.17 vs 19.26 fps delivered (20 fps content), speech
+coverage 95.4 % vs 96.0 %, worst frame gap 159 vs 145 ms. Over the 12 minutes: thermal status 0
+throughout, battery 35.2 → 37.2 °C (on USB power), no fps or latency drift, app PSS ≈ 3.0 GB
+(peak 3.08 GB, avatar and brain together). Brain load 2.6 s.
+
+### Files the app provides
+
+Two paths come from Dart (the same two Apple takes); the speech-in models sit beside the LLM:
+
+```
+<dir>/<model>.gguf                     ggufPath: the LLM
+<supertonicAssets | <dir>/supertonic>/  duration_predictor.int8.onnx text_encoder.int8.onnx
+                                       vector_estimator.int8.onnx vocoder.int8.onnx
+                                       tts.json unicode_indexer.bin voice.bin
+<dir>/stt/                             silero_vad.onnx preprocess.onnx encode.int8.onnx
+                                       uncached_decode.int8.onnx cached_decode.int8.onnx tokens.txt
+```
+
+| asset | source | size | license |
+| --- | --- | --- | --- |
+| Llama-3.2-1B-Instruct Q4_K_M | `bartowski/Llama-3.2-1B-Instruct-GGUF` | 808 MB | Llama 3.2 Community License (attribution "Built with Llama"; 700 M MAU cap; AUP) |
+| — or Qwen2.5-0.5B-Instruct Q4_K_M (Apple's) | `Qwen/Qwen2.5-0.5B-Instruct-GGUF` | 491 MB | Apache-2.0 |
+| Supertonic 3, int8 | sherpa-onnx `tts-models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11` | 145 MB (128 MB .tar.bz2) | model OpenRAIL-M, code MIT |
+| Moonshine tiny, int8 | sherpa-onnx `asr-models/sherpa-onnx-moonshine-tiny-en-int8` | 124 MB | MIT |
+| silero VAD | sherpa-onnx `asr-models/silero_vad.onnx` | 0.6 MB | MIT |
+
+The app adds **26.5 MB** of native code (`libsherpa-onnx-jni.so` 23.6 MB, ONNX Runtime linked in
+statically, and `libbhbrain.so` 3.0 MB, llama.cpp). Nothing in the shipped path is GPL: sherpa-onnx is
+built from source with its espeak-ng dependency replaced by a no-op stand-in
+(`android/src/main/cpp/no-espeak/`, see its README); Supertonic does not phonemize.
+
+### Hybrid brain: on-device speech, the app's reply (`replyMode: 'host'`)
+
+`LocalConverseTransport(replySource: ...)` keeps speech-to-text and the Supertonic voice on the
+phone and takes the reply text from the app — typically a cheap cloud text model behind the app's
+own server, so no model key sits on the device and the server owns the character's persona. The
+brain sends `reply_request` {id, messages} (the bounded history and the user's turn; no system
+prompt unless the app passes one), the app streams pieces back with `localReplyText(id, piece)` and
+ends with `done: true`; a barge-in, or the reply reaching `maxSentences`, sends `reply_cancel` {id}
+so the app drops its stream. The crisis guard, clause chunking, emoji/markdown stripping, the
+leading-silence trim and barge-in stay in the brain; a host that fails before a word was said gets
+a spoken error reply instead of silence. No GGUF is loaded and llama.cpp is not used.
+
+`sttDir` takes any sherpa-onnx offline speech-to-text export (picked by its files: Moonshine,
+Moonshine v2, Whisper, NeMo Parakeet/transducer, NeMo CTC) with `silero_vad.onnx` beside it.
+Measured on a Galaxy Z Flip5 (Snapdragon 8 Gen 2), 32 recorded conversational utterances (EdAcc
+accented English and speechocean762 Mandarin-L1 children and adults; WER after removing fillers):
+
+| speech-to-text (int8) | WER | decode p50 / p90 | load | download | license |
+| --- | --- | --- | --- | --- | --- |
+| **NeMo Parakeet TDT 110M** (`nemo-parakeet_tdt_transducer_110m-en-36000-int8`) | **19.4 %** | **70 / 88 ms** | 0.7-0.9 s | 137 MB | CC-BY-4.0 |
+| NeMo Parakeet TDT 0.6B v2 | 14.5 % | 256 / 416 ms | 1.9 s | 662 MB | CC-BY-4.0 |
+| Whisper small.en | 20.1 % | 1494 / 1866 ms | 1.3 s | 376 MB | MIT |
+| Whisper base.en | 24.9 % | 552 / 718 ms | 0.9 s | 161 MB | MIT |
+| Moonshine base (2026-02) | 25.6 % | 114 / 157 ms | 0.6 s | 142 MB | MIT (English) |
+| Moonshine tiny int8 (LOCAL mode's default) | 34.9 % | 59 / 83 ms | 0.8 s | 125 MB | MIT |
+
+Android's own on-device `SpeechRecognizer` (fed the same files through `EXTRA_AUDIO_SOURCE`) scored
+28.2 % on that phone, only after a one-time 62 MB English pack download the user must confirm in a
+system dialog; it returned its text only as partial results (the final result list was empty) and
+only once the audio stream was closed, so it needs the VAD's endpoint anyway.
+
+With Parakeet TDT 110M, Supertonic 3 int8 (4 steps, voice F1 / M1, trim on), a stub reply source
+(first piece 400 ms after the request, then 50 pieces/s) and the avatar rendering throughout,
+15 spoken turns per avatar in ~20 s sessions:
+
+| p50 / p90 | Essence 2 (Sofia) | Expression 2 (Wise Pup) |
+| --- | --- | --- |
+| end of speech → final text (VAD endpoint + decode) | 0.54 / 0.59 s | 0.55 / 0.62 s |
+| Supertonic, first clause | 0.97 / 1.28 s | 1.04 / 1.41 s |
+| end of speech → first reply audio handed to the avatar | 2.15 / 2.56 s | 2.21 / 2.71 s |
+| reply audio → first mouth frame (the avatar's own onset; 0.86-0.93 / 1.71-1.97 s with no brain) | 1.01 / 1.23 s | 1.93 / 2.17 s |
+| end of speech → **first audible word** | **3.27 / 3.61 s** | **4.22 / 4.86 s** |
+| gap between spoken sentences | 0 | 0 |
+| barge-in: user speech onset → reply audio cut (6 cuts each) | 0.61 s | 0.61 s |
+
+Avatar health while speech-to-text and Supertonic ran: 24.9 fps (Essence 2) and 20.0 fps
+(Expression 2) median delivered, speech coverage 94 % / 89 % median, app PSS peak 1.9 / 1.3 GB,
+thermal status 0-1. Brain load (Supertonic + speech-to-text + VAD) 1.3-2.2 s.
+
+### Build notes
+
+The Android native build compiles llama.cpp (pinned commit) and sherpa-onnx v1.13.8 from source
+through CMake (NDK + CMake 3.22.1); the first build takes a few minutes. Offline builds:
+`BH_LLAMA_CPP_DIR=/path/to/llama.cpp` and `BH_SHERPA_ONNX_DIR=/path/to/sherpa-onnx@v1.13.8`.
+The ISA baseline is armv8.2-a + dotprod + fp16 (no i8mm assumed); on a Galaxy S25+ that costs
+nothing measurable against an armv8.7-a build (prefill 237 vs 251 tok/s, generation 69 vs 66).
+
 ## Hardware floor
 
 - **Mac**: Apple Silicon M3 or newer. Older Intel Macs and M1/M2 will run but are not benched.
