@@ -172,4 +172,104 @@ void main() {
     await BithumanAvatar.clearCredentials();
     expect(calls.map((c) => c.method), ['clearCredentials']);
   });
+
+  // ── PR #202 round 3 ────────────────────────────────────────────────────────────────────────────────────
+  Map<Object?, Object?> lastLoad() => calls.lastWhere((c) => c.method == 'load').arguments as Map<Object?, Object?>;
+
+  test('round 3: no other spelling of a kept install escapes the gate (dot segments, //, sub/.., a symlink, '
+      'a file inside one)', () async {
+    useGate();
+    final x2 = await kept(_private, dir: true);
+    Directory('$x2/sub').createSync();
+    final bundle = await kept('$_private.elevatedir', dir: true);
+    File('$bundle/meta.json').writeAsStringSync('{}');
+    final imx = await kept('A11IMX0001.imx');
+    final outside = await Directory.systemTemp.createTemp('load_alias');
+    addTearDown(() => outside.delete(recursive: true));
+    final link = Link('${outside.path}/my_avatar')..createSync(x2);
+    final imxLink = Link('${outside.path}/my.imx')..createSync(imx);
+    final name = tmp.path.split('/').last;
+    for (final p in [
+      '$x2/.',
+      '$x2/./',
+      '$x2/sub/..',
+      '$x2/no_such_dir/..',
+      '$x2//.',
+      '${tmp.path}//$_private',
+      '${tmp.path}/./$_private',
+      '${tmp.path}/../$name/$_private',
+      '$bundle/.',
+      '$bundle/meta.json',
+      link.path,
+      '${link.path}/.',
+      '${link.path}/sub/..',
+      imxLink.path,
+    ]) {
+      await expectLater(BithumanAvatar.load(p, engine: 'essence2', apiSecret: _other), _refused(true), reason: p);
+    }
+    // The agent dir Expression 2 renders on iOS / macOS, under another spelling.
+    await BithumanAvatar.setExpression2AgentDir('$x2/.');
+    await expectLater(BithumanAvatar.load('${outside.path}/app.imx', apiSecret: _other), _refused(true));
+    await BithumanAvatar.setExpression2AgentDir(link.path);
+    await expectLater(BithumanAvatar.load('${outside.path}/app.imx', apiSecret: _other), _refused(true));
+    expect(loaded(), isFalse, reason: 'every spelling refused before the engine is asked to load anything');
+    // The package's own marks are never a path to load.
+    await expectLater(BithumanAvatar.load('${tmp.path}/.door-auth', engine: 'essence2', apiSecret: _owner), _refused(false));
+    // The owner opens through any spelling (its fresh mark), with the door down.
+    useGate(up: false);
+    await BithumanAvatar.setExpression2AgentDir(null);
+    final a = await BithumanAvatar.load('${link.path}/./', apiSecret: _owner);
+    await a.dispose();
+    final b = await BithumanAvatar.load('$bundle/.', engine: 'essence2', apiSecret: _owner);
+    await b.dispose();
+  });
+
+  test('round 3: the canonical path folds what the file system folds', () async {
+    final x = Directory('${tmp.path}/x/y')..createSync(recursive: true);
+    final real = x.resolveSymbolicLinksSync();
+    expect(DoorGate.canonicalPath('${x.path}/.'), real);
+    expect(DoorGate.canonicalPath('${x.path}/../y/./'), real);
+    expect(DoorGate.canonicalPath('${x.path}//'), real);
+    expect(DoorGate.canonicalPath('${x.path}/nothing/../'), real, reason: 'a missing component is folded lexically');
+    expect(DoorGate.canonicalPath('${x.path}/nothing/file.imx'), '$real/nothing/file.imx');
+  });
+
+  test('round 3: Expression 2 sends the agent dir Dart gated with the load; clearCredentials forgets it', () async {
+    useGate();
+    final x2 = await kept(_private, dir: true);
+    await BithumanAvatar.setExpression2AgentDir(x2);
+    final a = await BithumanAvatar.load('bundled', apiSecret: _owner);
+    expect(lastLoad()['agentDir'], x2, reason: 'the native side renders the dir that was gated, not its own copy');
+    await a.dispose();
+    await BithumanAvatar.clearCredentials();
+    final b = await BithumanAvatar.load('bundled', engine: 'expression-2', apiSecret: _other);
+    expect(lastLoad()['agentDir'], '',
+        reason: 'after sign-out the bundled default: the signed-out account\'s dir is never rendered');
+    await b.dispose();
+    final e = await BithumanAvatar.load(_private, engine: 'essence2', apiSecret: _other);
+    expect(lastLoad().containsKey('agentDir'), isFalse, reason: 'Essence 2 renders its own path only');
+    await e.dispose();
+    expect(asked, isEmpty, reason: 'the owner\'s fresh mark opened its agent dir with no door ask');
+  });
+
+  test('round 3: a kept .imx is the container door\'s alone (no member-door ask)', () async {
+    final memberAsked = <String>[];
+    entitlementGate = DoorGate(
+        clock: () => now,
+        allowInsecure: true,
+        door: (code, model) => Uri.parse('http://127.0.0.1:${door.port}/v1/agent/$code/model/download')
+            .replace(queryParameters: {if (model.isNotEmpty) 'model': model, 'redirect': 'false'}),
+        publicDoor: (code, family) {
+          memberAsked.add(family);
+          return Uri.parse('http://127.0.0.1:${door.port}/v1/agent/$code/model/download?member=x');
+        });
+    final imx = await kept('$_private.imx');
+    await expectLater(BithumanAvatar.load(imx, engine: 'essence2', apiSecret: _other), _refused(true));
+    expect(memberAsked, isEmpty);
+    expect(asked, [_other], reason: 'one ask: the container door');
+    final x2 = await kept(_private, dir: true);
+    await expectLater(BithumanAvatar.load(x2, apiSecret: _other), _refused(true));
+    expect(memberAsked, ['expression-2']);
+    expect(asked, [_other, _other, _other], reason: 'an Expression 2 install: the container door, then the member door');
+  });
 }

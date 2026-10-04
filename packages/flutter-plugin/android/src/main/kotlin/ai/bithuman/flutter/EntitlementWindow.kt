@@ -38,14 +38,35 @@ import javax.crypto.spec.SecretKeySpec
  * The door is the platform's: `GET https://api.bithuman.ai/v1/agent/<code>/model/download?model=<model>&redirect=false`,
  * owner-scoped (another account's key gets 404 NOT_FOUND), the key in the `api-secret` header,
  * redirects not followed. One request; the file is never fetched here.
+ *
+ * ★WHO MAY OPEN, AS THE STORES SEE IT (PR #202 round 3). The platform lets an account render an avatar it
+ * owns, one shared into a workspace it is an active member of, or a public / featured one (P11, platform
+ * #1324). The container door above serves the first two and bitHuman's showcase; another account's PUBLIC
+ * avatar outside the showcase gets 404 NOT_FOUND there, while the member door the stores fetch from
+ * (`&member=web_manifest.json` for Expression 2, `&member=android_store.v1.json&plane=android` for
+ * Essence 2) serves it to any credential. So a 404 NOT_FOUND from the container door is asked again, once,
+ * at the store's member door ([publicDoor]): its yes is a yes (what the store itself would fetch), its no
+ * leaves the container's no, no answer is no answer. Through 2.6.35 the stores loaded such an avatar; this
+ * window does not narrow that.
  */
 internal class EntitlementWindow(
     private val dir: File,
     private val clock: () -> Long = { System.currentTimeMillis() },
-    private val door: (code: String, model: String) -> URL = ::platformDoor,
+    /** The container door; null: bitHuman's ([platformDoor]). */
+    door: ((code: String, model: String) -> URL)? = null,
     private val timeoutMs: Int = 20_000,
     private val background: (Runnable) -> Unit = { r -> Thread(r, "bh-door-auth").apply { isDaemon = true }.start() },
+    /**
+     * The store's member door for a PUBLIC avatar (see the class note). Null: bitHuman's ([storeDoor]) when
+     * [door] is bitHuman's too, and none for a window on another door (a test's loopback), so a test never
+     * reaches the real door by accident.
+     */
+    publicDoor: ((code: String, model: String) -> URL?)? = null,
 ) {
+    private val door: (code: String, model: String) -> URL = door ?: { c, m -> platformDoor(c, m) }
+    private val publicDoor: (code: String, model: String) -> URL? =
+        publicDoor ?: if (door == null) { c, m -> storeDoor(c, m) } else { _, _ -> null }
+
     /** The door refused ([refused] true) or could not be asked when the record was missing or too old. */
     class Refused(message: String, val refused: Boolean, val status: Int?) : Exception(message) {
         /** The method-channel error code the Dart side maps to BithumanEntitlementException. */
@@ -84,7 +105,7 @@ internal class EntitlementWindow(
 
     /** One door ask with [credential]: its yes (re)writes the record, its no drops it, no answer leaves it. */
     fun renew(code: String, model: String, credential: String): Answer {
-        val a = ask(code, model, credential)
+        val a = askEntitled(code, model, credential)
         when {
             a.granted -> write(code, model, credential)
             a.denied -> drop(code, model, credential)
@@ -99,7 +120,7 @@ internal class EntitlementWindow(
         val lines = try { markFile(code, model, credential).readText().split('\n') } catch (_: Exception) { return false }
         if (lines.size != 5 || lines[0] != "v1" || lines[1] != entry || lines[2] != tag) return false
         val checked = lines[3].toLongOrNull() ?: return false
-        val want = seal(credential, entry, tag, checked)
+        val want = seal(credential, code, model, tag, checked)
         if (!MessageDigest.isEqual(want.toByteArray(), lines[4].toByteArray())) return false
         val now = clock()
         if (checked > now + FUTURE_SKEW_MS) return false
@@ -118,7 +139,7 @@ internal class EntitlementWindow(
             val entry = entry(code, model)
             val at = clock()
             val tmp = File(f.path + ".tmp")
-            tmp.writeText("v1\n$entry\n$tag\n$at\n${seal(credential, entry, tag, at)}")
+            tmp.writeText("v1\n$entry\n$tag\n$at\n${seal(credential, code, model, tag, at)}")
             if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
         } catch (_: Exception) {
             // Best effort: no record means the next load asks the door first.
@@ -129,11 +150,31 @@ internal class EntitlementWindow(
         try { markFile(code, model, credential).delete() } catch (_: Exception) {}
     }
 
-    /** One GET of the door with exactly [credential], redirects not followed. Never throws. */
-    fun ask(code: String, model: String, credential: String): Answer {
+    /**
+     * The container door's answer, and for its 404 NOT_FOUND the store's member door's (a PUBLIC avatar
+     * outside the showcase; see the class note): its yes is the answer, its no leaves the container's no, no
+     * answer is no answer. A 401 / 403 is about the key and is not asked again.
+     */
+    fun askEntitled(code: String, model: String, credential: String): Answer {
+        val a = ask(code, model, credential)
+        if (!(a.denied && a.status == 404)) return a
+        val pub = publicDoor(code, model) ?: return a
+        val m = askUrl(pub, credential)
+        return when {
+            m.granted -> m
+            m.denied -> a
+            else -> m
+        }
+    }
+
+    /** One GET of [code]'s container door with exactly [credential], redirects not followed. Never throws. */
+    fun ask(code: String, model: String, credential: String): Answer = askUrl(door(code, model), credential)
+
+    /** One GET of [url] with exactly [credential], redirects not followed. Never throws. */
+    fun askUrl(url: URL, credential: String): Answer {
         var c: HttpURLConnection? = null
         return try {
-            c = (door(code, model).openConnection() as HttpURLConnection).apply {
+            c = (url.openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = false
                 connectTimeout = timeoutMs
                 readTimeout = timeoutMs
@@ -141,13 +182,15 @@ internal class EntitlementWindow(
                 setRequestProperty("api-secret", credential)
             }
             val status = c.responseCode
-            // A redirect is the door's yes only when it points at the signed file URL the door minted: off
-            // the asked host and off bitHuman's door hosts (the Dart gate's rule, door_gate.dart `ask`).
+            // A redirect is the door's yes only when it points at the signed file URL the door minted: https,
+            // off the asked host and off bitHuman's door hosts, compared as DNS compares names (case, a
+            // trailing dot); the Dart gate's rule, door_gate.dart `ask`.
             if (status in 300..399) {
                 val asked = c.url
                 val next = c.getHeaderField("Location")?.takeIf { it.isNotEmpty() }?.let { runCatching { URL(asked, it) }.getOrNull() }
-                if (next == null || next.host == asked.host || next.host in DOOR_HOSTS) {
-                    return Answer(null, error = IllegalStateException("HTTP $status to ${next?.host ?: "no location"}: a redirect within bitHuman's door hosts is no answer"))
+                if (next == null || next.protocol != "https" || normalizeHost(next.host) == normalizeHost(asked.host) ||
+                    normalizeHost(next.host) in DOOR_HOSTS) {
+                    return Answer(null, error = IllegalStateException("HTTP $status to ${next?.host ?: "no location"}: a redirect within bitHuman's door hosts (or not https) is no answer"))
                 }
             }
             var errorCode: String? = null
@@ -201,13 +244,35 @@ internal class EntitlementWindow(
             URL("https://api.bithuman.ai/v1/agent/${URLEncoder.encode(code, "UTF-8")}/model/download" +
                 "?model=${URLEncoder.encode(model, "UTF-8")}&redirect=false")
 
+        /**
+         * The member door [model]'s store fetches its catalog from (expression2-android
+         * `MeteredDoorResolver`: `member=web_manifest.json`; essence2-android: `member=android_store.v1.json`
+         * on `plane=android`), asked for a JSON grant. Null for a model with no store.
+         */
+        fun storeDoor(code: String, model: String): URL? {
+            val member = when (model) {
+                "expression-2" -> "member=web_manifest.json"
+                "essence-2" -> "member=android_store.v1.json&plane=android"
+                else -> return null
+            }
+            return URL("https://api.bithuman.ai/v1/agent/${URLEncoder.encode(code, "UTF-8")}/model/download" +
+                "?model=${URLEncoder.encode(model, "UTF-8")}&$member&redirect=false")
+        }
+
+        /** [host] as DNS compares it: lower case, without the root's trailing dot. */
+        fun normalizeHost(host: String): String = host.lowercase(java.util.Locale.ROOT).trimEnd('.')
+
         private fun safe(s: String) = s.replace(Regex("[^A-Za-z0-9_-]"), "_")
         private fun entry(code: String, model: String) = "${safe(model)}/${safe(code)}"
 
-        private fun seal(credential: String, entry: String, tag: String, checkedMs: Long): String {
+        /**
+         * The record's seal: an HMAC keyed by the credential over the RAW model and code (not the file-name-safe
+         * [entry], so two codes that spell the same safe name never share a seal), the tag and the time.
+         */
+        private fun seal(credential: String, code: String, model: String, tag: String, checkedMs: Long): String {
             val mac = Mac.getInstance("HmacSHA256")
             mac.init(SecretKeySpec("bithuman.door.mark.v1\u0000$credential".toByteArray(Charsets.UTF_8), "HmacSHA256"))
-            return mac.doFinal("v1\n$entry\n$tag\n$checkedMs\n0".toByteArray(Charsets.UTF_8))
+            return mac.doFinal("v2\n$model\u0000$code\n$tag\n$checkedMs\n0".toByteArray(Charsets.UTF_8))
                 .joinToString("") { "%02x".format(it) }
         }
     }

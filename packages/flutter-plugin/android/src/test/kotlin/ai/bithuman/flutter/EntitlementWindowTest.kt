@@ -37,7 +37,11 @@ class EntitlementWindowTest {
     private var now = 1_791_000_000_000L
     /** What the door answers: (status, body, Location) for the request's key. */
     private var rule: (String?) -> Triple<Int, String, String?> = ::ownerScoped
+    /** What the store's member door (a request with `member=`) answers; null: the same [rule]. */
+    private var memberRule: ((String?) -> Triple<Int, String, String?>)? = null
     private val asked = ArrayList<String?>()
+    /** Each request's path and query, in order. */
+    private val targets = ArrayList<String>()
     private val background = ArrayList<Runnable>()
     private var dead = 0
 
@@ -58,14 +62,15 @@ class EntitlementWindowTest {
                 sock.use { c ->
                     val r = c.getInputStream().bufferedReader(Charsets.ISO_8859_1)
                     var key: String? = null
+                    val target = (r.readLine() ?: "").split(' ').getOrElse(1) { "" }
                     while (true) {
                         val line = r.readLine() ?: break
                         if (line.isEmpty()) break
                         val i = line.indexOf(':')
                         if (i > 0 && line.substring(0, i).trim().equals("api-secret", ignoreCase = true)) key = line.substring(i + 1).trim()
                     }
-                    synchronized(asked) { asked += key }
-                    val (status, body, location) = rule(key)
+                    synchronized(asked) { asked += key; targets += target }
+                    val (status, body, location) = (if (target.contains("member=")) memberRule else null)?.invoke(key) ?: rule(key)
                     val bytes = body.toByteArray()
                     val head = StringBuilder("HTTP/1.1 $status X\r\nContent-Type: application/json\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n")
                     if (location != null) head.append("Location: $location\r\n")
@@ -83,12 +88,16 @@ class EntitlementWindowTest {
         dir.deleteRecursively()
     }
 
-    private fun window(up: Boolean = true) = EntitlementWindow(
+    private fun window(up: Boolean = true, member: Boolean = false) = EntitlementWindow(
         dir,
         clock = { now },
         door = { c, m -> URL("http://127.0.0.1:${if (up) server.localPort else dead}/v1/agent/$c/model/download?model=$m&redirect=false") },
         timeoutMs = 3_000,
         background = { r -> background += r },
+        // The store's member door on the same loopback (the plugin's is EntitlementWindow.storeDoor).
+        publicDoor = if (!member) null else { c, m ->
+            URL("http://127.0.0.1:${if (up) server.localPort else dead}/v1/agent/$c/model/download?model=$m&member=catalog&redirect=false")
+        },
     )
 
     private fun refused(expectRefused: Boolean, block: () -> Unit) {
@@ -194,5 +203,76 @@ class EntitlementWindowTest {
         val all = dir.walkTopDown().filter { it.isFile }.joinToString("\n") { it.path + "\n" + it.readText() }
         assertFalse(all.contains(owner))
         assertTrue(window().markFile(code, "essence-2", owner).path.endsWith("/essence-2/$code/6aa0c9c2b25dc45d3ab28b9b311939b2"))
+    }
+
+    // ── PR #202 round 3: the platform's own rule for who may render (P11, platform #1324) ──────────────────────
+    // The container door serves an avatar to its owner, a member of the workspace it is shared into, and
+    // bitHuman's showcase; another account's PUBLIC avatar outside the showcase is 404 NOT_FOUND there, while
+    // the member door the stores fetch from serves it to any credential. The window asks that door once.
+
+    @Test
+    fun anotherAccountsPublicAvatarOpensWhenTheStoresMemberDoorSaysYes() {
+        memberRule = { Triple(200, """{"success": true, "data": {"url": "https://example.invalid/m"}}""", null) }
+        window(member = true).admit(code, "expression-2", other)
+        assertTrue(window(member = true).fresh(code, "expression-2", other))
+        val t = synchronized(asked) { targets.toList() }
+        assertEquals(2, t.size)
+        assertFalse("the container door first", t[0].contains("member="))
+        assertTrue("then the member door, once", t[1].contains("member="))
+        assertEquals(listOf(other, other), synchronized(asked) { asked.toList() })
+    }
+
+    @Test
+    fun theMemberDoorsNoKeepsTheContainersNoAndNoAnswerIsUnconfirmed() {
+        memberRule = { Triple(404, notFound, null) }   // not public: a private avatar of another account
+        refused(true) { window(member = true).admit(code, "essence-2", other) }
+        assertFalse(window(member = true).markFile(code, "essence-2", other).exists())
+        memberRule = { Triple(503, "", null) }
+        refused(false) { window(member = true).admit(code, "essence-2", other) }
+        // A revoked key (401 at the container) is about the key: the member door is not asked.
+        rule = { Triple(401, """{"error": {"code": "MISSING_AUTH"}}""", null) }
+        memberRule = { Triple(200, "{}", null) }
+        val before = synchronized(asked) { targets.size }
+        refused(true) { window(member = true).admit(code, "essence-2", other) }
+        assertEquals(before + 1, synchronized(asked) { targets.size })
+    }
+
+    @Test
+    fun theOwnersYesNeverAsksTheMemberDoorAndAWindowOnAnotherDoorHasNone() {
+        memberRule = { Triple(200, "{}", null) }
+        window(member = true).admit(code, "essence-2", owner)
+        assertEquals(1, synchronized(asked) { targets.size })
+        // No publicDoor given with a test door: the container's no is the answer (never the real door).
+        refused(true) { window().admit(code, "essence-2", other) }
+        assertEquals(2, synchronized(asked) { targets.size })
+    }
+
+    @Test
+    fun theDoorsTheWindowAsksAreTheStoresOwn() {
+        assertEquals("https://api.bithuman.ai/v1/agent/A23WJF0199/model/download?model=expression-2&redirect=false",
+            EntitlementWindow.platformDoor("A23WJF0199", "expression-2").toString())
+        assertEquals("https://api.bithuman.ai/v1/agent/A23WJF0199/model/download?model=expression-2&member=web_manifest.json&redirect=false",
+            EntitlementWindow.storeDoor("A23WJF0199", "expression-2").toString())
+        assertEquals("https://api.bithuman.ai/v1/agent/A52DHS2219/model/download?model=essence-2&member=android_store.v1.json&plane=android&redirect=false",
+            EntitlementWindow.storeDoor("A52DHS2219", "essence-2").toString())
+        assertNull(EntitlementWindow.storeDoor("A52DHS2219", "essence-1"))
+    }
+
+    @Test
+    fun hostsCompareAsDnsNamesAndOnlyAnHttpsRedirectIsAYes() {
+        for (loc in listOf(
+            "https://WWW.BITHUMAN.AI/api/agents/$code/model/download",   // letter case
+            "https://www.bithuman.ai./api/agents/$code/model/download",  // the root's trailing dot
+            "https://Api.Bithuman.Ai./v1/agent/$code/model/download",
+            "http://storage.example.invalid/signed/x.imx",                // cleartext, off the door hosts
+        )) {
+            rule = { Triple(307, "", loc) }
+            assertNull(loc, window().ask(code, "essence-2", owner).status)
+            refused(false) { window().admit(code, "essence-2", other) }
+        }
+        assertEquals("api.bithuman.ai", EntitlementWindow.normalizeHost("API.Bithuman.AI."))
+        rule = { Triple(302, "", "https://storage.example.invalid/signed/x.imx") }
+        window().admit(code, "essence-2", owner)
+        assertTrue(window().fresh(code, "essence-2", owner))
     }
 }
