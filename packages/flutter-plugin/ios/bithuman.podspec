@@ -219,7 +219,20 @@ Pod::Spec.new do |s|
   # Set from the staged bytes, never from intent: the local-brain code compiles
   # in ONLY when the framework it calls is actually present.
   conds << 'CONVERSE_AVAILABLE'  if converse_fw
+  # libconverse >= 2.4.0 adds bc_session_push_text_ex (continuation merge of a
+  # split utterance). Detected from the staged header so this pod still builds
+  # against an older vendored brain (the split part is then its own turn).
+  if converse_fw
+    hdr = Dir.glob(File.join(__dir__, 'Frameworks/libconverse.xcframework/*/Headers/bithuman/libconverse.h')).first
+    conds << 'CONVERSE_PUSH_EX' if hdr && File.read(hdr).include?('bc_session_push_text_ex')
+    # libconverse >= 2.5.0 adds bc_session_create_with_llm: the brain can run
+    # Apple's on-device model (Foundation Models) instead of llama.cpp.
+    conds << 'CONVERSE_HOST_LLM' if hdr && File.read(hdr).include?('bc_session_create_with_llm')
+  end
   pod_xcconfig['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = conds.join(' ')
+  # Apple's on-device model (AppleFoundationLlm.swift) is iOS / macOS 26+: weak so
+  # the plugin still loads on the older systems this pod supports.
+  s.weak_frameworks = ['FoundationModels']
   pod_xcconfig['GCC_PREPROCESSOR_DEFINITIONS'] = '$(inherited) BH_ENGINE_AUTH_HOOKS=1' if auth_hooks
   s.pod_target_xcconfig = pod_xcconfig
 

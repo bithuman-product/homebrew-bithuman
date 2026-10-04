@@ -175,11 +175,13 @@ class RecordingVoiceHost implements VoiceHost {
 
   @override
   Future<void> localAudioStart({
-    required String ggufPath,
+    String? ggufPath,
     String? supertonicAssets,
     String? voice,
     int vadThreshold = 0,
     String systemPrompt = '',
+    String llm = 'auto',
+    String refusalReply = '',
   }) async {
     calls.add('localAudioStart:$ggufPath');
   }

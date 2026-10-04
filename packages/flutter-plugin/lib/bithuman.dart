@@ -489,23 +489,45 @@ class BithumanAvatar implements VoiceHost {
   /// .gguf; [supertonicAssets] is the Supertonic ONNX assets dir. The metered
   /// avatar render still needs your API secret — the `apiSecret:` passed to
   /// [load] (or BITHUMAN_API_SECRET in the process environment).
+  ///
+  /// [llm]: `auto` (default) runs Apple's on-device model where
+  /// [appleIntelligenceStatus] is `available` and the GGUF otherwise; `apple` /
+  /// `llama` force one. [ggufPath] may be null when Apple's model is used.
   @override
   Future<void> localAudioStart({
-    required String ggufPath,
+    String? ggufPath,
     String? supertonicAssets,
     String? voice,
     int vadThreshold = 0,
     String systemPrompt = '',
+    String llm = 'auto',
+    String refusalReply = '',
   }) async {
     if (_disposed) throw const BithumanAvatarException('avatar is disposed');
     await _channel.invokeMethod('localAudioStart', {
       'textureId': textureId,
-      'ggufPath': ggufPath,
+      'ggufPath': ?ggufPath,
       'supertonicAssets': ?supertonicAssets,
       'voice': ?voice,
       'vadThreshold': vadThreshold,
       'systemPrompt': systemPrompt,
+      'llm': llm,
+      if (refusalReply.isNotEmpty) 'refusalReply': refusalReply,
     });
+  }
+
+  /// Whether the on-device brain can run Apple's model (Apple Intelligence /
+  /// Foundation Models) here, so the app need not download the Llama GGUF.
+  /// Ask BEFORE downloading. Values: see [AppleIntelligenceStatus] —
+  /// `available`, `deviceNotEligible`, `appleIntelligenceNotEnabled`,
+  /// `modelNotReady`, `unsupportedLocale`, `unsupportedOS`, `notBuilt`,
+  /// `unavailable`. `notBuilt` on non-Apple platforms and older native sides.
+  static Future<String> appleIntelligenceStatus() async {
+    try {
+      return await _channel.invokeMethod<String>('appleIntelligenceStatus') ?? 'notBuilt';
+    } catch (_) {
+      return 'notBuilt';
+    }
   }
 
   /// Tear down the local converse brain + audio engine.
