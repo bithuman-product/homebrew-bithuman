@@ -1,7 +1,8 @@
 // The owner's offline window on Android (2.6.36, security; EntitlementWindow.kt): the door's last yes to a
 // credential opens a code's avatar for 24 h with the door down, never past that, and never for another
-// account. A loopback HttpServer stands in for bitHuman's owner-scoped door (the bodies are production's,
-// 2026-10-03). Plain JVM, no device, no real network.
+// account. A loopback socket stands in for bitHuman's owner-scoped door (the bodies are production's,
+// 2026-10-03; the JDK's com.sun HttpServer is not on Android's unit-test classpath). Plain JVM, no device,
+// no real network.
 //
 // Run from any Flutter app that depends on this plugin:
 //   (cd <app>/android && ./gradlew :bithuman:testDebugUnitTest --tests 'ai.bithuman.flutter.EntitlementWindowTest')
@@ -9,10 +10,10 @@
 
 package ai.bithuman.flutter
 
-import com.sun.net.httpserver.HttpServer
 import java.io.File
-import java.net.InetSocketAddress
+import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.SocketException
 import java.net.URL
 import java.nio.file.Files
 import org.junit.After
@@ -32,7 +33,7 @@ class EntitlementWindowTest {
     private val notReady = """{"error": {"code": "MODEL_ARTIFACT_NOT_READY", "message": "not downloadable yet", "httpStatus": 404}}"""
 
     private lateinit var dir: File
-    private lateinit var server: HttpServer
+    private lateinit var server: ServerSocket
     private var now = 1_791_000_000_000L
     /** What the door answers: (status, body, Location) for the request's key. */
     private var rule: (String?) -> Triple<Int, String, String?> = ::ownerScoped
@@ -49,30 +50,43 @@ class EntitlementWindowTest {
     @Before
     fun setUp() {
         dir = Files.createTempDirectory("entitlement_window").toFile()
-        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/") { ex ->
-            val key = ex.requestHeaders.getFirst("api-secret")
-            synchronized(asked) { asked += key }
-            val (status, body, location) = rule(key)
-            if (location != null) ex.responseHeaders.add("Location", location)
-            val bytes = body.toByteArray()
-            ex.sendResponseHeaders(status, if (bytes.isEmpty()) -1 else bytes.size.toLong())
-            if (bytes.isNotEmpty()) ex.responseBody.use { it.write(bytes) } else ex.close()
-        }
-        server.start()
+        server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+        // One request per connection: read the head, answer by the rule, close.
+        Thread({
+            while (true) {
+                val sock = try { server.accept() } catch (_: SocketException) { break }
+                sock.use { c ->
+                    val r = c.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+                    var key: String? = null
+                    while (true) {
+                        val line = r.readLine() ?: break
+                        if (line.isEmpty()) break
+                        val i = line.indexOf(':')
+                        if (i > 0 && line.substring(0, i).trim().equals("api-secret", ignoreCase = true)) key = line.substring(i + 1).trim()
+                    }
+                    synchronized(asked) { asked += key }
+                    val (status, body, location) = rule(key)
+                    val bytes = body.toByteArray()
+                    val head = StringBuilder("HTTP/1.1 $status X\r\nContent-Type: application/json\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n")
+                    if (location != null) head.append("Location: $location\r\n")
+                    head.append("\r\n")
+                    c.getOutputStream().apply { write(head.toString().toByteArray(Charsets.ISO_8859_1)); write(bytes); flush() }
+                }
+            }
+        }, "door").apply { isDaemon = true }.start()
         dead = ServerSocket(0).use { it.localPort }
     }
 
     @After
     fun tearDown() {
-        server.stop(0)
+        server.close()
         dir.deleteRecursively()
     }
 
     private fun window(up: Boolean = true) = EntitlementWindow(
         dir,
         clock = { now },
-        door = { c, m -> URL("http://127.0.0.1:${if (up) server.address.port else dead}/v1/agent/$c/model/download?model=$m&redirect=false") },
+        door = { c, m -> URL("http://127.0.0.1:${if (up) server.localPort else dead}/v1/agent/$c/model/download?model=$m&redirect=false") },
         timeoutMs = 3_000,
         background = { r -> background += r },
     )
@@ -91,7 +105,7 @@ class EntitlementWindowTest {
     fun anotherAccountIsRefusedAfterOneDoorAskAndGetsNoRecord() {
         window().admit(code, "essence-2", owner)
         refused(true) { window().admit(code, "essence-2", other) }
-        assertEquals(listOf(owner, other), asked)
+        assertEquals(listOf(owner, other), synchronized(asked) { asked.toList() })
         assertFalse(window().markFile(code, "essence-2", other).exists())
         // ...and with the door down, the other account (no record) fails closed.
         refused(false) { window(up = false).admit(code, "essence-2", other) }
@@ -165,10 +179,10 @@ class EntitlementWindowTest {
         // Copied to another code: does not verify there.
         window().markFile("A11AAA0001", "essence-2", owner).apply { parentFile?.mkdirs(); writeText(original) }
         assertFalse(window().fresh("A11AAA0001", "essence-2", owner))
-        // Sealed correctly but dated a day ahead of the clock.
-        now += 24 * 3600_000L
+        // Sealed correctly but dated a day ahead of the clock (written 25 h on: past the window, so asked).
+        now += 25 * 3600_000L
         window().admit(code, "essence-2", owner)
-        now -= 24 * 3600_000L
+        now -= 25 * 3600_000L
         assertFalse(window().fresh(code, "essence-2", owner))
     }
 

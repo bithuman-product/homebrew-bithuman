@@ -13,7 +13,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Calls a platform does not answer, on purpose. Key: '<channel> <method>'.
+/// Calls a platform does not answer, on purpose. Key: `'<channel> <method>'`.
 const Map<String, Map<String, String>> unsupported = {
   'android': {
     // macOS window chrome (borderless window, floating bubble). Every Dart call is wrapped in a catch.
