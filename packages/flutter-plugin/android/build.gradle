@@ -107,7 +107,13 @@ dependencies {
     // 25 ms after); the frame count is unchanged. Store retries share one budget per store.
     // 0.5.1 (2026-09-26): each installation names itself on the meter; the meter talks only to
     // bitHuman hosts (an app-set endpoint elsewhere is ignored).
-    implementation 'ai.bithuman:expression2-android:0.5.2'
+    // 0.6.0 (2026-10-03, maven.bithuman.ai): an installed avatar picks up server-side repairs —
+    // Expression2ModelStore.fetch() returns the installed copy at once, checks for an update in the
+    // background (at most hourly) and swaps a changed file in on the NEXT fetch(); an installed avatar
+    // never fails to open because the network is down. A first open killed mid-prepare finishes in the
+    // background (a JobScheduler service in the AAR's manifest); idle frames bill from the first frame.
+    // Security: a cached private avatar opens only for a credential the door has said yes to.
+    implementation 'ai.bithuman:expression2-android:0.6.0'
     // 0.5.10 (public on Central since 2026-09-16, lastUpdated 20260916205927): A BARGE-IN
     // NO LONGER REWINDS THE DRIVER VIDEO TO ITS FIRST FRAME. Interrupt the agent mid-reply
     // and the video behind the avatar used to snap back to the start of its clip — every
