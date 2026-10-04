@@ -3,22 +3,29 @@
 # installs it into ~/.local/bin (or $BITHUMAN_INSTALL_DIR).
 #   curl -fsSL https://install.bithuman.ai | sh
 # Environment: BITHUMAN_VERSION=cli-vX.Y.Z pins a release; BITHUMAN_INSTALL_DIR picks the directory;
-# BITHUMAN_MIRROR overrides the download mirror ("off" = GitHub only);
-# GITHUB_TOKEN (optional) spends your own GitHub API quota instead of this network's shared one.
+# BITHUMAN_DOWNLOADS overrides the release origin (default https://downloads.bithuman.ai/homebrew-bithuman);
+# BITHUMAN_MIRROR overrides the download mirror ("off" = the release origin only).
 # Docs: https://docs.bithuman.ai/sdk/cli
 
 set -eu
 
-GITHUB_REPO="bithuman-product/homebrew-bithuman"
+# ── Where releases come from (2026-10: bitHuman's own origin; GitHub is not used) ──
+# Every release is published to bitHuman's download origin in one fixed layout:
+#   <origin>/latest.json           the newest published cli-v* release (never a draft or pre-release)
+#   <origin>/releases.json         every release: tag_name, draft, prerelease, assets[].name
+#   <origin>/<tag>/<asset>[.sha256]
+# (scripts/downloads-publish.py writes all three; RELEASE.md.)
+DOWNLOADS="${BITHUMAN_DOWNLOADS:-${BITHUMAN_DOWNLOADS_BASE:-https://downloads.bithuman.ai}/homebrew-bithuman}"
+DOWNLOADS="${DOWNLOADS%/}"
 
 # ── The bitHuman download mirror (2026-10-01) ───────────────────────────────
-# Release metadata and tarballs come from bitHuman's own origin first:
+# A second copy of each CLI release, in a Maven-shaped layout:
 #   https://maven.bithuman.ai/ai/bithuman/bithuman-cli/maven-metadata.xml   newest version (<release>)
 #   https://maven.bithuman.ai/ai/bithuman/bithuman-cli/<X.Y.Z>/<asset>[.sha256]
-# a byte-for-byte copy of each GitHub release (scripts/mirror-cli-release.sh, RELEASE.md),
-# so a normal install makes no GitHub request at all and never meets GitHub's
-# 60-requests-per-hour-per-network limit. Anything the mirror cannot answer (it is down, the
-# version or target is not mirrored, a sidecar is missing) falls back to GitHub exactly as before.
+# a byte-for-byte copy of each release (scripts/mirror-cli-release.sh, RELEASE.md). The installer
+# downloads from it first when it holds the resolved version (sidecar AND tarball), and uses its
+# metadata to name a version when the origin cannot be read. Anything it cannot answer falls back
+# to the origin above.
 MIRROR="${BITHUMAN_MIRROR-https://maven.bithuman.ai/ai/bithuman/bithuman-cli}"
 case "$MIRROR" in off|none|0) MIRROR="" ;; esac
 MIRROR="${MIRROR%/}"
@@ -62,65 +69,51 @@ need_cmd tar
 need_cmd uname
 need_cmd mktemp
 
-# ── GitHub fetches: retry a rate limit honestly ─────────────────────────────
-# Everything this script downloads comes from GitHub: api.github.com (60
-# anonymous requests per hour per SOURCE ADDRESS, shared by everyone behind a
-# NAT) and the release assets. A 429, or a 403 that says the quota is spent, is
-# "wait and retry", never "not published". Before 2026-09-30 a 429 on the
-# tarball printed "The tarball … may not be published", which sent people to
-# look for a release that was there all along (DX audit, retry-after: 300).
+# ── Origin fetches: retry a rate limit honestly ─────────────────────────────
+# A 429, or a 403 that says a quota is spent, is "wait and retry", never "not published". Before
+# 2026-09-30 a 429 on the tarball printed "The tarball … may not be published", which sent people
+# to look for a release that was there all along (DX audit, retry-after: 300). No credential is
+# ever sent: the origin is public.
 #
-# gh_fetch <url> <outfile> [progress] -> 0 on 2xx; else 1, with the last HTTP
-# code in $_gh_state/code and, when GitHub is rate-limiting, the wait it asked
-# for in $_gh_state/ratelimited. State lives in files because callers run this
+# dl_fetch <url> <outfile> [progress] -> 0 on 2xx; else 1, with the last HTTP
+# code in $_dl_state/code and, when the origin is rate-limiting, the wait it asked
+# for in $_dl_state/ratelimited. State lives in files because callers run this
 # inside $( ), where a variable would not survive.
-GH_MAX_TRIES="${BITHUMAN_INSTALL_MAX_TRIES:-3}"
-GH_MAX_WAIT="${BITHUMAN_INSTALL_MAX_WAIT:-120}"   # total seconds this run will sleep
-_gh_state=$(mktemp -d 2>/dev/null || mktemp -d -t 'bithuman-gh')
-printf '0\n' > "$_gh_state/waited"
-trap 'rm -rf "$_gh_state"' EXIT INT TERM HUP
+DL_MAX_TRIES="${BITHUMAN_INSTALL_MAX_TRIES:-3}"
+DL_MAX_WAIT="${BITHUMAN_INSTALL_MAX_WAIT:-120}"   # total seconds this run will sleep
+_dl_state=$(mktemp -d 2>/dev/null || mktemp -d -t 'bithuman-dl')
+printf '0\n' > "$_dl_state/waited"
+trap 'rm -rf "$_dl_state"' EXIT INT TERM HUP
 
-_gh_hdr_value() { # <header-name> <header-file> -> the last value (redirects write several blocks)
+_dl_hdr_value() { # <header-name> <header-file> -> the last value (redirects write several blocks)
   grep -i "^$1:" "$2" 2>/dev/null | tail -1 | sed -e 's/^[^:]*:[[:space:]]*//' | tr -d '\r' | sed -e 's/[[:space:]]*$//'
 }
 
-_gh_curl() { # <url> <outfile> <hdrfile> <progress?>  -> prints the HTTP code
-  _auth=""
-  case "$1" in
-    https://api.github.com/*|https://github.com/*) [ -n "${GITHUB_TOKEN:-}" ] && _auth=1 ;;
-  esac
+_dl_curl() { # <url> <outfile> <hdrfile> <progress?>  -> prints the HTTP code
   if [ -n "$4" ]; then
-    if [ -n "$_auth" ]; then
-      curl -SL --progress-bar -H "Authorization: Bearer $GITHUB_TOKEN" -D "$3" -o "$2" -w '%{http_code}' "$1" || true
-    else
-      curl -SL --progress-bar -D "$3" -o "$2" -w '%{http_code}' "$1" || true
-    fi
+    curl -SL --progress-bar -D "$3" -o "$2" -w '%{http_code}' "$1" || true
   else
-    if [ -n "$_auth" ]; then
-      curl -sSL -H "Authorization: Bearer $GITHUB_TOKEN" -D "$3" -o "$2" -w '%{http_code}' "$1" 2>/dev/null || true
-    else
-      curl -sSL -D "$3" -o "$2" -w '%{http_code}' "$1" 2>/dev/null || true
-    fi
+    curl -sSL -D "$3" -o "$2" -w '%{http_code}' "$1" 2>/dev/null || true
   fi
 }
 
-gh_fetch() {
+dl_fetch() {
   _url=$1; _out=$2; _prog=${3:-}
-  _hdr="$_gh_state/hdr.$$"
+  _hdr="$_dl_state/hdr.$$"
   _try=1
-  rm -f "$_gh_state/ratelimited"
+  rm -f "$_dl_state/ratelimited"
   while :; do
     : > "$_hdr"
-    _code=$(_gh_curl "$_url" "$_out" "$_hdr" "$_prog")
+    _code=$(_dl_curl "$_url" "$_out" "$_hdr" "$_prog")
     case "$_code" in [0-9][0-9][0-9]) ;; *) _code=000 ;; esac
-    printf '%s\n' "$_code" > "$_gh_state/code"
+    printf '%s\n' "$_code" > "$_dl_state/code"
     case "$_code" in 2??) rm -f "$_hdr"; return 0 ;; esac
 
     _wait=""
     _limited=""
-    _ra=$(_gh_hdr_value retry-after "$_hdr")
-    _rem=$(_gh_hdr_value x-ratelimit-remaining "$_hdr")
-    _reset=$(_gh_hdr_value x-ratelimit-reset "$_hdr")
+    _ra=$(_dl_hdr_value retry-after "$_hdr")
+    _rem=$(_dl_hdr_value x-ratelimit-remaining "$_hdr")
+    _reset=$(_dl_hdr_value x-ratelimit-reset "$_hdr")
     if [ "$_code" = 429 ] || { [ "$_code" = 403 ] && { [ -n "$_ra" ] || [ "$_rem" = 0 ]; }; }; then
       _limited=1
       case "$_ra" in
@@ -138,33 +131,33 @@ gh_fetch() {
       [ "$_wait" -lt 1 ] && _wait=1
     else
       case "$_code" in
-        000|5??) _wait=$((_try * 3)) ;;         # network hiccup or a GitHub 5xx: brief retry
+        000|5??) _wait=$((_try * 3)) ;;         # network hiccup or a 5xx: brief retry
         *) rm -f "$_hdr"; return 1 ;;           # 404 and friends: a real answer, no retry
       esac
     fi
 
-    _waited=$(cat "$_gh_state/waited" 2>/dev/null || echo 0)
-    if [ "$_try" -ge "$GH_MAX_TRIES" ] || [ $((_waited + _wait)) -gt "$GH_MAX_WAIT" ]; then
-      [ -n "$_limited" ] && printf '%s %s\n' "$_code" "$_wait" > "$_gh_state/ratelimited"
+    _waited=$(cat "$_dl_state/waited" 2>/dev/null || echo 0)
+    if [ "$_try" -ge "$DL_MAX_TRIES" ] || [ $((_waited + _wait)) -gt "$DL_MAX_WAIT" ]; then
+      [ -n "$_limited" ] && printf '%s %s\n' "$_code" "$_wait" > "$_dl_state/ratelimited"
       rm -f "$_hdr"
       return 1
     fi
     if [ -n "$_limited" ]; then
-      printf 'install: GitHub is rate-limiting this network (HTTP %s); retrying in %ss (attempt %s of %s)\n' \
-        "$_code" "$_wait" "$((_try + 1))" "$GH_MAX_TRIES" >&2
+      printf 'install: the download server is rate-limiting this network (HTTP %s); retrying in %ss (attempt %s of %s)\n' \
+        "$_code" "$_wait" "$((_try + 1))" "$DL_MAX_TRIES" >&2
     else
-      printf 'install: GitHub did not answer (HTTP %s); retrying in %ss (attempt %s of %s)\n' \
-        "$_code" "$_wait" "$((_try + 1))" "$GH_MAX_TRIES" >&2
+      printf 'install: the download server did not answer (HTTP %s); retrying in %ss (attempt %s of %s)\n' \
+        "$_code" "$_wait" "$((_try + 1))" "$DL_MAX_TRIES" >&2
     fi
     sleep "$_wait"
-    printf '%s\n' "$((_waited + _wait))" > "$_gh_state/waited"
+    printf '%s\n' "$((_waited + _wait))" > "$_dl_state/waited"
     _try=$((_try + 1))
   done
 }
 
-gh_get() { # <url> -> the body on stdout (empty on failure); status as for gh_fetch
-  _body="$_gh_state/body.$$"
-  if gh_fetch "$1" "$_body"; then
+dl_get() { # <url> -> the body on stdout (empty on failure); status as for dl_fetch
+  _body="$_dl_state/body.$$"
+  if dl_fetch "$1" "$_body"; then
     cat "$_body"; rm -f "$_body"; return 0
   fi
   rm -f "$_body"; return 1
@@ -172,25 +165,70 @@ gh_get() { # <url> -> the body on stdout (empty on failure); status as for gh_fe
 
 # Print the rate-limit refusal and exit, when the last fetch ended on one.
 exit_if_rate_limited() {
-  [ -f "$_gh_state/ratelimited" ] || return 0
-  read -r _rl_code _rl_wait < "$_gh_state/ratelimited"
-  err "GitHub is rate-limiting downloads from this network (HTTP $_rl_code); retry in about ${_rl_wait}s."
+  [ -f "$_dl_state/ratelimited" ] || return 0
+  read -r _rl_code _rl_wait < "$_dl_state/ratelimited"
+  err "the download server is rate-limiting downloads from this network (HTTP $_rl_code); retry in about ${_rl_wait}s."
   err ""
-  err "  Nothing is wrong with the release. GitHub allows 60 anonymous API requests per hour"
-  err "  per network address, shared by every machine behind it (offices, CI, VPNs)."
-  err "  To use your own quota instead, pass a GitHub token on the \`sh\` side of the pipe:"
+  err "  Nothing is wrong with the release. Run the installer again in a few minutes, or pin a"
+  err "  release on the \`sh\` side of the pipe, which skips the release lookup:"
   err ""
-  err "      curl -fsSL https://install.bithuman.ai | GITHUB_TOKEN=<your token> sh"
-  err ""
-  err "  Pinning a release on the \`sh\` side (BITHUMAN_VERSION=cli-vX.Y.Z) also skips most API calls."
+  err "      curl -sSL https://install.bithuman.ai | BITHUMAN_VERSION=cli-vX.Y.Z sh"
   exit 1
 }
 
+# ── The release index, read without jq ──────────────────────────────────────
+# rel_table <json-file>: one line per release, "R <tag> <draft> <prerelease>", then one line per
+# asset, "A <tag> <name>". It reads releases.json (an array) and latest.json (one object) in any
+# JSON layout -- pretty or minified, any key order -- by splitting on '"' (awk RS): records then
+# alternate between text outside and inside strings, an escaped quote is re-joined, and braces
+# outside strings give the depth (a release is depth 1, an asset depth 2 inside "assets").
+rel_table() {
+  awk 'BEGIN { RS = "\""; d = 0; instr = 0; buf = ""; have = 0; ina = 0 }
+  {
+    if (instr) {
+      t = $0; n = 0
+      while (n < length(t) && substr(t, length(t) - n, 1) == "\\") n++
+      if (n % 2 == 1) { buf = buf $0 "\""; next }
+      str = buf $0; buf = ""; instr = 0; have = 1; next
+    }
+    r = $0
+    if (have) {
+      have = 0
+      if (r ~ /^[ \t\r\n]*:/) { kd[d] = str; if (d == 1) ina = (str == "assets") }
+      else if (d == 1 && kd[1] == "tag_name") tag = str
+      else if (d == 2 && ina && kd[2] == "name") an[++na] = str
+    }
+    if (d == 1 && r ~ /^[ \t\r\n]*:[ \t\r\n]*(true|false)/) {
+      v = r; sub(/^[ \t\r\n]*:[ \t\r\n]*/, "", v); v = (substr(v, 1, 1) == "t") ? "true" : "false"
+      if (kd[1] == "draft") dr = v; else if (kd[1] == "prerelease") pr = v
+    }
+    for (i = 1; i <= length(r); i++) {
+      c = substr(r, i, 1)
+      if (c == "{") { d++; if (d == 1) { tag = ""; dr = "?"; pr = "?"; na = 0; ina = 0 } }
+      else if (c == "}") {
+        if (d == 1 && tag != "") {
+          print "R", tag, dr, pr
+          for (j = 1; j <= na; j++) print "A", tag, an[j]
+        }
+        d--
+      }
+    }
+    instr = 1
+  }' "$1"
+}
+
+releases_json() { # -> path of this run's copy of <origin>/releases.json, or nothing (unreadable)
+  if [ ! -s "$_dl_state/releases.json" ] && [ ! -f "$_dl_state/releases.fail" ]; then
+    dl_fetch "$DOWNLOADS/releases.json" "$_dl_state/releases.json" || { rm -f "$_dl_state/releases.json"; : > "$_dl_state/releases.fail"; }
+  fi
+  [ -s "$_dl_state/releases.json" ] && printf '%s\n' "$_dl_state/releases.json"
+  return 0
+}
+
 assets_for_tag() {
-  gh_get "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/$1" \
-    | grep '"name"' \
-    | sed -e 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' \
-    | grep '^bithuman-.*\.tar\.gz$' || true
+  _rj=$(releases_json)
+  [ -n "$_rj" ] || return 0
+  rel_table "$_rj" | awk -v t="$1" '$1 == "A" && $2 == t { print $3 }' | grep '^bithuman-.*\.tar\.gz$' || true
 }
 
 target_availability() {
@@ -205,17 +243,15 @@ target_availability() {
 }
 
 release_state() {
-  _meta=$(gh_get "https://api.github.com/repos/${GITHUB_REPO}/releases/tags/$1" || true)
-  [ -z "$_meta" ] && { printf 'UNKNOWN\n'; return 0; }
-  _draft=$(printf '%s\n' "$_meta" | grep -m1 '"draft"' \
-    | sed -e 's/.*"draft"[[:space:]]*:[[:space:]]*\([a-z]*\).*/\1/')
-  _pre=$(printf '%s\n' "$_meta" | grep -m1 '"prerelease"' \
-    | sed -e 's/.*"prerelease"[[:space:]]*:[[:space:]]*\([a-z]*\).*/\1/')
-  if [ "$_draft" != true ] && [ "$_draft" != false ]; then printf 'UNKNOWN\n'; return 0; fi
-  if [ "$_pre"   != true ] && [ "$_pre"   != false ]; then printf 'UNKNOWN\n'; return 0; fi
-  if [ "$_draft" = true ]; then printf 'DRAFT\n'; return 0; fi
-  if [ "$_pre"   = true ]; then printf 'PRERELEASE\n'; return 0; fi
-  printf 'RELEASE\n'
+  _rj=$(releases_json)
+  [ -n "$_rj" ] || { printf 'UNKNOWN\n'; return 0; }
+  _st=$(rel_table "$_rj" | awk -v t="$1" '$1 == "R" && $2 == t { print $3, $4; exit }')
+  case "$_st" in
+    "true "*)     printf 'DRAFT\n' ;;
+    "false true") printf 'PRERELEASE\n' ;;
+    "false false") printf 'RELEASE\n' ;;
+    *)            printf 'UNKNOWN\n' ;;
+  esac
 }
 
 semver_desc() {
@@ -225,20 +261,26 @@ semver_desc() {
     | sed -e "s/^/$1/"
 }
 
+# pick_latest_real_release <prefix>: stdin = rel_table lines; prints the newest <prefix>X.Y.Z that is
+# neither a draft nor a pre-release (never a `-mac` app tag), or nothing.
 pick_latest_real_release() {
-  _cands=$(grep "^$1[0-9]" || true)
+  _cands=$(awk -v p="$1" '$1 == "R" && index($2, p) == 1 && $3 == "false" && $4 == "false" { print $2 }' \
+           | grep "^$1[0-9]" | grep -v -- '-mac$' || true)
   [ -z "$_cands" ] && return 0
-  _cands=$(printf '%s\n' "$_cands" | grep -v -- '-mac$' || true)
-  [ -z "$_cands" ] && return 0
-  _n=0
-  for _t in $(printf '%s\n' "$_cands" | semver_desc "$1"); do
-    _n=$((_n + 1))
-    [ "$_n" -gt 8 ] && break
-    case "$(release_state "$_t")" in
-      RELEASE) printf '%s\n' "$_t"; return 0 ;;
-      *)       ;;
-    esac
-  done
+  printf '%s\n' "$_cands" | semver_desc "$1" | head -1
+  return 0
+}
+
+# downloads_latest -> the newest published cli-v* release from <origin>/latest.json, cross-checked:
+# it must say draft=false and prerelease=false and carry a cli-v tag; anything else falls back to
+# picking from <origin>/releases.json. Prints nothing when neither can be read.
+downloads_latest() {
+  if dl_fetch "$DOWNLOADS/latest.json" "$_dl_state/latest.json"; then
+    _lt=$(rel_table "$_dl_state/latest.json" | awk '$1 == "R" && $3 == "false" && $4 == "false" { print $2; exit }')
+    case "$_lt" in cli-v[0-9]*) printf '%s\n' "$_lt"; return 0 ;; esac
+  fi
+  _rj=$(releases_json)
+  [ -n "$_rj" ] && rel_table "$_rj" | pick_latest_real_release 'cli-v'
   return 0
 }
 
@@ -256,7 +298,7 @@ if [ "${1:-}" = "--self-test" ]; then
       printf '  FAIL  %-58s got %s, want %s\n' "$1" "$_got" "$4"; _t_fail=1
     fi
   }
-  printf 'install.sh --self-test  (live, against %s)\n' "$GITHUB_REPO"
+  printf 'install.sh --self-test  (live, against %s)\n' "$DOWNLOADS"
   _t "cli-v2.5.1 has no aarch64 Linux"          cli-v2.5.1  bithuman-aarch64-unknown-linux-gnu.tar.gz MISSING
   _t "cli-v2.5.1 HAS x86_64 Linux (control)"    cli-v2.5.1  bithuman-x86_64-unknown-linux-gnu.tar.gz  OK
   _t "cli-v2.5.1 HAS arm64 macOS (control)"     cli-v2.5.1  bithuman-aarch64-apple-darwin.tar.gz      OK
@@ -271,42 +313,45 @@ if [ "${1:-}" = "--self-test" ]; then
       printf '  FAIL  %-58s got %s, want %s\n' "$1" "$_got" "$3"; _t_fail=1
     fi
   }
-  _rel_list=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100" || true)
-  _triples=$(printf '%s\n' "$_rel_list" \
-    | grep -E '"(tag_name|draft|prerelease)"[[:space:]]*:' \
-    | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/T \1/' \
-          -e 's/.*"draft"[[:space:]]*:[[:space:]]*\([a-z]*\).*/D \1/' \
-          -e 's/.*"prerelease"[[:space:]]*:[[:space:]]*\([a-z]*\).*/P \1/' \
-    | awk '$1=="T"{t=$2} $1=="D"{d=$2} $1=="P"&&t!=""{print t, d, $2}')
+  _rj=$(releases_json)
+  _triples=""
+  [ -n "$_rj" ] && _triples=$(rel_table "$_rj" | awk '$1 == "R" { print $2, $3, $4 }')
   _one_real=$(printf '%s\n' "$_triples" | awk '$2=="false" && $3=="false" {print $1; exit}')
   _one_pre=$(printf  '%s\n' "$_triples" | awk '$2=="false" && $3=="true"  {print $1; exit}')
   if [ -z "$_one_real" ]; then
-    printf '  FAIL  %-58s %s\n' "the listing offers a REAL release to grade" "none — could not look"; _t_fail=1
+    printf '  FAIL  %-58s %s\n' "the index offers a REAL release to grade" "none — could not look"; _t_fail=1
   else
-    _ts "a tag the API calls a real release -> RELEASE"       "$_one_real" RELEASE
+    _ts "a tag the index calls a real release -> RELEASE"     "$_one_real" RELEASE
   fi
   if [ -z "$_one_pre" ]; then
-    printf '  FAIL  %-58s %s\n' "★the listing offers a PRE-RELEASE to grade" "none — could not look"; _t_fail=1
+    printf '  FAIL  %-58s %s\n' "★the index offers a PRE-RELEASE to grade" "none — could not look"; _t_fail=1
   else
-    _ts "★a tag the API calls a pre-release -> PRERELEASE"     "$_one_pre" PRERELEASE
+    _ts "★a tag the index calls a pre-release -> PRERELEASE"   "$_one_pre" PRERELEASE
   fi
   _ts "a tag that cannot exist -> UNKNOWN"      cli-v0.0.0-nope UNKNOWN
 
-  _sel=$(printf '%s\n' "$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100" \
-    | grep '"tag_name"' \
-    | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')" \
-    | pick_latest_real_release 'cli-v' || true)
-  if [ -z "$_sel" ]; then
+  _picked=""
+  [ -n "$_rj" ] && _picked=$(rel_table "$_rj" | pick_latest_real_release 'cli-v' || true)
+  if [ -z "$_picked" ]; then
     printf '  FAIL  %-58s resolved nothing\n' "the picker selects a cli-v* release"; _t_fail=1
-  elif [ "$(release_state "$_sel")" = RELEASE ]; then
-    printf '  PASS  %-58s %s\n' "★the picker selects a release, never a pre-release" "$_sel"
+  elif [ "$(release_state "$_picked")" = RELEASE ]; then
+    printf '  PASS  %-58s %s\n' "★the picker selects a release, never a pre-release" "$_picked"
   else
     printf '  FAIL  %-58s picked %s which is %s\n' \
-           "★the picker selects a release, never a pre-release" "$_sel" "$(release_state "$_sel")"; _t_fail=1
+           "★the picker selects a release, never a pre-release" "$_picked" "$(release_state "$_picked")"; _t_fail=1
+  fi
+  _sel=$(downloads_latest || true)
+  if [ -n "$_sel" ] && [ "$_sel" = "$_picked" ]; then
+    printf '  PASS  %-58s %s\n' "★latest.json names the release the picker chooses" "$_sel"
+  else
+    printf '  FAIL  %-58s latest.json=%s picker=%s\n' \
+           "★latest.json names the release the picker chooses" "${_sel:-<none>}" "${_picked:-<none>}"; _t_fail=1
   fi
 
-  _formula_tag=$(curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPO}/main/Formula/bithuman-cli.rb" 2>/dev/null \
-    | sed -n 's|.*releases/download/\([^/]*\)/bithuman-aarch64-apple-darwin\.tar\.gz.*|\1|p' | head -1)
+  # The formula users install, read from the tap's canonical main (override for a local run).
+  _formula_url="${BITHUMAN_SELFTEST_FORMULA_URL:-https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/Formula/bithuman-cli.rb}"
+  _formula_tag=$(curl -fsSL "$_formula_url" 2>/dev/null \
+    | sed -n 's|.*/\([^/]*\)/bithuman-aarch64-apple-darwin\.tar\.gz".*|\1|p' | head -1)
   if [ -z "$_formula_tag" ]; then
     printf '  FAIL  %-58s %s\n' "the formula names a tag to compare against" "none — could not look"; _t_fail=1
   elif [ "$_formula_tag" = "$_sel" ]; then
@@ -459,39 +504,33 @@ target="${arch}-${os}"
 
 version="${BITHUMAN_VERSION:-}"
 if [ -z "$version" ]; then
-  version=$(mirror_latest)
-  [ -n "$version" ] && info "latest release (bitHuman mirror): $version"
+  info "querying latest release..."
+  version=$(downloads_latest)
+  [ -n "$version" ] && info "latest release: $version"
 fi
 if [ -z "$version" ]; then
-  info "querying latest release..."
-  api_url="https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=100"
-  tags=$(gh_get "$api_url" \
-    | grep '"tag_name"' \
-    | sed -e 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-  version=$(printf '%s\n' "$tags" | pick_latest_real_release 'cli-v')
-  [ -z "$version" ] && version=$(printf '%s\n' "$tags" | pick_latest_real_release 'v')
-  if [ -z "$version" ]; then
-    exit_if_rate_limited
-    err "could not determine latest CLI release from $api_url"
-    err ""
-    err "  Every cli-v* candidate was a draft, a pre-release, or unreadable."
-    err "  The installer does NOT fall back to a pre-release: a pre-release is"
-    err "  bytes Homebrew users are not running, and the two populations follow"
-    err "  the same instruction."
-    err ""
-    err "  If this box shares an egress IP with other machines, the likeliest"
-    err "  cause is GitHub ANONYMOUS API budget exhaustion: 60 requests per"
-    err "  hour per SOURCE ADDRESS, shared by everyone behind that address."
-    err "  Resolving a version costs about three of them. Wait for the window"
-    err "  to roll, or skip resolution entirely by pinning:"
-    err ""
-    err "      curl -sSL https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/install.sh | BITHUMAN_VERSION=cli-vX.Y.Z sh"
-    err ""
-    err "  Check the budget with:  curl -s https://api.github.com/rate_limit"
-    err ""
-    err "set BITHUMAN_VERSION on the \`sh\` side of the pipe (form above) to pin a release."
-    exit 1
-  fi
+  # A rate limit on the origin does not end the lookup: the mirror exists for exactly this kind of
+  # origin trouble. mirror_latest uses plain curl, so the origin's rate-limit record survives it,
+  # and the check below still names the rate limit when the mirror cannot name a release either.
+  version=$(mirror_latest)
+  [ -n "$version" ] && info "latest release (bitHuman mirror; $DOWNLOADS could not be read): $version"
+fi
+if [ -z "$version" ]; then
+  exit_if_rate_limited
+  err "could not determine the latest CLI release from $DOWNLOADS/latest.json"
+  err ""
+  err "  Neither the release origin nor the bitHuman mirror named a published cli-v*"
+  err "  release (offline, a proxy, or every candidate is a draft or a pre-release)."
+  err "  The installer does NOT fall back to a pre-release: a pre-release is"
+  err "  bytes Homebrew users are not running, and the two populations follow"
+  err "  the same instruction."
+  err ""
+  err "  Pin a release to skip the lookup:"
+  err ""
+  err "      curl -sSL https://install.bithuman.ai | BITHUMAN_VERSION=cli-vX.Y.Z sh"
+  err ""
+  err "set BITHUMAN_VERSION on the \`sh\` side of the pipe (form above) to pin a release."
+  exit 1
 fi
 
 info "version: $version"
@@ -510,13 +549,13 @@ mkdir -p "$install_dir"
 info "install dir: $install_dir"
 
 tarball_name="bithuman-${target}.tar.gz"
-tarball_url="https://github.com/${GITHUB_REPO}/releases/download/${version}/${tarball_name}"
+tarball_url="${DOWNLOADS}/${version}/${tarball_name}"
 
 tmpdir=$(mktemp -d 2>/dev/null || mktemp -d -t 'bithuman-install')
-trap 'rm -rf "$tmpdir" "$_gh_state"' EXIT INT TERM HUP
+trap 'rm -rf "$tmpdir" "$_dl_state"' EXIT INT TERM HUP
 sha_file="$tmpdir/${tarball_name}.sha256"
 
-# The mirror first: it must hold BOTH the sidecar and the tarball, or GitHub is used.
+# The mirror first: it must hold BOTH the sidecar and the tarball, or the origin is used.
 from_mirror=""
 case "$version" in cli-v[0-9]*) _mver=${version#cli-v} ;; *) _mver="" ;; esac
 if [ -n "$MIRROR" ] && [ -n "$_mver" ]; then
@@ -528,11 +567,11 @@ if [ -n "$MIRROR" ] && [ -n "$_mver" ]; then
       tarball_url=$_murl
     else
       rm -f "$tmpdir/$tarball_name" "$sha_file"
-      info "the bitHuman mirror did not deliver $tarball_name; falling back to GitHub"
+      info "the bitHuman mirror did not deliver $tarball_name; using the release origin"
     fi
   else
     rm -f "$sha_file"
-    info "the bitHuman mirror has no $version/$tarball_name (or is unreachable); using GitHub"
+    info "the bitHuman mirror has no $version/$tarball_name (or is unreachable); using the release origin"
   fi
 fi
 
@@ -556,7 +595,7 @@ case "$_avail" in
         err "  earlier); $version was cut while only an x86_64 Linux render host existed."
         err "  Options, in order of preference:"
         err "    * ★INSTALL A RELEASE THAT CARRIES IT — the newest does; to pin the first:"
-        err "          curl -sSL https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/install.sh | BITHUMAN_VERSION=cli-v2.7.1 sh"
+        err "          curl -sSL https://install.bithuman.ai | BITHUMAN_VERSION=cli-v2.7.1 sh"
         err "    * use the Python library, which supports aarch64 Linux too:"
         err "          pip install bithuman        # docs.bithuman.ai"
         err "      Same engine, in your process; it is a library, not this command."
@@ -573,36 +612,36 @@ case "$_avail" in
         ;;
     esac
     err ""
-    err "  Full asset list: https://github.com/${GITHUB_REPO}/releases/tag/${version}"
+    err "  Full release index: ${DOWNLOADS}/releases.json"
     exit 1
     ;;
 esac
 
 info "downloading $tarball_url"
-if ! gh_fetch "$tarball_url" "$tmpdir/$tarball_name" progress; then
+if ! dl_fetch "$tarball_url" "$tmpdir/$tarball_name" progress; then
   exit_if_rate_limited
-  _dl_code=$(cat "$_gh_state/code" 2>/dev/null || echo 000)
+  _dl_code=$(cat "$_dl_state/code" 2>/dev/null || echo 000)
   case "$_dl_code" in
     404)
       err "download failed (HTTP 404): $version has no $tarball_name."
-      err "See the assets it does carry: https://github.com/${GITHUB_REPO}/releases/tag/${version}"
+      err "See the assets it does carry: ${DOWNLOADS}/releases.json"
       ;;
     000)
-      err "download failed: could not reach github.com (network, proxy or DNS)."
+      err "download failed: could not reach ${DOWNLOADS} (network, proxy or DNS)."
       err "Check the connection and run the installer again."
       ;;
     *)
       err "download failed (HTTP $_dl_code) for $tarball_url"
-      err "GitHub may be having trouble; run the installer again in a minute."
+      err "The download server may be having trouble; run the installer again in a minute."
       ;;
   esac
   exit 1
 fi
 
-fi  # end of the GitHub fallback
+fi  # end of the release-origin path
 
 sha_url="${tarball_url}.sha256"
-if [ -n "$from_mirror" ] || gh_fetch "$sha_url" "$sha_file"; then
+if [ -n "$from_mirror" ] || dl_fetch "$sha_url" "$sha_file"; then
   info "verifying sha256..."
   expected=$(awk '{print $1}' "$sha_file")
   if command -v shasum >/dev/null 2>&1; then

@@ -56,9 +56,9 @@
 # This formula installs a prebuilt Rust binary built from the standalone
 # bithuman-product/bithuman (repo renamed from bithuman-cli) against the bithuman-product/bithuman-models
 # engine monorepo, models/essence-1 (libessence engine core 3.1.0, ABI 7),
-# mirrored to the public homebrew-bithuman tap repo's own Releases
-# (both upstream repos are private — anonymous brew downloads fail
-# there with HTTP 404; the mirror is the workaround).
+# published to https://downloads.bithuman.ai/homebrew-bithuman/<tag>/ (until 2026-10, the
+# public tap repo's own GitHub Releases; both upstream repos are private, so anonymous brew
+# downloads cannot come from them).
 class BithumanCli < Formula
   desc "Live-avatar CLI for the bitHuman SDK (`bithuman run` for browser-served chat)"
   homepage "https://www.bithuman.ai"
@@ -405,7 +405,7 @@ class BithumanCli < Formula
   # dfe6e24b5). The macOS half was built, signed and notarized on the release Mac; the two lines
   # below are release_pack.sh's FORMULA-PIN.txt for those bytes, pasted, not typed.
   # (2.7.5 was 060d9a7d4 / e2.43 / sha ea9c7e44….)
-  url "https://github.com/bithuman-product/homebrew-bithuman/releases/download/cli-v2.8.8/bithuman-aarch64-apple-darwin.tar.gz"
+  url "https://downloads.bithuman.ai/homebrew-bithuman/cli-v2.8.8/bithuman-aarch64-apple-darwin.tar.gz"
   sha256 "67e5a3d0fbbeea305e1c1bceda2090c22b7b8d2676333d5a17bae250c97a5a64"
   # ★CORRECTED 2026-09-05 — THIS FIELD WAS A LIVE LICENSING MISSTATEMENT.
   # It read `license "Apache-2.0"`, which is what `brew info bithuman-cli`

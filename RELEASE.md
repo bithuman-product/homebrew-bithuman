@@ -9,7 +9,7 @@ One repo, **one tag prefix per artifact**. Don't mix the namespaces.
 
 | Artifact | Tag | Ships to | Driven by |
 |---|---|---|---|
-| **CLI** (`bithuman`) | `cli-v<x.y.z>` | Homebrew tap + `curl\|bash` | the CLI repo's tracked `scripts/release-macos.sh` + `scripts/release-linux.sh` (one `CLI_SHA` for both halves) and `scripts/release_pack.sh`, run on a signing host; `scripts/check-release-atomic.sh` here before the draft is published; then bump `Formula/bithuman-cli.rb`. `release-coverage.yml` audits every published release |
+| **CLI** (`bithuman`) | `cli-v<x.y.z>` | Homebrew tap + `curl\|bash` | the CLI repo's tracked `scripts/release-macos.sh` + `scripts/release-linux.sh` (one `CLI_SHA` for both halves) and `scripts/release_pack.sh`, run on a signing host; `scripts/check-release-atomic.sh --manifest` here on the staged release, ONE `scripts/downloads-publish.py publish` call, `scripts/check-release-atomic.sh <tag>` on the published one; then bump `Formula/bithuman-cli.rb`. `release-coverage.yml` audits every published release |
 | **Python SDK** (`bithuman`) | `pypi-v<x.y.z>` | PyPI | `ci/github-workflows-disabled/release-pypi.yml` |
 | **MCP** (`bithuman-mcp`) | `mcp-v<x.y.z>` | PyPI | `ci/github-workflows-disabled/publish-mcp.yml` |
 | **Flutter plugin** (`bithuman`) | `flutter-v<x.y.z>` | pub.dev | `ci/github-workflows-disabled/publish-pubdev.yml` |
@@ -18,17 +18,52 @@ One repo, **one tag prefix per artifact**. Don't mix the namespaces.
 
 **Why the prefixes:** SwiftPM resolves packages by **bare semver tags**, so the bare `v*` namespace is the **Swift SDK's alone**. The CLI moved to `cli-v*` to stop colliding (old bare CLI tags ≤ `v2.3.25` are frozen history). `install.sh` and the formula follow `cli-v*` (with a fallback to the old bare tags until the next CLI release).
 
-**The Latest badge is a separate, sticky flag — only `cli-v*` may claim it.** `gh release create` sets `make_latest=true` unless told otherwise, so **every** non-CLI publish in this repo takes `/releases/latest` from the newest CLI, whatever the dates say. Measured twice: 2026-09-15 `essence2-v1.6.3` held it over the newer `cli-v2.6.20` (fixed for that lane by `--latest=false` in `publish-essence2-apple.yml`, commit `626d828`), and hours later the hand-cut `flutter-plugin-vendor-v1` took it again. So pass **`--latest=false`** on every `gh release create` here that is not a `cli-v*` release — from a workflow **or by hand**.
+## Where releases are published (2026-10: downloads.bithuman.ai, not GitHub)
 
-Clearing the flag on the thief is **not enough**: with `make_latest=false` alone GitHub falls back to the newest non-draft, non-prerelease release by `created_at` and hands the badge straight back (measured 2026-09-15 on `flutter-plugin-vendor-v1` — `/releases/latest` still returned it). Re-pin the CLI explicitly, which touches metadata only and leaves assets and download URLs byte-for-byte intact:
+Every release of this repository is published to bitHuman's download origin in one fixed
+layout. The installers, the formula and every check in this repository read it; none of them reads
+GitHub Releases (the ones published before the move stay readable):
 
-```sh
-R=bithuman-product/homebrew-bithuman
-gh api -X PATCH repos/$R/releases/$(gh api repos/$R/releases/tags/<thief-tag>  --jq .id) -f make_latest=false &&
-gh api -X PATCH repos/$R/releases/$(gh api repos/$R/releases/tags/cli-v<x.y.z> --jq .id) -f make_latest=true
+```
+https://downloads.bithuman.ai/homebrew-bithuman/<tag>/<asset>      immutable, edge-cached a year
+https://downloads.bithuman.ai/homebrew-bithuman/releases.json      every release (GitHub's releases shape)
+https://downloads.bithuman.ai/homebrew-bithuman/latest.json        the newest cli-v* release
 ```
 
-Never fix this by deleting, retagging or moving a release — `flutter-plugin-vendor-v1` is fetched by `packages/flutter-plugin/scripts/bootstrap.sh` against **digests pinned in that script**, so its bytes and URLs must not move. `install.sh` is unaffected by the badge either way: it resolves `cli-v*` through its own `pick_latest_real_release()` and never reads `/releases/latest`.
+`scripts/downloads-publish.py` is the `gh release` replacement: `view`, `list` and `download`
+read the public index; `stage`, `publish`, `set-latest` and `reindex` go through the canonical
+downloads publisher (`dlhost.py`, at `$BITHUMAN_DLHOST` or `scripts/dlhost.py`), which verifies
+every upload and refuses different bytes under a published name. There are **no drafts** (the
+bucket is public), so a release is assembled and graded **locally**, then published in **one**
+call:
+
+```sh
+scripts/downloads-publish.py stage cli-v<x.y.z> out/bithuman-* > /tmp/m.json
+scripts/check-release-atomic.sh --manifest /tmp/m.json --assets out --verify-bytes
+scripts/downloads-publish.py publish cli-v<x.y.z> out/bithuman-* --title "bithuman CLI <x.y.z>" --notes-file NOTES.md
+scripts/check-release-atomic.sh cli-v<x.y.z>          # the published release, read back anonymously
+```
+
+The release enters `releases.json` only after every asset is verified, so it is atomic by
+construction. Publishing the halves of one CLI release in two calls lists it while incomplete,
+and `check-release-atomic.sh` C5 refuses that. Published assets are immutable: to change bytes,
+cut a new tag and re-pin every sha256 that names it. The index is edge-cached for up to 300 s.
+
+**Only `cli-v*` may be latest.json.** The installers and the CLI's update notice read it to learn
+the CLI version. `downloads-publish.py publish` passes `--latest auto` for a `cli-v*` tag (it
+becomes latest when it is a higher CLI version) and `--latest false` for every other family
+(Swift SDK `v*`, `essence2-v*`, `enginecore-v*`, `flutter-plugin-vendor-v*`, engine assets), and
+refuses `--latest true` on them. If latest.json ever names anything else,
+`tools/verify_latest_badge.py` refuses by name, and the remedy is
+`scripts/downloads-publish.py set-latest cli-v<x.y.z>` (`--heal` runs it): it rewrites latest.json
+only, never assets or URLs. Never fix it by deleting, retagging or moving a release:
+`flutter-plugin-vendor-v1` is fetched by `packages/flutter-plugin/scripts/bootstrap.sh` against
+digests pinned in that script, so its bytes and URLs must not move.
+
+(History: on GitHub the sticky Latest badge was taken twice on 2026-09-15 by non-CLI releases
+— `essence2-v1.6.3`, then `flutter-plugin-vendor-v1` — because `gh release create` sets
+`make_latest=true` by default. The GitHub Releases published before the move still carry that
+state.)
 
 ## macOS code signing (CLI)
 
@@ -204,7 +239,7 @@ That is not hypothetical — it is `cli-v2.5.1`, minus the timing:
 * Linux asset created `19:42:49Z` — **44 seconds** after CLI commit `2f210b3`,
   *"expr2 linux engine: re-pin to the clean-room rebuild"*
 * `release-cli` (the dispatch lane, deleted 2026-09-07) had **zero successful runs** that day (7 total, last success 08-02),
-  and no workflow in `bithuman-product/bithuman` uploads a release asset
+  and no workflow in the CLI repo (then `bithuman-product/bithuman`) uploads a release asset
   (verified by grep) — so **both halves were uploaded by hand, 7 h apart**
 
 ★ **CORRECTED 2026-09-04 — "two different trees" IS NOT WHAT THE ARTIFACTS SAY,
@@ -327,18 +362,19 @@ would change the tag, not the vintage. Refusing is the correct outcome here;
 
 ## CLI download mirror (maven.bithuman.ai) — a release step
 
-Since 2026-10-01 `install.sh` and `install.ps1` download from bitHuman's own origin first and
-fall back to GitHub, so a normal install makes **zero** GitHub requests (GitHub allows 60
-anonymous API requests per hour per network, shared by everyone behind a NAT).
+Since 2026-10-01 `install.sh` and `install.ps1` download from this second copy first when it
+holds the resolved version, and since the 2026-10 move they resolve the version from
+`https://downloads.bithuman.ai/homebrew-bithuman/latest.json` (the mirror's metadata only when the
+origin cannot be read). No install makes a GitHub request.
 
 * **Where:** the existing public-read object-storage bucket `maven`, served by the existing
   Cloudflare Worker `bithuman-maven-proxy` (platform `deploy/cloudflare/maven-proxy.mjs`): no
   new bucket, Worker or DNS. Versioned files sit in our edge cache for a year; `maven-metadata.xml`
   for 300 s.
 * **Layout:** `https://maven.bithuman.ai/ai/bithuman/bithuman-cli/<x.y.z>/<asset>` and
-  `<asset>.sha256` (the GitHub release's own bytes), plus
+  `<asset>.sha256` (the release's own bytes, copied from downloads.bithuman.ai), plus
   `…/bithuman-cli/maven-metadata.xml`, whose `<release>` is the newest mirrored version. That is the
-  installers' "latest". It is a Maven metadata file rather than a `latest.json` because the
+  installers' fallback "latest". It is a Maven metadata file rather than a `latest.json` because the
   Worker gives every other file name a 1-year immutable edge TTL, and nothing on the account
   can purge it.
 * **After every `cli-v<x.y.z>` release is published** (not a draft, not a pre-release), from a
@@ -355,26 +391,31 @@ anonymous API requests per hour per network, shared by everyone behind a NAT).
   re-cut a version; publish a new one. It checks every asset against its `.sha256` before upload
   and reads each one back through `maven.bithuman.ai` afterwards. The installers verify the
   sidecar exactly as before. A mirror sidecar mismatch **refuses** the install; it is not
-  silently swapped for GitHub.
-* **Fallback:** the installers fall back to GitHub when the mirror is down, or when the version
+  silently swapped for the origin.
+* **Fallback:** the installers download from the origin (`BITHUMAN_DOWNLOADS`, default
+  `https://downloads.bithuman.ai/homebrew-bithuman`) when the mirror is down, or when the version
   or target is not mirrored (a pinned older `BITHUMAN_VERSION`). `BITHUMAN_MIRROR=off` forces
-  GitHub only, and `BITHUMAN_MIRROR=<url>` points at another copy.
-* **Tests:** `sh tests/install-sh-mirror.sh` runs offline: mirror healthy (0 GitHub requests),
-  mirror down, version not mirrored, tampered mirror, and `off`.
+  the origin only, and `BITHUMAN_MIRROR=<url>` points at another copy.
+* **Tests:** `sh tests/install-sh-mirror.sh` and `sh tests/install-sh-download-errors.sh` run
+  offline (fake origin + mirror): version from latest.json, mirror healthy / down / version not
+  mirrored / tampered, `off`, origin down, a latest.json naming a pre-release, a minified index,
+  rate limits, and that **no** case asks any other host (GitHub included).
+  `pwsh -NoProfile -File tests/install-ps1-resolution.ps1` runs the whole of `install.ps1` the same
+  way: latest.json, then releases.json (also when latest.json is a 404), then the mirror.
 * **Cost (metered: storage-origin egress at $0.09/GB, storage at $0.021/GB-month):** ~$1–5/month.
   Storage is ~0.65 GB per mirrored version, about $0.014/month. Egress is one pull per Cloudflare
   location per file per release (~0.2 GB per target), plus re-pulls after the edge evicts a
   rarely used object. The ceiling is every install missing the edge: installs × ~0.2 GB ×
   $0.09, about $5/month at 300 installs. The Worker's requests fall within the free allowance.
   Nothing is idle-billed. Prune old versions from the bucket once they are no longer the
-  release; pinned installs then fall back to GitHub.
+  release; pinned installs then fall back to the origin.
 
 ## Cut a release
 - **PyPI wheel** — tag `bithuman-models` `essence1-v<x.y.z>` (must match `models/essence-1/sdk/python/pyproject.toml`), then `git tag pypi-v<x.y.z> && git push --tags` here. Dry run: run `release-pypi.yml` via *workflow_dispatch* with `publish=false` (builds the 9-wheel matrix, publishes nothing).
 - **MCP** — bump `packages/python-mcp/pyproject.toml`, `git tag mcp-v<x.y.z>`.
 - **Flutter plugin** — enable *Automated Publishing* on `pub.dev/packages/bithuman/admin` once, bump `packages/flutter-plugin/pubspec.yaml`, run `flutter test` there on that commit (it must pass: `test/release_pins_test.dart` refuses a 2.6.36+ version whose Android engines are below `essence2-android` 0.9.4 / `expression2-android` 0.6.0 or whose Apple engines are below `essence2-v1.15.4` / `v2.20.3`, the cross-account cache fixes), and `scripts/check-apple-engine-pin.sh`, then `git tag flutter-v<x.y.z>`.
-- **CLI** — build in `bithuman-cli`, publish the tarballs as a **`cli-v<x.y.z>`** Release here, bump `Formula/bithuman-cli.rb` (`url`/`version`/`sha256`), then **mirror it** (next section). Until it is mirrored, `curl … | sh` and `irm … | iex` keep installing the previous mirrored version.
-- **Flutter plugin vendor bundle** — `flutter-plugin-vendor-v<n>`, hand-cut and **immutable**: the public build outputs `packages/flutter-plugin/scripts/bootstrap.sh` fetches anonymously against digests **pinned in that script** (`embody-models.tar.gz`, `onnxruntime.xcframework.zip`, and `manifest.json` for a human to verify against). Publish it with **`--latest=false`**. Never re-upload an asset under an existing vendor tag — cut `-v<n+1>` and bump the pins.
-- **Swift SDK** — cut a bare `v<x.y.z>` **above** the highest existing bare tag (`v2.3.25`), **tag-only** (no Release object so `install.sh` ignores it), with `Package.swift`'s `binaryTarget` URL+checksum pointing at a hosted xcframework. Consumers pin `.package(url: …/homebrew-bithuman, from: "<x.y.z>")`.
+- **CLI** — build in the CLI repo, publish every tarball of **`cli-v<x.y.z>`** in ONE `scripts/downloads-publish.py publish` call (section "Where releases are published"), bump `Formula/bithuman-cli.rb` (`url` = `https://downloads.bithuman.ai/homebrew-bithuman/cli-v<x.y.z>/bithuman-aarch64-apple-darwin.tar.gz`, `sha256`), then **mirror it** (section above). The installers pick it up from latest.json at once; the mirror is the second copy.
+- **Flutter plugin vendor bundle** — `flutter-plugin-vendor-v<n>`, hand-cut and **immutable**: the public build outputs `packages/flutter-plugin/scripts/bootstrap.sh` fetches anonymously against digests **pinned in that script** (`embody-models.tar.gz`, `onnxruntime.xcframework.zip`, and `manifest.json` for a human to verify against). `scripts/downloads-publish.py publish` never makes it latest.json. Never re-upload an asset under an existing vendor tag — cut `-v<n+1>` and bump the pins.
+- **Swift SDK** — cut a bare `v<x.y.z>` **above** the highest existing bare tag, **tag-only** (no release on the downloads host, so `install.sh` ignores it), with `Package.swift`'s `binaryTarget` URL+checksum pointing at a hosted xcframework (publish it with `scripts/downloads-publish.py publish`, never latest.json). Consumers pin `.package(url: …/homebrew-bithuman, from: "<x.y.z>")`.
 
 > PyPI is **yank-only**, pub.dev is **retract-only** — publishes are permanent. Tag deliberately; dry-run first.

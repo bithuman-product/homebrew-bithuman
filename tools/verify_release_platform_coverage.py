@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 """verify_release_platform_coverage.py -- DID THE CLI RELEASE LOSE A PLATFORM?
 
-The GitHub-Releases twin of bithuman-models' tools/verify_pypi_platform_
+The release-index twin of bithuman-models' tools/verify_pypi_platform_
 coverage.py, which guards `pip install bithuman`.  This one guards
-`curl -sSL install.bithuman.ai | sh`.
+`curl -sSL install.bithuman.ai | sh`.  ★2026-10: the index it reads is
+https://downloads.bithuman.ai/homebrew-bithuman/releases.json (GitHub's
+releases shape), where the releases moved; GitHub is no longer read.
 
 WHY THIS EXISTS (measured 2026-09-02)
 ─────────────────────────────────────
@@ -94,8 +96,8 @@ import sys
 import urllib.error
 import urllib.request
 
-REPO = "bithuman-product/homebrew-bithuman"
-API = "https://api.github.com/repos/%s/releases?per_page=100"
+REPO = "homebrew-bithuman"
+API = os.environ.get("BITHUMAN_DOWNLOADS_BASE", "https://downloads.bithuman.ai").rstrip("/") + "/%s/releases.json"
 
 # The CLI archive asset name, the ONLY name an installer ever asks for:
 #   bithuman-<arch>-<os>.tar.gz  (+ the optional .sha256 sidecar)  install.sh
@@ -132,11 +134,7 @@ def fetch_index(repo: str = REPO, url: str | None = None,
         with open(index_file, "r", encoding="utf-8") as fh:
             return json.load(fh)
     req = urllib.request.Request(url or (API % repo),
-                                 headers={"Accept": "application/vnd.github+json",
-                                          "User-Agent": "bithuman-release-gate"})
-    tok = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if tok:
-        req.add_header("Authorization", "Bearer %s" % tok)
+                                 headers={"User-Agent": "bithuman-release-gate"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.loads(r.read().decode())
 
@@ -374,7 +372,7 @@ def main(argv=None) -> int:
                     help="comma-separated target triples that MUST be present, "
                          "independent of the predecessor")
     ap.add_argument("--url", default=None,
-                    help="read the index from here instead of the GitHub API")
+                    help="read the index from here instead of the downloads host")
     ap.add_argument("--index-file", default=None,
                     help="read the index from a local JSON file (testing)")
     ap.add_argument("--quiet", action="store_true")

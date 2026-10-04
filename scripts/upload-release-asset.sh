@@ -29,10 +29,16 @@
 # never a silent default — the same shape as `allow_unsigned` and
 # BITHUMAN_TARBALL_NO_ESSENCE2 elsewhere in this workflow.
 #
+# ★2026-10: releases live on https://downloads.bithuman.ai (<repo>/<tag>/<asset>,
+# releases.json, latest.json), written through scripts/downloads-publish.py. Assets there
+# are IMMUTABLE (the edge caches them for a year), so the declared-overwrite escape hatch is
+# gone: OVERWRITE_PUBLISHED=true is refused with the same explanation. Cut a new tag instead.
+# Adding NEW assets to an existing release is allowed and never moves latest.json.
+#
 # Environment
-#   OVERWRITE_PUBLISHED=true   allow replacing an asset that already exists
-#   ASSET_REPO                 repo holding the release (default: this tap)
-#   GH_TOKEN                   as usual
+#   OVERWRITE_PUBLISHED=true   (refused: published assets are immutable)
+#   ASSET_REPO                 repo name on the downloads host (default: homebrew-bithuman)
+#   bucket credentials         read by the downloads publisher (dlhost.py), never printed
 #
 set -euo pipefail
 
@@ -40,7 +46,11 @@ TAG="${1:?usage: upload-release-asset.sh <release-tag> <file> [file...]}"
 shift
 [ "$#" -gt 0 ] || { echo "upload-release-asset: no files given" >&2; exit 2; }
 
-REPO="${ASSET_REPO:-bithuman-product/homebrew-bithuman}"
+REPO="${ASSET_REPO:-homebrew-bithuman}"
+# Until the move ASSET_REPO took OWNER/NAME (a GitHub repo); only the last segment names the repo
+# on the downloads host, so an old export (bithuman-product/homebrew-bithuman) keeps working.
+REPO="${REPO##*/}"
+PUBLISH=(python3 "$(cd "$(dirname "$0")" && pwd)/downloads-publish.py" --repo "$REPO")
 OVERWRITE="${OVERWRITE_PUBLISHED:-false}"
 
 for f in "$@"; do
@@ -48,15 +58,15 @@ for f in "$@"; do
 done
 
 # ---- what is already on this release ---------------------------------------
-# Read it ONCE, from the API, and fail loudly if the read itself fails: an
-# empty asset list because `gh` errored would read as "nothing to overwrite"
-# and wave the clobber straight through.
+# Read it ONCE, from the bucket's index, and fail loudly if the read itself
+# fails: an empty asset list because the read errored would read as "nothing to
+# overwrite" and wave the clobber straight through.
 # Portable form: GNU mktemp rejects `-t <prefix>` ("too few X's in template"),
 # and this script runs on BOTH the macOS and the Linux runner.
 EXISTING="$(mktemp "${TMPDIR:-/tmp}/relassets.XXXXXX")"
 trap 'rm -f "$EXISTING"' EXIT
-if ! gh release view "$TAG" --repo "$REPO" \
-      --json assets --jq '.assets[] | [.name, (.size|tostring), .updatedAt, (.downloadCount|tostring)] | @tsv' \
+if ! "${PUBLISH[@]}" view "$TAG" --json \
+      | python3 -c 'import json,sys; [print("%s\t%s\t%s\t-" % (a["name"], a["size"], a.get("updated_at") or "-")) for a in json.load(sys.stdin)["assets"]]' \
       > "$EXISTING"; then
   echo "upload-release-asset: cannot read release $TAG on $REPO (does the tag exist?)" >&2
   exit 2
@@ -73,30 +83,22 @@ for f in "$@"; do
   fi
 done
 
-if [ "$CLASH" -eq 1 ] && [ "$OVERWRITE" != "true" ]; then
+if [ "$CLASH" -eq 1 ]; then
   cat >&2 <<EOF
 ::error::refusing to overwrite a published release asset on $TAG.
 
 The asset(s) listed above are already on the $TAG release and customers may be
 installing them right now — the Homebrew formula pins a sha256 against that
 exact URL, so replacing the bytes breaks \`brew install\` until the formula is
-re-pinned.
+re-pinned. On the downloads host published assets are immutable, so
+OVERWRITE_PUBLISHED=$OVERWRITE changes nothing.
 
-If you meant to cut a NEW release, dispatch against a NEW tag.
-If you meant to REPLACE these bytes, re-dispatch with overwrite_published=true
-and re-pin Formula/bithuman-cli.rb afterwards (see 2a7cd37).
+Cut a NEW tag (and re-pin Formula/bithuman-cli.rb to it).
 EOF
   exit 1
 fi
 
-if [ "$CLASH" -eq 1 ]; then
-  echo "::warning::overwrite_published=true — replacing published asset(s) on $TAG"
-  gh release upload "$TAG" --repo "$REPO" --clobber "$@"
-else
-  # No --clobber: nothing to clobber, and without the flag a surprise
-  # collision (an asset uploaded between the read above and this line) fails
-  # instead of silently winning the race.
-  gh release upload "$TAG" --repo "$REPO" "$@"
-fi
+# New assets only; adding files to a release never moves latest.json.
+"${PUBLISH[@]}" publish "$TAG" --latest false "$@"
 
 echo "upload-release-asset: uploaded $# asset(s) to $TAG"

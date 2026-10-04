@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# mirror-cli-release.sh — copy one published CLI release (cli-vX.Y.Z) from GitHub to the
-# bitHuman download mirror, https://maven.bithuman.ai/ai/bithuman/bithuman-cli/, so
-# install.sh / install.ps1 never need GitHub (60 anonymous API requests/hour per network).
+# mirror-cli-release.sh — copy one published CLI release (cli-vX.Y.Z) from the release origin,
+# https://downloads.bithuman.ai/homebrew-bithuman/ (scripts/downloads-publish.py), to the bitHuman
+# download mirror, https://maven.bithuman.ai/ai/bithuman/bithuman-cli/: the second copy
+# install.sh / install.ps1 download from first, and fall back to when the origin cannot be read.
 #
 # WHERE: the existing public-read object-storage bucket `maven`, served by the existing
 # Cloudflare Worker bithuman-maven-proxy (platform deploy/cloudflare/maven-proxy.mjs). That
@@ -21,12 +22,14 @@
 #
 # Usage:  scripts/mirror-cli-release.sh cli-v2.8.6            # dry run: download + verify only
 #         scripts/mirror-cli-release.sh cli-v2.8.6 --execute  # upload + metadata + read-back
-# Needs: gh (logged in), curl, python3, sha256sum|shasum; SUPABASE_URL and
+# Needs: curl, python3, sha256sum|shasum; SUPABASE_URL and
 # SUPABASE_SERVICE_ROLE_KEY in the environment (never printed), e.g.
 #   set -a; eval "$(/usr/bin/grep -E '^(SUPABASE_URL|SUPABASE_SERVICE_ROLE_KEY)=' ~/.env)"; set +a
 set -euo pipefail
 
-REPO="bithuman-product/homebrew-bithuman"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+PUBLISH=(python3 "$HERE/downloads-publish.py" --repo homebrew-bithuman)
+ORIGIN="${BITHUMAN_DOWNLOADS_BASE:-https://downloads.bithuman.ai}/homebrew-bithuman"
 BUCKET="maven"
 PREFIX="ai/bithuman/bithuman-cli"
 PUBLIC="https://maven.bithuman.ai/${PREFIX}"
@@ -41,12 +44,13 @@ ver="${tag#cli-v}"
 sha() { if command -v sha256sum >/dev/null; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi; }
 mime() { case "$1" in *.xml) echo application/xml ;; *.sha256) echo text/plain ;; *.zip) echo application/zip ;; *) echo application/octet-stream ;; esac; }
 
-state=$(gh release view "$tag" -R "$REPO" --json isDraft,isPrerelease -q '"\(.isDraft) \(.isPrerelease)"')
+state=$("${PUBLISH[@]}" view "$tag" --json \
+  | python3 -c 'import json,sys; r=json.load(sys.stdin); print(str(bool(r["draft"])).lower(), str(bool(r["prerelease"])).lower())')
 [ "$state" = "false false" ] || { echo "refuse: $tag is a draft or pre-release ($state)" >&2; exit 2; }
 
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
-echo "mirror: downloading $tag assets from GitHub"
-gh release download "$tag" -R "$REPO" -D "$work" -p 'bithuman-*.tar.gz' -p 'bithuman-*.zip' -p 'bithuman-*.sha256'
+echo "mirror: downloading $tag assets from $ORIGIN"
+"${PUBLISH[@]}" download "$tag" -D "$work" -p 'bithuman-*.tar.gz' -p 'bithuman-*.zip' -p 'bithuman-*.sha256'
 assets=()
 for f in "$work"/bithuman-*; do
   case "$f" in *.sha256) continue ;; esac

@@ -111,7 +111,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import urllib.request
@@ -119,7 +118,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 BASELINE = os.path.join(HERE, "public-vocabulary-baseline.json")
 RELEASES_BASELINE = os.path.join(HERE, "public-vocabulary-releases-baseline.json")
-GITHUB_API = "https://api.github.com"
+DOWNLOADS_BASE = "https://downloads.bithuman.ai"
 
 # --------------------------------------------------------------------------
 # The vocabulary. Patterns are built from fragments so that this file contains
@@ -338,82 +337,43 @@ def merge_baseline(found: dict, base: dict) -> dict:
 # ---------------------------------------------------------------------------
 # SURFACE 2: PUBLISHED RELEASE NOTES.  See the module header.
 # ---------------------------------------------------------------------------
-_TOKEN_CACHE: list = []
-
-
-def _gh_token():
-    """A token when one is reachable, else None.
-
-    ★NEVER PRINTED AND NEVER RETURNED TO OUTPUT. Callers report the BOOLEAN
-    `_gh_token() is not None` and nothing else. Unauthenticated reads work on a
-    public repo; a token only lifts the 60/hour shared limit, which is what
-    keeps a CI run from failing as CANNOT MEASURE on a busy runner."""
-    if _TOKEN_CACHE:
-        return _TOKEN_CACHE[0]
-    tok = None
-    for var in ("GITHUB_TOKEN", "GH_TOKEN"):
-        v = os.environ.get(var)
-        if v:
-            tok = v
-            break
-    if tok is None and shutil.which("gh"):
-        r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True)
-        if r.returncode == 0 and r.stdout.strip():
-            tok = r.stdout.strip()
-    _TOKEN_CACHE.append(tok)
-    return tok
+def downloads_base() -> str:
+    return os.environ.get("BITHUMAN_DOWNLOADS_BASE", DOWNLOADS_BASE).rstrip("/")
 
 
 def resolve_repo(root: str, explicit: str | None) -> str:
-    """OWNER/NAME for the repo whose releases to read: the flag, else CI's own
-    GITHUB_REPOSITORY, else this checkout's origin. Guessing a hard-coded name
-    would let the guard grade the WRONG repo and still print a green."""
+    """The repo NAME whose releases to read on the downloads host (its old GitHub
+    name, e.g. homebrew-bithuman): the flag (OWNER/NAME accepted), else this
+    checkout's origin. Guessing a hard-coded name would let the guard grade the
+    WRONG repo and still print a green."""
     if explicit:
-        return explicit
-    env = os.environ.get("GITHUB_REPOSITORY")
-    if env:
-        return env
+        return explicit.rstrip("/").rsplit("/", 1)[-1]
     r = subprocess.run(["git", "-C", root, "remote", "get-url", "origin"],
                        capture_output=True, text=True)
     url = r.stdout.strip()
-    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
+    m = re.search(r"[:/]([^/:]+?)(?:\.git)?/?$", url)
     if r.returncode != 0 or not m:
-        raise RuntimeError("cannot resolve OWNER/NAME -- pass --repo")
+        raise RuntimeError("cannot resolve the repo name -- pass --repo")
     return m.group(1)
 
 
 def fetch_releases(repo: str, limit: int) -> list[dict]:
-    """Every release of `repo`, newest first, as {tag, name, notes, draft}.
+    """Every release of `repo`, newest first, as {tag, name, notes, draft}, from
+    the public https://downloads.bithuman.ai/<repo>/releases.json (2026-10: the
+    releases moved there from GitHub; no credential is needed or sent).
 
-    Drafts are graded too, on purpose: a draft is the LAST moment the text can
-    be fixed for free, and it becomes world-readable the instant someone clicks
-    publish. Any failure raises -- an empty list must never be reachable by
-    accident, because an empty corpus prints as a clean surface."""
-    tok = _gh_token()
-    out: list[dict] = []
-    page = 1
-    while len(out) < limit:
-        url = f"{GITHUB_API}/repos/{repo}/releases?per_page=100&page={page}"
-        req = urllib.request.Request(url, headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "guard-public-vocabulary",
-        })
-        if tok:
-            req.add_header("Authorization", "Bearer " + tok)
-        with urllib.request.urlopen(req, timeout=30) as fh:
-            batch = json.loads(fh.read().decode("utf-8"))
-        if not batch:
-            break
-        for r in batch:
-            out.append({
-                "tag": r.get("tag_name") or f"id:{r.get('id')}",
-                "name": r.get("name") or "",
-                "notes": r.get("body") or "",
-                "draft": bool(r.get("draft")),
-            })
-        if len(batch) < 100:
-            break
-        page += 1
+    Any failure raises -- an empty list must never be reachable by accident,
+    because an empty corpus prints as a clean surface."""
+    url = f"{downloads_base()}/{repo}/releases.json"
+    req = urllib.request.Request(url, headers={"User-Agent": "guard-public-vocabulary"})
+    with urllib.request.urlopen(req, timeout=60) as fh:
+        batch = json.loads(fh.read().decode("utf-8"))
+    out = [{
+        "tag": r.get("tag_name") or f"id:{r.get('id')}",
+        "name": r.get("name") or "",
+        "notes": r.get("body") or "",
+        "draft": bool(r.get("draft")),
+    } for r in batch]
     return out[:limit]
 
 
@@ -471,7 +431,7 @@ def run_releases(root: str, repo_arg: str | None, limit: int, update: bool) -> i
     errors, notices = ratchet(found, base, "--update-releases")
     drafts = sum(1 for r in rels if r["draft"])
     print(f"scanned {len(rels)} release(s) of {repo} (title + notes; "
-          f"{drafts} draft), authenticated: {_gh_token() is not None}")
+          f"{drafts} draft), from {downloads_base()}")
     for n in notices:
         print(f"  note: {n}")
     if errors:
@@ -638,8 +598,8 @@ def main() -> int:
     ap.add_argument("--update-releases", action="store_true",
                     help="rewrite the release baseline from a fresh measurement")
     ap.add_argument("--repo", default=None,
-                    help="OWNER/NAME to read releases from "
-                         "(default: $GITHUB_REPOSITORY, else this checkout's origin)")
+                    help="repo name on the downloads host to read releases from "
+                         "(default: this checkout's origin's name)")
     ap.add_argument("--limit", type=int, default=1000,
                     help="most recent N releases to grade (default: all)")
     args = ap.parse_args()
