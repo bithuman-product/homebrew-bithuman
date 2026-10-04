@@ -11,8 +11,8 @@ connect it to a voice conversation through bitHuman's realtime relay. Full guide
 | Platform | Status |
 | --- | --- |
 | Android (arm64-v8a phone, API 29+) | Supported: Expression 2 and Essence 2 on the device. `load` takes the agent code and downloads the avatar. Emulators cannot load the engines. |
-| iOS (arm64 device) | Supported: Expression 2 and Essence 2 on the device. Run `scripts/bootstrap.sh` once; your app supplies the avatar files. iOS 16.0+. Essence 2 renders on iOS 26 and later; below that `load(engine: 'essence2')` fails with `unsupported`. |
-| macOS (Apple silicon) | Supported, as iOS; macOS 26.0+ (the on-device brain's staged library is built for macOS 26). Also `brew install llama.cpp onnxruntime`, which the plugin links. |
+| iOS (arm64 device) | Supported: Expression 2 and Essence 2 on the device. Run `scripts/bootstrap.sh` once; your app supplies the avatar files. iOS 16.4+. Essence 2 renders on iOS 26 and later; below that `load(engine: 'essence2')` fails with `unsupported`. |
+| macOS (Apple silicon) | Supported, as iOS; macOS 14.0+. Also `brew install onnxruntime`, which the plugin links. |
 
 ## Install
 
@@ -41,7 +41,7 @@ android {
 On iOS and macOS, run `scripts/bootstrap.sh` once in the plugin's folder (for a git dependency,
 `packages/flutter-plugin` under `~/.pub-cache/git/homebrew-bithuman-…`). It downloads the published engines and
 checks their sha256. Then set the deployment targets to at least the floor of the engines it staged: the pod reads it
-from the files and `pod install` names it (`platform :ios, '16.0'` in `ios/Podfile` and `platform :osx, '26.0'` in
+from the files and `pod install` names it (`platform :ios, '16.4'` in `ios/Podfile` and `platform :osx, '14.0'` in
 `macos/Podfile` with today's engines, and the Runner targets to match). An app below the floor does not build: a fresh
 `pod install` refuses it, and an app whose `Podfile.lock` already has the pod fails at compile time with a `bithuman:`
 message naming the fix. That compile-time check reaches your app through `$(inherited)`: if your Runner target sets
@@ -293,9 +293,10 @@ Run it once after cloning — it downloads + sha256-verifies releases and lays t
 native deps into `<plat>/Frameworks/` + each engine under `<plat>/Engines/<engine>/`
 + the demo CoreML models into `Assets/embody/`. Nothing is committed.
 
-- **`libconverse.xcframework`** — the on-device LOCAL-mode brain (llama.cpp +
-  Supertonic). The ONE module-map xcframework (INVARIANT #1). Fetched from the
-  `vendor-v1` embody Release.
+- **`libconverse.xcframework`** — the on-device LOCAL-mode brain (llama.cpp,
+  linked statically, + Supertonic). The ONE module-map xcframework (INVARIANT #1).
+  The release this plugin pins (`LIBCONVERSE_RELEASE` + `LIBCONVERSE_SHA256` in
+  `scripts/bootstrap.sh`); without access to it the build has no LOCAL mode.
 - **expression2** (REQUIRED) — the published `Expression2` Swift binary frameworks
   (sha256-checked), plus the demo model bundle → `Assets/embody`.
 - **essence2** (OPTIONAL) — its bootstrap fetches + sha-verifies the
@@ -305,9 +306,9 @@ native deps into `<plat>/Frameworks/` + each engine under `<plat>/Engines/<engin
   `libessence2.a` + resources → `Engines/essence2/{Classes,include,Vendor}`;
   absent it, the build is byte-identical expression-2-only.
 
-macOS needs two Homebrew dylibs at link + runtime via `@rpath`:
-`brew install llama.cpp onnxruntime` (the app's xcconfig wires the `@rpath`). The
-cloud OpenAI-Realtime mode needs neither — it's pure Swift.
+macOS needs one Homebrew dylib at link + runtime via `@rpath`:
+`brew install onnxruntime` (the app's xcconfig wires the `@rpath`); the pod
+links it in every mode.
 
 ## Hardware floor
 

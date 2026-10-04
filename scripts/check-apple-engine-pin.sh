@@ -56,6 +56,9 @@
 #   A8 CORE-AGREES     the pod's EngineCore pin (ENGINECORE_RELEASE + sha256) == Package.swift's
 #                      essence2Tag and EngineCore binaryTarget checksum (macOS link, from
 #                      essence2-v1.15.0), when Package.swift declares EngineCore.
+#   A9 BRAIN-PINNED    bootstrap.sh pins libconverse (LIBCONVERSE_RELEASE, a final
+#                      converse-apple-v* tag, + a 64-hex LIBCONVERSE_SHA256), 2.6.37. SwiftPM
+#                      ships no libconverse, so there is nothing to agree with: only the pin.
 #
 # Usage:  check-apple-engine-pin.sh [repo-root]
 # Exit:   0 PASS   1 REFUSE   2 could not run (never a silent pass)
@@ -226,6 +229,21 @@ elif [ "$CORE_TAG" != "$SPM_CORE_TAG" ] || [ "$CORE_SHA" != "$SPM_CORE_SHA" ]; t
     refuse "A8 the pod stages EngineCore $CORE_TAG (${CORE_SHA:0:16}…), SwiftPM serves $SPM_CORE_TAG (${SPM_CORE_SHA:0:16}…) — roll ENGINECORE_RELEASE/ENGINECORE_SHA256 with the manifest's enginecoreTag"
 else
     pass "A8 EngineCore pinned at $CORE_TAG, the SwiftPM binaryTarget's bytes (${SPM_CORE_SHA:0:16}…)"
+fi
+
+# A9 — the on-device brain the pod stages is a named release with a pinned digest. Through 2.6.36
+# libconverse came unpinned from a combined vendor bundle (the 2026-07-01 cut, built for macOS 26),
+# and the pod's floors followed whatever that bundle held.
+CV_TAG="$(pin LIBCONVERSE_RELEASE)"
+CV_SHA="$(pin LIBCONVERSE_SHA256)"
+if [ -z "$CV_TAG" ] || [ -z "$CV_SHA" ]; then
+    refuse "A9 bootstrap.sh declares no LIBCONVERSE_RELEASE/LIBCONVERSE_SHA256 default — the on-device brain would be unpinned"
+elif ! printf '%s' "$CV_TAG" | grep -Eq '^converse-apple-v[0-9]+\.[0-9]+\.[0-9]+$'; then
+    refuse "A9 LIBCONVERSE_RELEASE '$CV_TAG' is not a final converse-apple-vX.Y.Z release"
+elif ! printf '%s' "$CV_SHA" | grep -Eq '^[0-9a-f]{64}$'; then
+    refuse "A9 LIBCONVERSE_SHA256 is not a 64-hex sha256 ('$CV_SHA')"
+else
+    pass "A9 libconverse pinned at $CV_TAG (${CV_SHA:0:16}…)"
 fi
 
 if [ "$FAIL" -ne 0 ]; then

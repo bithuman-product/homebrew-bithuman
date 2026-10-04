@@ -194,7 +194,7 @@ Pod::Spec.new do |s|
   # this pod declared therefore could not LAUNCH on iOS 16.0 to 18.3, Essence 2 used or not (measured
   # 2026-10-03, bithuman-models #1826). Now the floor is read from the binaries this pod vendors (the
   # LC_BUILD_VERSION minos of every device-slice object, otool -l): the highest one wins, and never
-  # below 16.0. With essence2-v1.15.3 staged that was iOS 26.0, so a Podfile below it failed `pod install`
+  # below the base (16.0 through 2.6.36, 16.4 from 2.6.37: see below). With essence2-v1.15.3 staged that was iOS 26.0, so a Podfile below it failed `pod install`
   # by name instead of building an app that crashes at launch. essence2-v1.15.4 (#1826, Swift package
   # 2.20.3), staged since 2.6.36, is rebuilt at the floor: the pod is back at iOS 16.0 by itself, and
   # Essence 2 refuses by name below iOS 26 at `load` (EngineSelection) and at be_essence2_create.
@@ -230,21 +230,27 @@ Pod::Spec.new do |s|
        .flat_map { |slice| Dir.glob(File.join(slice, '{*.a,*.framework/*}')) }
        .select { |p| framework_binary.call(p) }
   end
-  ios_base = Gem::Version.new('16.0')
+  # ★iOS 16.4 IS THE BASE (2.6.37). libconverse converse-apple-v2.5.1 (the on-device brain) is built at iOS 16.4:
+  # llama.cpp's Accelerate BLAS imports `cblas_sgemm$NEWLAPACK$ILP64`, which exists only from iOS 16.4 (the
+  # 2026-07-01 cut said 16.0 while importing it, so an app at 16.0-16.3 that linked it could not start). The
+  # staged bytes say 16.4 too; the base holds it even for a clone without the brain, so one plugin version
+  # declares one iOS floor.
+  ios_base = Gem::Version.new('16.4')
   ios_staged = staged_minos.call(ios_binaries, 2)          # 2 = PLATFORM_IOS (the device slices)
   ios_floor = ios_staged.nil? ? Gem::Version.new('26.0') : [ios_base, ios_staged].max
   s.platform         = :ios, ios_floor.to_s
-  # Above the base, the floor also goes into the APP target's preprocessor definitions, where
-  # Classes/BHDeploymentFloor.h (in this pod's umbrella module, compiled with the app's deployment target
-  # by the app's `@import bithuman`) fails an app below it by name. Without it an app whose Podfile.lock
-  # already resolves this pod gets only CocoaPods' "may not be compatible" warning and builds for its own
-  # lower target (measured 2026-10-03: a Runner at iOS 16.0 built and linked with no error).
+  # Above iOS 16.0 (the floor through 2.6.36; always, from 2.6.37), the floor also goes into the APP target's
+  # preprocessor definitions, where Classes/BHDeploymentFloor.h (in this pod's umbrella module, compiled with the
+  # app's deployment target by the app's `@import bithuman`) fails an app below it by name. Without it an app
+  # whose Podfile.lock already resolves this pod gets only CocoaPods' "may not be compatible" warning and builds
+  # for its own lower target (measured 2026-10-03: a Runner at iOS 16.0 built and linked with no error).
+  ios_macro_base = Gem::Version.new('16.0')
   floor_macro = lambda { |v| s0, s1 = v.segments; (s0.to_i * 10000 + (s1 || 0).to_i * 100).to_s }
-  ios_floor_defines = ios_floor > ios_base ? " BITHUMAN_IOS_FLOOR=#{floor_macro.call(ios_floor)}" : ''
+  ios_floor_defines = ios_floor > ios_macro_base ? " BITHUMAN_IOS_FLOOR=#{floor_macro.call(ios_floor)}" : ''
   if ios_floor > ios_base && defined?(Pod::UI)
     Pod::UI.warn "bithuman: the engines scripts/bootstrap.sh staged are built for iOS #{ios_floor}, so this pod " \
                  "needs iOS #{ios_floor} (set `platform :ios, '#{ios_floor}'` in ios/Podfile and the Runner target). " \
-                 'For iOS 16 with Expression 2 only, run BITHUMAN_SKIP_ESSENCE2=1 scripts/bootstrap.sh.'
+                 "For iOS #{ios_base} with Expression 2 only, run BITHUMAN_SKIP_ESSENCE2=1 scripts/bootstrap.sh."
   end
 
   # Metal/MetalKit: ggml-metal (libconverse LOCAL mode). CoreML/Accelerate:
