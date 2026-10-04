@@ -312,6 +312,12 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
         result(false)
       }
 
+    // Sign-out (2.6.36, security): the engines' process-wide credential is cleared, so nothing after this
+    // runs or bills as the account that signed out. Every load sets (or clears) its own anyway.
+    case "clearCredentials":
+      EngineRegistry.clearCredentials()
+      result(nil)
+
     // dual-accept: "setExpression2AgentDir" is canonical; "setEmbodyAgentDir" stays
     // accepted forever (cross-boundary SDK↔app channel string contract).
     case "setExpression2AgentDir", "setEmbodyAgentDir":
