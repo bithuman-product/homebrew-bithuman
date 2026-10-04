@@ -128,6 +128,22 @@ abstract class VoiceHost {
   /// available, else the GGUF at [ggufPath]), `apple`, or `llama`. [ggufPath]
   /// may be null only when Apple's model will be used. [refusalReply] is spoken
   /// when Apple's model refuses a turn ('' = the brain's default line).
+  ///
+  /// THE HYBRID BRAIN ([replyMode] `host`): speech-to-text and the voice stay on
+  /// the device and the REPLY TEXT comes from the app — typically a cheap cloud
+  /// text model behind the app's own server (no key on the device, no
+  /// speech-to-speech minute). The brain asks with a `reply_request` event
+  /// (`{"kind":"reply_request","id":int,"messages":[{role,content}],"maxTokens":int}`);
+  /// the app streams the answer back with [localReplyText] and drops its stream
+  /// on `reply_cancel` (barge-in). [ggufPath] and [llm] are then unused.
+  /// [sttDir]: a sherpa-onnx speech-to-text model directory (with
+  /// `silero_vad.onnx`) to listen with instead of Apple's SpeechAnalyzer (iOS
+  /// builds that staged sherpa-onnx); [minSilenceMs] is the pause that ends the
+  /// user's turn there. [bargeOnSpeech]: barge when the speech-to-text hears the
+  /// user start talking while the character speaks (the on-device VAD barge).
+  /// [injectAudio] (testing): the microphone is never opened; [localInjectAudio]
+  /// speaks prerecorded files into the speech-to-text instead, in real time,
+  /// under a noise floor of [injectNoiseDb] dBFS.
   Future<void> localAudioStart({
     String? ggufPath,
     String? supertonicAssets,
@@ -136,7 +152,25 @@ abstract class VoiceHost {
     String systemPrompt,
     String llm,
     String refusalReply,
+    String replyMode,
+    String? sttDir,
+    int minSilenceMs,
+    bool bargeOnSpeech,
+    bool injectAudio,
+    double injectNoiseDb,
   });
+
+  /// The hybrid brain ([localAudioStart] `replyMode: 'host'`): a piece of the
+  /// reply to `reply_request` [id]. [done] ends it; [result] 0 = ok, 1 = refused,
+  /// 2 = context full, 3 = error (the brain then says its fallback line if
+  /// nothing was spoken yet). Pieces for a cancelled or older request are dropped.
+  Future<void> localReplyText(int id, String text, {bool done = false, int result = 0});
+
+  /// Testing ([localAudioStart] `injectAudio: true`): speak a 16 kHz WAV at
+  /// [path] into the speech-to-text as if from the microphone. [speechStart] /
+  /// [speechEnd] (seconds into the file) are reported as `inject_speech_start` /
+  /// `inject_speech_end` metric events when the stream passes them.
+  Future<bool> localInjectAudio(String path, {String? tag, double? speechStart, double? speechEnd});
 
   /// Tear down the local brain and its audio unit.
   Future<void> localAudioStop();

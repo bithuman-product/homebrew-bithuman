@@ -65,6 +65,19 @@ final class ConverseSession: @unchecked Sendable {
     private var turnEndPending = false
     private var turnEndPendingGen: UInt64 = 0
 
+    /// The hybrid brain's reply stage (a HostReplyLlm), when the app supplies the reply.
+    private let hostReply: AnyObject?
+    /// Timing probe: a turn was pushed and its first audio has not been pulled yet.
+    private var firstPullPending = false
+    /// The brain's audio of the live turn ran dry this many times (a gap the listener hears).
+    private var underruns = 0
+    /// Timing probe: samples of the turn's audio pulled before its first audible sample
+    /// (-1 = found / not looking). Pull thread only.
+    private var onsetScanned = -1
+
+    /// Timing probes for the hybrid brain's harness (first audio of a turn, where its first word
+    /// starts, heard gaps): {"ev":..., "hostMs":...}. Pull thread.
+    var onMetric: (([String: Any]) -> Void)?
     var onState: ((bc_state) -> Void)?
     var onUserFinal: ((String) -> Void)?
     var onBotChunk: ((String) -> Void)?
@@ -79,8 +92,13 @@ final class ConverseSession: @unchecked Sendable {
     /// Models) through the brain's host-LLM ABI instead of llama.cpp; `gguf` is
     /// then unused. The caller checks `AppleLlmStatus.current() == "available"`.
     /// `refusalReply`: spoken when that model's guardrail refuses a turn.
+    /// `hostReply` (the hybrid brain, `replyMode: 'host'`): the APP supplies the reply
+    /// text through the same host-LLM ABI; `gguf` and `appleLlm` are then unused.
+    /// It is an `AnyObject` so this file still compiles against a brain without the ABI.
     init?(gguf: String, supertonicAssets: String?, voice: String = "M1",
-          systemPrompt: String = "", appleLlm: Bool = false, refusalReply: String = "") {
+          systemPrompt: String = "", appleLlm: Bool = false, refusalReply: String = "",
+          hostReply: AnyObject? = nil) {
+        self.hostReply = hostReply
         if let a = supertonicAssets, !a.isEmpty { setenv("BITHUMAN_SUPERTONIC_ASSETS", a, 1) }
 
         var cfg = bc_config_t()
@@ -104,7 +122,18 @@ final class ConverseSession: @unchecked Sendable {
                     cfg.system_prompt = systemPrompt.isEmpty ? nil : sp
                     var hh: OpaquePointer?
                     var s: bc_status = BC_ERR_INVALID_ARG
-                    if appleLlm {
+                    if let hostReply {
+                        #if CONVERSE_HOST_LLM
+                        if let host = hostReply as? HostReplyLlm {
+                            s = refusalReply.withCString { rr in
+                                var h = host.hostLlm(refusalReply: refusalReply.isEmpty ? nil : rr, errorReply: nil)
+                                return bc_session_create_with_llm(&cfg, &h, &hh)
+                            }
+                        }
+                        #else
+                        NSLog("[Converse] host reply requested but the staged libconverse has no host-LLM ABI (< 2.5.0)")
+                        #endif
+                    } else if appleLlm {
                         #if CONVERSE_HOST_LLM
                         if #available(macOS 26.0, iOS 26.0, *) {
                             // The brain copies refusal_reply at create time.
@@ -188,8 +217,41 @@ final class ConverseSession: @unchecked Sendable {
                     // Advance the pacing clock by this chunk's duration.
                     let secs = Double(got) / 24000.0
                     self.outputLock.lock()
-                    self.bufferedUntil = Swift.max(self.bufferedUntil, Date()).addingTimeInterval(secs)
+                    let now = Date()
+                    // Timing probe (one line per turn + one per gap): the first audio the brain
+                    // produced for this turn, and every time the voice already handed over ran
+                    // out before the next piece was synthesized (`ahead` < 0: a heard gap).
+                    let first = self.firstPullPending
+                    let dryMs = Int((now.timeIntervalSince(self.bufferedUntil)) * 1000)
+                    if first { self.firstPullPending = false; self.underruns = 0 }
+                    else if dryMs > 40 { self.underruns += 1 }
+                    let n = self.underruns
+                    self.bufferedUntil = Swift.max(self.bufferedUntil, now).addingTimeInterval(secs)
                     self.outputLock.unlock()
+                    if first { self.onsetScanned = 0 }
+                    if self.onsetScanned >= 0 {
+                        // Where the first word starts inside the reply's audio (|x| > -40 dBFS):
+                        // what the synthesis' leading silence (and its trim) costs the listener.
+                        var at = -1
+                        for i in 0..<got where abs(buf[i]) > 0.01 { at = i; break }
+                        if at >= 0 || self.onsetScanned + got >= 24000 {
+                            let onsetMs = at >= 0 ? (self.onsetScanned + at) * 1000 / 24000 : -1
+                            NSLog("[bhtts] onset turn=%llu ms=%d", turn, onsetMs)
+                            self.onMetric?(["ev": "onset", "turn": Int(turn), "ms": onsetMs])
+                            self.onsetScanned = -1
+                        } else {
+                            self.onsetScanned += got
+                        }
+                    }
+                    if first {
+                        NSLog("[bhtts] first_audio turn=%llu hostMs=%lld", turn, Int64(now.timeIntervalSince1970 * 1000))
+                        self.onMetric?(["ev": "first_audio", "turn": Int(turn), "samples": got,
+                                        "hostMs": Int64(now.timeIntervalSince1970 * 1000)])
+                    } else if dryMs > 40 {
+                        NSLog("[bhtts] gap turn=%llu ms=%d n=%d hostMs=%lld", turn, dryMs, n, Int64(now.timeIntervalSince1970 * 1000))
+                        self.onMetric?(["ev": "gap", "turn": Int(turn), "ms": dryMs, "n": n,
+                                        "hostMs": Int64(now.timeIntervalSince1970 * 1000)])
+                    }
                     var i16 = [Int16](repeating: 0, count: got)
                     for i in 0..<got { i16[i] = Int16(max(-32768, min(32767, Int((buf[i] * 32767).rounded())))) }
                     let data = i16.withUnsafeBytes { Data($0) }  // little-endian on arm64
@@ -253,6 +315,7 @@ final class ConverseSession: @unchecked Sendable {
         // lock (onTurnEnd hops to the embody runtime).
         outputLock.lock()
         if discardOutput { armResume = true }
+        firstPullPending = true
         let firePrev = turnEndPending && turnEndPendingGen == turnGen && !discardOutput
         if firePrev { turnEndPending = false }
         outputLock.unlock()
@@ -295,6 +358,11 @@ final class ConverseSession: @unchecked Sendable {
         turnEndPending = false
         outputLock.unlock()
         bc_session_interrupt(handle)
+        #if CONVERSE_HOST_LLM
+        // The brain is blocked in the host's stream while it waits for text: end that wait now
+        // (the app gets reply_cancel and drops its HTTP stream).
+        (hostReply as? HostReplyLlm)?.cancel()
+        #endif
     }
 
     func stop() {

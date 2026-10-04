@@ -15,6 +15,17 @@ enum SpeechEvent: Sendable {
     var text: String { switch self { case .partial(let t), .final(let t): return t } }
 }
 
+/// Any on-device speech-to-text the local / hybrid brain can listen with: Apple's
+/// SpeechAnalyzer (SpeechPipeline, the default: nothing to download) or a sherpa-onnx
+/// model behind a Silero VAD (SherpaAsr, when the app ships one: `localAudioStart(sttDir:)`).
+/// One ordered consumer pushes the (AEC'd or injected) audio; `events` carries the partials
+/// (the turn has started / barge-in) and the finals (commit the turn).
+protocol AsrPipeline: AnyObject, Sendable {
+    var events: AsyncStream<SpeechEvent> { get }
+    func push(_ buffer: AVAudioPCMBuffer) async
+    func stop() async
+}
+
 enum SpeechPipelineError: Error {
     case localeNotSupported(Locale)
     case noCompatibleAudioFormat
@@ -28,7 +39,7 @@ enum SpeechPipelineError: Error {
 /// SpeechAnalyzer is macOS 26+. The plugin gates LOCAL mode behind a
 /// `#available(macOS 26.0, *)` check; cloud mode keeps the 13.0 floor.
 @available(macOS 26.0, iOS 26.0, *)
-actor SpeechPipeline {
+actor SpeechPipeline: AsrPipeline {
     private let transcriber: SpeechTranscriber
     private let analyzer: SpeechAnalyzer
     private let analyzerFormat: AVAudioFormat

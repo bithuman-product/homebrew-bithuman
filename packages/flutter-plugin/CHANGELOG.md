@@ -22,6 +22,27 @@ older brain (the split-sentence merge is then off).
 * The brain strips emoji, markdown and `*actions*` from captions and speech, and answers a turn
   about suicide or self-harm with a fixed crisis message (988 / local crisis line).
 
+### The hybrid brain: on-device speech, a cheap cloud text model (iOS; needs libconverse 2.5.0)
+
+* **`replyMode: 'host'`** (`LocalConverseTransport(reply: ...)`): speech-to-text, the clause chunker,
+  the Supertonic voice, barge-in and the avatar feed stay on the device; the REPLY TEXT comes from
+  the app — typically a cheap text model behind the app's own server (no key on the phone, no
+  speech-to-speech minute). The brain asks with a `reply_request` event, the app streams the answer
+  back with `localReplyText(id, text, done:)`, and a barge-in sends `reply_cancel` (the app drops its
+  stream; measured: the cancel leaves within 5 ms of the barge).
+* **Parakeet speech-to-text on iOS** (`sttDir:`): a Silero VAD + NVIDIA Parakeet TDT 110M (int8,
+  137 MB download, CC BY 4.0) through sherpa-onnx, staged by `scripts/build-sherpa-ios.sh` against
+  the pod's own onnxruntime (+2.1 MB app binary). iPhone 18 Pro, prerecorded accented / child
+  speech under an avatar: the turn is committed 0.62 s (p50) after the user stops, against 1.1–1.3 s
+  for Apple's SpeechAnalyzer (with outliers past 6 s), and speech onset is detected in ~0.3 s
+  against 0.6–2.6 s. Without `sttDir` the app keeps Apple's SpeechAnalyzer (nothing to download).
+* **`bargeOnSpeech:`** — the on-device VAD barge: the user starting to talk over the character
+  stops the voice and the avatar and cancels the reply (0.28–0.48 s from speech onset with Parakeet).
+* **`injectAudio:` + `localInjectAudio(path)`** (testing): the microphone is never opened; prerecorded
+  16 kHz files are spoken into the speech-to-text in real time under a noise floor, and the
+  session reports `metric` events (speech end, final, first audio, heard, barge, fps, memory) so a
+  harness measures the whole pipeline on the device without a speaker-to-mic loop.
+
 ### Apple's on-device model as the brain's LLM (needs libconverse 2.5.0)
 
 * **No LLM download on Apple Intelligence devices.** On iOS / macOS 26 with Apple Intelligence

@@ -182,8 +182,24 @@ class RecordingVoiceHost implements VoiceHost {
     String systemPrompt = '',
     String llm = 'auto',
     String refusalReply = '',
+    String replyMode = 'local',
+    String? sttDir,
+    int minSilenceMs = 0,
+    bool bargeOnSpeech = false,
+    bool injectAudio = false,
+    double injectNoiseDb = -65,
   }) async {
     calls.add('localAudioStart:$ggufPath');
+  }
+
+  @override
+  Future<void> localReplyText(int id, String text, {bool done = false, int result = 0}) async =>
+      calls.add('localReplyText:$id');
+
+  @override
+  Future<bool> localInjectAudio(String path, {String? tag, double? speechStart, double? speechEnd}) async {
+    calls.add('localInjectAudio');
+    return false;
   }
 
   @override

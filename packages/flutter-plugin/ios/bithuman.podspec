@@ -47,6 +47,14 @@ Pod::Spec.new do |s|
   # gate `#if (os(macOS) || os(iOS)) && ESSENCE2_AVAILABLE` — linking the iOS
   # libessence2.a slice + the static non-SME2 onnxruntime.xcframework.)
   engine_libs = Dir.glob(File.join(__dir__, 'Engines/*/Vendor/*.a'))
+  # sherpa-onnx (OPTIONAL): the hybrid brain's own speech-to-text on iOS — a Silero VAD + an offline
+  # recognizer (NeMo Parakeet TDT / Moonshine), SherpaAsr.swift. A PLAIN static .a built against THIS
+  # pod's onnxruntime.xcframework by scripts/build-sherpa-ios.sh, its C API header served from this
+  # pod's own umbrella (never a second module-map xcframework: INVARIANT #1). Decided by the staged
+  # bytes, like every optional part: without it the app runs Apple's SpeechAnalyzer.
+  sherpa_dir = File.join(__dir__, 'Vendor/sherpa-onnx')
+  sherpa_lib = File.file?(File.join(sherpa_dir, 'libsherpa-onnx.a')) &&
+               File.file?(File.join(sherpa_dir, 'include/sherpa_onnx_c_api.h'))
   essence2_lib = !engine_libs.empty?
 
   # DARK Component-4 auth hooks (shared/Classes/DeviceAuthShim.m) name two
@@ -97,8 +105,9 @@ Pod::Spec.new do |s|
   # its C ABI header (Engines/**), folded into THIS pod's own umbrella module so
   # the staged engine Swift calls be_essence2_* with no `import` (INVARIANT #1's
   # mechanism, generalized to N engines).
-  s.source_files        = 'Classes/**/*.{swift,h,m}', 'Engines/**/include/**/*.h'
-  s.public_header_files = 'Classes/**/*.h', 'Engines/**/include/**/*.h'
+  sherpa_headers = sherpa_lib ? ['Vendor/sherpa-onnx/include/*.h'] : []
+  s.source_files        = ['Classes/**/*.{swift,h,m}', 'Engines/**/include/**/*.h'] + sherpa_headers
+  s.public_header_files = ['Classes/**/*.h', 'Engines/**/include/**/*.h'] + sherpa_headers
   # Assets/embody — the per-agent embody CoreML models (the A42 demo bundle).
   # Expression2Runtime probes Bundle subdirectory "embody". Populated by
   # scripts/bootstrap.sh (not committed) at <plugin>/ios/Assets/embody — this
@@ -183,7 +192,9 @@ Pod::Spec.new do |s|
   # 2026-08-28; this said the adapter is `#if os(macOS)`-gated and dead-strips on
   # iOS): the adapter is `#if (os(macOS) || os(iOS)) && ESSENCE2_AVAILABLE`, so on
   # iOS these symbols are LINKED, not dead-stripped — see the header block.
-  s.vendored_libraries  = engine_libs.map { |p| p.sub(__dir__ + '/', '') } if essence2_lib
+  vendored_libs = essence2_lib ? engine_libs.map { |p| p.sub(__dir__ + '/', '') } : []
+  vendored_libs << 'Vendor/sherpa-onnx/libsherpa-onnx.a' if sherpa_lib
+  s.vendored_libraries  = vendored_libs unless vendored_libs.empty?
 
   # Metal/MetalKit: ggml-metal (libconverse LOCAL mode). CoreML/Accelerate:
   # embody's CoreML graphs + vImage frame conversion. AudioToolbox/CoreAudio:
@@ -229,6 +240,7 @@ Pod::Spec.new do |s|
     # Apple's on-device model (Foundation Models) instead of llama.cpp.
     conds << 'CONVERSE_HOST_LLM' if hdr && File.read(hdr).include?('bc_session_create_with_llm')
   end
+  conds << 'SHERPA_ASR_AVAILABLE' if sherpa_lib
   pod_xcconfig['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = conds.join(' ')
   # Apple's on-device model (AppleFoundationLlm.swift) is iOS / macOS 26+: weak so
   # the plugin still loads on the older systems this pod supports.

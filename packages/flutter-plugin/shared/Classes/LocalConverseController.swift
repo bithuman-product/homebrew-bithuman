@@ -32,11 +32,36 @@ import FlutterMacOS
 ///
 /// macOS 26+ only — it holds a SpeechPipeline (SpeechAnalyzer). The plugin
 /// guards the entry path with `#available(macOS 26.0, *)`.
+/// The hybrid brain's switches (`localAudioStart(replyMode: 'host', sttDir:, ...)`).
+struct HybridOptions {
+    /// The app supplies the reply text (a HostReplyLlm): speech in and the voice out stay on
+    /// the device, the words come from a cheap cloud text model behind the app's server.
+    var hostReply: AnyObject? = nil
+    /// A sherpa-onnx speech-to-text model directory (+ silero_vad.onnx): SherpaAsr. nil = Apple's
+    /// SpeechAnalyzer (nothing to download).
+    var sttDir: String? = nil
+    /// SherpaAsr: the pause that ends the user's turn.
+    var minSilence: Float = 0.5
+    /// Barge when the speech-to-text hears the user start talking while the character is audible
+    /// (the on-device VAD barge). Off = the energy barge of RealtimeAudioIO only (the mic path).
+    var bargeOnSpeech = false
+    /// DEV / harness: the microphone is replaced by prerecorded audio (`localInjectAudio`), paced in
+    /// real time under a noise floor; the session's audio unit then runs without a mic.
+    var injected = false
+    /// The injected stream's noise floor between and under the files (dBFS RMS; nil = digital silence).
+    var noiseDb: Double? = -65
+}
+
 @available(macOS 26.0, iOS 26.0, *)
 final class LocalConverseController: @unchecked Sendable {
     private let converse: ConverseSession
     private weak var io: RealtimeAudioIO?
-    private var speech: SpeechPipeline?
+    private var speech: AsrPipeline?
+    private let options: HybridOptions
+    private var injector: AudioInjector?
+    /// How long the brain took to load (Supertonic + the reply stage), ms: reported with `ready`.
+    let brainLoadMs: Int
+    private var statsTimer: DispatchSourceTimer?
     private let micCont: AsyncStream<AVAudioPCMBuffer>.Continuation
     private let micStream: AsyncStream<AVAudioPCMBuffer>
     private var botAudibleUntil = Date.distantPast
@@ -76,12 +101,16 @@ final class LocalConverseController: @unchecked Sendable {
     var onEvent: (([String: Any]) -> Void)?
 
     init?(io: RealtimeAudioIO, gguf: String, supertonicAssets: String?, voice: String = "M1",
-          systemPrompt: String = "", appleLlm: Bool = false, refusalReply: String = "") {
+          systemPrompt: String = "", appleLlm: Bool = false, refusalReply: String = "",
+          options: HybridOptions = HybridOptions()) {
+        let tLoad = Date()
         guard let c = ConverseSession(gguf: gguf, supertonicAssets: supertonicAssets, voice: voice,
                                       systemPrompt: systemPrompt, appleLlm: appleLlm,
-                                      refusalReply: refusalReply) else { return nil }
+                                      refusalReply: refusalReply, hostReply: options.hostReply) else { return nil }
         converse = c
         self.io = io
+        self.options = options
+        brainLoadMs = Int(Date().timeIntervalSince(tLoad) * 1000)
         // BOUNDED queue (bufferingNewest): under backpressure — the ASR
         // consumer (SpeechPipeline actor) draining slower than the real-time mic
         // tap — DROP the oldest mic frames instead of retaining them forever.
@@ -129,6 +158,10 @@ final class LocalConverseController: @unchecked Sendable {
                 self.onEvent?(["kind": "bot_level", "level": self.pcm16Peak(data)])
             }
         }
+        converse.onMetric = { [weak self] m in self?.metric(m) }
+        io.onFirstHeard = { [weak self] at, lat in
+            self?.metric(["ev": "heard", "heardAtMs": at, "outputLatencyMs": lat])
+        }
         converse.onBotChunk  = { [weak self] t in self?.onEvent?(["kind": "bot", "text": t]) }
         converse.onUserFinal = { [weak self] t in self?.onEvent?(["kind": "user", "text": t]) }
         converse.onState     = { [weak self] s in
@@ -175,6 +208,13 @@ final class LocalConverseController: @unchecked Sendable {
         // mic → ASR. Feed CONTINUOUSLY, including while the bot is speaking, so the
         // user's interruption is transcribed live for the brain. VP-IO AEC keeps
         // the bot's own voice out of ch0; the energy VAD (above) drives the barge.
+        if options.injected {
+            // DEV / harness: prerecorded speech replaces the microphone (localInjectAudio).
+            let inj = AudioInjector(noiseDb: options.noiseDb) { [weak self] buf in self?.micCont.yield(buf) }
+            inj.onMark = { [weak self] m in self?.metric(m) }
+            injector = inj
+            startStats()
+        } else {
         io.onMicTap = { [weak self] buf in
             guard let self else { return }
             self.micCont.yield(buf)
@@ -186,20 +226,52 @@ final class LocalConverseController: @unchecked Sendable {
                 self.onEvent?(["kind": "mic_level", "level": self.micPeak(buf)])
             }
         }
+        }
 
         // Apple ASR pipeline (async init) + the mic→ASR + ASR-events loops.
         Task { [weak self] in
             guard let self else { return }
-            do { self.speech = try await SpeechPipeline() }
-            catch { NSLog("[Converse] SpeechPipeline init failed: %@", "\(error)"); return }
+            let tAsr = Date()
+            var engine = "apple"
+            do {
+                #if SHERPA_ASR_AVAILABLE
+                if let dir = options.sttDir, !dir.isEmpty {
+                    let sh = try SherpaAsr(dir: dir, minSilence: options.minSilence)
+                    sh.onMetric = { [weak self] m in self?.metric(m) }
+                    engine = sh.kind
+                    self.speech = sh
+                } else {
+                    self.speech = try await SpeechPipeline()
+                }
+                #else
+                if let dir = options.sttDir, !dir.isEmpty {
+                    NSLog("[Converse] sttDir %@ ignored: this build has no sherpa-onnx (SHERPA_ASR_AVAILABLE)", dir)
+                }
+                self.speech = try await SpeechPipeline()
+                #endif
+            } catch {
+                NSLog("[Converse] speech-to-text init failed: %@", "\(error)")
+                self.metric(["ev": "asr_error", "message": "\(error)"])
+                return
+            }
             guard let sp = self.speech else { return }
+            self.metric(["ev": "asr_ready", "engine": engine, "loadMs": Int(Date().timeIntervalSince(tAsr) * 1000)])
             Task { for await buf in self.micStream { await sp.push(buf) } }   // single ordered consumer
             for await ev in sp.events {
                 switch ev {
                 case .partial(let t):
                     self.lock.lock()
-                    if self.segmentStartAt == nil { self.segmentStartAt = Date() }
+                    let first = self.segmentStartAt == nil
+                    if first { self.segmentStartAt = Date() }
                     self.lock.unlock()
+                    if first { self.metric(["ev": "asr_speech", "engine": engine, "partial": t]) }
+                    // The on-device VAD barge: the user started talking while the character is
+                    // audible → stop the voice + the avatar and cancel the reply (and its stream).
+                    if first, self.options.bargeOnSpeech, self.botSpeaking() {
+                        let tb = Date()
+                        self.io?.barge(reason: "speech")
+                        self.metric(["ev": "barge", "reason": "speech", "bargeMs": Int(Date().timeIntervalSince(tb) * 1000)])
+                    }
                     // The energy VAD already barged the bot at speech onset; the
                     // partials are now only for live debug visibility.
                     if self.dbgBarge {
@@ -207,6 +279,7 @@ final class LocalConverseController: @unchecked Sendable {
                               Self.ts(), Self.wordCount(t), self.botSpeaking() ? "Y" : "n", t)
                     }
                 case .final(let t):
+                    self.metric(["ev": "asr_final", "engine": engine, "text": t])
                     let wc = Self.wordCount(t)
                     self.lock.lock()
                     let segStart = self.segmentStartAt ?? Date()
@@ -238,10 +311,14 @@ final class LocalConverseController: @unchecked Sendable {
                         // let the brain answer the whole utterance.
                         if busy || self.botSpeaking() { self.io?.barge(reason: "asr-continuation") }
                         self.lock.lock(); self.lastAsrCommitAt = Date(); self.replyAudibleAt = nil; self.lock.unlock()
+                        self.metric(["ev": "commit", "text": t, "continuation": true])
+                        self.io?.armFirstHeard()
                         self.converse.pushText(t, continuation: true)
                         self.onEvent?(["kind": "state", "state": 2])
                     } else if !self.botSpeaking() {
                         self.lock.lock(); self.lastAsrCommitAt = Date(); self.replyAudibleAt = nil; self.lock.unlock()
+                        self.metric(["ev": "commit", "text": t, "continuation": false])
+                        self.io?.armFirstHeard()
                         self.converse.pushText(t)
                         // Drive the "thinking" neon rim the instant the user's spoken
                         // turn commits to the brain — the local analogue of cloud's
@@ -313,10 +390,74 @@ final class LocalConverseController: @unchecked Sendable {
         io?.barge()
         // A typed turn (or the greeting directive) is never continued by speech.
         lock.lock(); lastAsrCommitAt = nil; replyAudibleAt = nil; lock.unlock()
+        metric(["ev": "commit", "text": t, "typed": true])
+        io?.armFirstHeard()
         converse.pushText(t)
     }
 
+    // MARK: - the hybrid brain (host reply) + the harness
+
+    /// A piece of the app's reply to request [id] (`localReplyText`).
+    func replyText(id: Int, text: String, done: Bool, result: Int32) {
+        #if CONVERSE_HOST_LLM
+        (options.hostReply as? HostReplyLlm)?.push(id: id, text: text, done: done, result: result)
+        #endif
+    }
+
+    /// DEV / harness: speak [samples] (16 kHz mono) into the speech-to-text as if from the mic.
+    /// [speechStart] / [speechEnd]: where the words begin and end in the file (seconds), reported as
+    /// `inject_speech_start` / `inject_speech_end` the moment the stream passes them.
+    func inject(samples: [Float], tag: String, speechStart: Double, speechEnd: Double) -> Bool {
+        guard let injector else { return false }
+        injector.enqueue(samples, tag: tag, speechStart: speechStart, speechEnd: speechEnd)
+        return true
+    }
+
+    /// Timing / health metric for the harness: forwarded to Dart as {"kind":"metric", ...} with the
+    /// wall clock (ms since 1970) it happened at.
+    private func metric(_ m: [String: Any]) {
+        var e = m
+        e["kind"] = "metric"
+        if e["hostMs"] == nil { e["hostMs"] = Int64(Date().timeIntervalSince1970 * 1000) }
+        onEvent?(e)
+    }
+
+    /// Once a second (harness only): avatar frames published (all / speech), memory, thermal state.
+    private func startStats() {
+        let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        var lastAll = -1, lastSpeech = -1
+        t.schedule(deadline: .now() + 1, repeating: 1)
+        t.setEventHandler { [weak self] in
+            guard let self else { return }
+            let sink = self.io?.lipsyncSink
+            let all = (sink as? AvatarTexture)?.publishedFramesTotal ?? 0
+            let sp = sink?.speechFramesPublished ?? 0
+            var m: [String: Any] = ["ev": "stats", "footprintMb": Self.footprintMb(),
+                                    "thermal": ProcessInfo.processInfo.thermalState.rawValue]
+            if lastAll >= 0 { m["frames"] = all - lastAll; m["speechFrames"] = sp - lastSpeech }
+            lastAll = all; lastSpeech = sp
+            m["botSpeaking"] = self.botSpeaking()
+            self.metric(m)
+        }
+        t.resume()
+        statsTimer = t
+    }
+
+    /// The process' physical footprint (what jetsam counts), MB.
+    static func footprintMb() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return kr == KERN_SUCCESS ? Double(info.phys_footprint) / 1_048_576 : -1
+    }
+
     func stop() {
+        statsTimer?.cancel(); statsTimer = nil
+        injector?.stop(); injector = nil
         micCont.finish()
         io?.onMicTap = nil
         io?.onBarge = nil

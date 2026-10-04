@@ -47,3 +47,21 @@ No GPL code is linked. The voice needs no phonemizer (no espeak-ng).
   graphs (weights stored as float16 and converted back to float32 when loaded).
   These are modified files: each graph records the modification in its ONNX
   metadata (`bithuman.modification`), as §4(c) requires.
+
+## The hybrid brain's speech-to-text on iOS (optional: `scripts/build-sherpa-ios.sh`)
+
+| Component | Version | License |
+|---|---|---|
+| [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) C API (static, no TTS, no CoreML EP) | v1.13.8 | Apache-2.0 — Copyright (c) Xiaomi Corporation and the k2-fsa authors |
+| [kaldi-native-fbank](https://github.com/csukuangfj/kaldi-native-fbank), kaldi-decoder, OpenFst subset, sentencepiece, kissfft (linked by sherpa-onnx) | as pinned by sherpa-onnx v1.13.8 | Apache-2.0 / BSD-3-Clause |
+
+Models the app downloads for it:
+
+* **NVIDIA Parakeet TDT-CTC 110M** (`nvidia/parakeet-tdt_ctc-110m`, int8 ONNX export by sherpa-onnx:
+  `sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8`) — **CC BY 4.0**: commercial use
+  allowed with attribution ("Parakeet TDT-CTC 110M © NVIDIA Corporation, CC BY 4.0"), e.g. in the
+  app's About / licences page.
+* **Silero VAD** (`silero_vad.onnx`) — MIT, Copyright (c) 2020-present Silero Team.
+* (Alternative) **Moonshine** English models — MIT. Moonshine's NON-English models are under the
+  Moonshine Community License, which is **non-commercial**: do not ship those.
+

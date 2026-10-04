@@ -502,6 +502,12 @@ class BithumanAvatar implements VoiceHost {
     String systemPrompt = '',
     String llm = 'auto',
     String refusalReply = '',
+    String replyMode = 'local',
+    String? sttDir,
+    int minSilenceMs = 0,
+    bool bargeOnSpeech = false,
+    bool injectAudio = false,
+    double injectNoiseDb = -65,
   }) async {
     if (_disposed) throw const BithumanAvatarException('avatar is disposed');
     await _channel.invokeMethod('localAudioStart', {
@@ -513,7 +519,39 @@ class BithumanAvatar implements VoiceHost {
       'systemPrompt': systemPrompt,
       'llm': llm,
       if (refusalReply.isNotEmpty) 'refusalReply': refusalReply,
+      if (replyMode != 'local') 'replyMode': replyMode,
+      'sttDir': ?sttDir,
+      if (minSilenceMs > 0) 'minSilenceMs': minSilenceMs,
+      if (bargeOnSpeech) 'bargeOnSpeech': true,
+      if (injectAudio) 'injectAudio': true,
+      if (injectAudio) 'injectNoiseDb': injectNoiseDb,
     });
+  }
+
+  /// The hybrid brain: a piece of the app's reply to `reply_request` [id]
+  /// (see [localAudioStart] `replyMode: 'host'`).
+  @override
+  Future<void> localReplyText(int id, String text, {bool done = false, int result = 0}) async {
+    if (_disposed) return;
+    await _channel.invokeMethod('localReplyText', {'id': id, 'text': text, 'done': done, 'result': result});
+  }
+
+  /// Testing: speak a 16 kHz WAV into the local session's speech-to-text
+  /// (see [localAudioStart] `injectAudio: true`).
+  @override
+  Future<bool> localInjectAudio(String path, {String? tag, double? speechStart, double? speechEnd}) async {
+    if (_disposed) return false;
+    try {
+      return await _channel.invokeMethod<bool>('localInjectAudio', {
+            'path': path,
+            'tag': ?tag,
+            'speechStart': ?speechStart,
+            'speechEnd': ?speechEnd,
+          }) ??
+          false;
+    } on MissingPluginException {
+      return false; // Android: no Apple local session here
+    }
   }
 
   /// Whether the on-device brain can run Apple's model (Apple Intelligence /

@@ -21,6 +21,13 @@ const Map<String, Map<String, String>> unsupported = {
     'ai.bithuman.window startDrag': 'macOS window chrome only; the Dart call ignores the error',
     'ai.bithuman.window enterBubble': 'macOS window chrome only; the Dart call ignores the error',
     'ai.bithuman.window exitBubble': 'macOS window chrome only; the Dart call ignores the error',
+    // The on-device brain's Apple-only calls (Android's local brain is LocalBrain / #147).
+    'ai.bithuman.avatar appleIntelligenceStatus':
+        "Apple's Foundation Models only; the static call answers notBuilt on MissingPluginException",
+    'ai.bithuman.avatar localReplyText':
+        'sent only in answer to a reply_request event, which only the Apple hybrid brain emits',
+    'ai.bithuman.avatar localInjectAudio':
+        'testing API of the Apple local session; localInjectAudio answers false on MissingPluginException',
   },
   'apple': {
     // Load progress is an Android channel; iOS and macOS send no load events yet.

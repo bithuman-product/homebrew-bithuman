@@ -374,6 +374,12 @@ class WebRTCTransport implements RealtimeTransport {
 /// LOCAL mode (macOS): the on-device converse brain via the plugin, no cloud.
 /// Status + captions come from the plugin's converse EventChannel; the avatar
 /// + VP-IO audio are driven natively, so this transport is thin.
+/// The hybrid brain's reply stage: stream the reply to [messages] (`role` /
+/// `content`; [0] is the system prompt, the last is the user's turn). Typically
+/// a cheap cloud text model behind the app's own server. Cancelled (the
+/// subscription) when the user barges in.
+typedef HostReplyStream = Stream<String> Function(List<Map<String, String>> messages, int maxTokens);
+
 class LocalConverseTransport implements RealtimeTransport {
   LocalConverseTransport({
     required this.avatar,
@@ -384,8 +390,28 @@ class LocalConverseTransport implements RealtimeTransport {
     this.systemPrompt = '',
     this.llm = LocalBrainLlm.auto,
     this.refusalReply = '',
+    this.reply,
+    this.sttDir,
+    this.minSilenceMs = 0,
+    this.bargeOnSpeech = false,
+    this.greet = true,
+    this.injectAudio = false,
   });
   final VoiceHost avatar;
+  /// THE HYBRID BRAIN: when set, the on-device brain asks this for its replies
+  /// (speech-to-text and the voice stay on the device); [ggufPath] / [llm] are
+  /// then unused.
+  final HostReplyStream? reply;
+  /// A sherpa-onnx speech-to-text model directory (iOS builds that staged it);
+  /// null = Apple's SpeechAnalyzer.
+  final String? sttDir;
+  final int minSilenceMs;
+  /// Barge when the speech-to-text hears the user start talking over the character.
+  final bool bargeOnSpeech;
+  /// Speak a greeting when the brain is ready.
+  final bool greet;
+  /// Testing: no microphone; feed files with [VoiceHost.localInjectAudio].
+  final bool injectAudio;
   /// The Llama GGUF. Null is fine when Apple's on-device model runs the brain
   /// (see [llm] and [AppleIntelligenceStatus]).
   final String? ggufPath;
@@ -404,7 +430,10 @@ class LocalConverseTransport implements RealtimeTransport {
   final _mic = StreamController<double>.broadcast();
   final _botLvl = StreamController<double>.broadcast();
   final _interrupt = StreamController<void>.broadcast();
+  final _raw = StreamController<Map<dynamic, dynamic>>.broadcast();
   StreamSubscription<Map<dynamic, dynamic>>? _evSub;
+  // The hybrid brain's reply in flight: request id → its stream.
+  final Map<int, StreamSubscription<String>> _replies = {};
   bool _muted = false;
   bool _greeted = false;   // welcome-on-connect fires once per session
 
@@ -418,6 +447,9 @@ class LocalConverseTransport implements RealtimeTransport {
 
   @override
   Stream<TransportStatus> get statusStream => _status.stream;
+  /// Every native brain event as it arrives (captions, states, the hybrid
+  /// brain's requests and the timing `metric` events) — diagnostics / harness.
+  Stream<Map<dynamic, dynamic>> get rawEvents => _raw.stream;
   @override
   Stream<String> get botTranscriptStream => _bot.stream;
   @override
@@ -455,6 +487,11 @@ class LocalConverseTransport implements RealtimeTransport {
         systemPrompt: systemPrompt,
         llm: llm.name,
         refusalReply: refusalReply,
+        replyMode: reply != null ? 'host' : 'local',
+        sttDir: sttDir,
+        minSilenceMs: minSilenceMs,
+        bargeOnSpeech: bargeOnSpeech,
+        injectAudio: injectAudio,
       );
       _evSub = avatar.converseEvents.listen(_onEvent);
       // The native mic only exists after localAudioStart, so a mute requested
@@ -468,13 +505,20 @@ class LocalConverseTransport implements RealtimeTransport {
   }
 
   void _onEvent(Map<dynamic, dynamic> ev) {
+    if (_raw.hasListener) _raw.add(ev);
     switch (ev['kind']) {
+      // The hybrid brain wants a reply: stream it back piece by piece.
+      case 'reply_request':
+        _startReply(ev);
+      case 'reply_cancel':
+        final id = ev['id'] as int? ?? -1;
+        unawaited(_replies.remove(id)?.cancel());
       // Native load progress (the GGUF + Supertonic load off-thread).
       case 'loading':
         _status.add(TransportStatus.connecting);
       case 'ready':
         _status.add(TransportStatus.listening);
-        if (!_greeted) {
+        if (greet && !_greeted) {
           _greeted = true;
           _status.add(TransportStatus.thinking);   // rim on until the greeting plays
           avatar.localPushText(_greetingPrompt);
@@ -511,8 +555,41 @@ class LocalConverseTransport implements RealtimeTransport {
     }
   }
 
+  void _startReply(Map<dynamic, dynamic> ev) {
+    final id = ev['id'] as int? ?? -1;
+    final provider = reply;
+    if (provider == null || id < 0) {
+      unawaited(avatar.localReplyText(id, '', done: true, result: 3));
+      return;
+    }
+    final msgs = <Map<String, String>>[
+      for (final m in (ev['messages'] as List? ?? const []))
+        {'role': '${(m as Map)['role'] ?? ''}', 'content': '${m['content'] ?? ''}'},
+    ];
+    final maxTokens = ev['maxTokens'] as int? ?? 256;
+    var ended = false;
+    void end(int result) {
+      if (ended) return;
+      ended = true;
+      _replies.remove(id);
+      unawaited(avatar.localReplyText(id, '', done: true, result: result));
+    }
+    _replies[id] = provider(msgs, maxTokens).listen(
+      (piece) {
+        if (!ended && piece.isNotEmpty) unawaited(avatar.localReplyText(id, piece));
+      },
+      onError: (Object _) => end(3),
+      onDone: () => end(0),
+      cancelOnError: true,
+    );
+  }
+
   @override
   Future<void> stop() async {
+    for (final r in _replies.values) {
+      unawaited(r.cancel());
+    }
+    _replies.clear();
     await avatar.localAudioStop();
     await _evSub?.cancel();
     _evSub = null;
@@ -527,6 +604,7 @@ class LocalConverseTransport implements RealtimeTransport {
     await _mic.close();
     await _botLvl.close();
     await _interrupt.close();
+    await _raw.close();
   }
 
   @override
