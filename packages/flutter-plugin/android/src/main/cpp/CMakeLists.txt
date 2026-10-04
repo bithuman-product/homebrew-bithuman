@@ -1,14 +1,20 @@
 # The Android on-device brain's native half, all built FROM SOURCE at pinned revisions —
-# nothing prebuilt is vendored:
+# nothing prebuilt is vendored. Only built for an app that opts in (android/build.gradle:
+# `bithuman.hybridBrain=true` / `bithuman.localLlm=true` in the app's gradle.properties):
 #
-#   libbhbrain.so          llama.cpp (the reply) behind a small JNI (bh_llm_jni.cpp)
-#   libsherpa-onnx-jni.so  sherpa-onnx v1.13.8 (speech in: silero VAD + Moonshine; speech out:
-#                          Supertonic) with ONNX Runtime linked in statically, and WITHOUT
+#   libsherpa-onnx-jni.so  sherpa-onnx v1.13.8 (speech in: silero VAD + a speech-to-text model;
+#                          speech out: Supertonic) with ONNX Runtime linked in statically, and WITHOUT
 #                          espeak-ng: sherpa-onnx's TTS switch drags in espeak-ng (GPL-3.0) for
 #                          voices this brain never uses, so its two CMake modules are replaced by
 #                          the no-op stand-ins in no-espeak/ (see its README). Static ONNX Runtime
 #                          because essence2-android already ships a libonnxruntime.so of another
 #                          version under the same name.
+#   libbhbrain.so          llama.cpp (LOCAL mode's on-device reply) behind a small JNI
+#                          (bh_llm_jni.cpp) — ONLY with BH_WITH_LLAMA=ON (bithuman.localLlm). The
+#                          hybrid brain (the reply streamed in by the app) never loads it, so a
+#                          hybrid-only build neither downloads nor compiles llama.cpp; its one built
+#                          target is libbhhybrid.so, an empty library whose only job is to make AGP
+#                          package the IMPORTED sherpa-onnx library it links.
 #
 # Offline builds / bisects: BH_LLAMA_CPP_DIR, BH_SHERPA_ONNX_DIR (a v1.13.8 checkout) and
 # BH_ORT_STATIC_DIR (an unpacked onnxruntime-android-arm64-v8a-static_lib-1.28.2) stand in for
@@ -23,32 +29,42 @@ project(bhbrain CXX C)
 include(FetchContent)
 include(ExternalProject)
 
-# ------------------------------------------------------------------ llama.cpp -> libbhbrain.so
-set(BH_LLAMA_CPP_COMMIT "237958db339300bdd8028608cc08b2ba2685ec33")   # b8110
-if(BH_LLAMA_CPP_DIR)
-  set(FETCHCONTENT_SOURCE_DIR_LLAMA_CPP ${BH_LLAMA_CPP_DIR})
-endif()
-FetchContent_Declare(llama_cpp
-    URL https://github.com/ggml-org/llama.cpp/archive/${BH_LLAMA_CPP_COMMIT}.tar.gz
-    URL_HASH SHA256=38b215a5ef82cd46756787ad724de328761d2ffc333763d80ae5d904ad8da0f3)
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
-set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
-set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
-set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
-set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
-set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
-set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
-FetchContent_MakeAvailable(llama_cpp)
+option(BH_WITH_LLAMA "llama.cpp (LOCAL mode's on-device LLM) in libbhbrain.so" OFF)
 
-add_library(bhbrain SHARED bh_llm_jni.cpp)
-target_compile_features(bhbrain PRIVATE cxx_std_17)
-target_link_libraries(bhbrain PRIVATE llama ggml android log)
-# Keep only the JNI entry points exported; llama/ggml stay internal to this .so.
-target_link_options(bhbrain PRIVATE "-Wl,--exclude-libs,ALL" "-Wl,--gc-sections")
+# ------------------------------------------------------------------ llama.cpp -> libbhbrain.so (opt-in)
+if(BH_WITH_LLAMA)
+  set(BH_LLAMA_CPP_COMMIT "237958db339300bdd8028608cc08b2ba2685ec33")   # b8110
+  if(BH_LLAMA_CPP_DIR)
+    set(FETCHCONTENT_SOURCE_DIR_LLAMA_CPP ${BH_LLAMA_CPP_DIR})
+  endif()
+  FetchContent_Declare(llama_cpp
+      URL https://github.com/ggml-org/llama.cpp/archive/${BH_LLAMA_CPP_COMMIT}.tar.gz
+      URL_HASH SHA256=38b215a5ef82cd46756787ad724de328761d2ffc333763d80ae5d904ad8da0f3)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+  set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+  set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+  set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+  set(LLAMA_CURL OFF CACHE BOOL "" FORCE)
+  set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+  set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+  set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
+  set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "" FORCE)
+  FetchContent_MakeAvailable(llama_cpp)
+
+  add_library(bhbrain SHARED bh_llm_jni.cpp)
+  target_compile_features(bhbrain PRIVATE cxx_std_17)
+  target_link_libraries(bhbrain PRIVATE llama ggml android log)
+  # Keep only the JNI entry points exported; llama/ggml stay internal to this .so.
+  target_link_options(bhbrain PRIVATE "-Wl,--exclude-libs,ALL" "-Wl,--gc-sections")
+  set(BH_PACKAGER bhbrain)
+else()
+  # The hybrid brain: no llama.cpp. AGP packages an IMPORTED library only through a built target
+  # that links it, so this empty one carries libsherpa-onnx-jni.so into the AAR.
+  add_library(bhhybrid SHARED bh_hybrid.c)
+  set(BH_PACKAGER bhhybrid)
+endif()
 
 # ------------------------------------------------------------------ sherpa-onnx -> libsherpa-onnx-jni.so
 set(BH_SHERPA_ONNX_VERSION "1.13.8")   # android/src/main/kotlin/com/k2fsa/... is this release's Kotlin API
@@ -114,4 +130,4 @@ ExternalProject_Add(sherpa_onnx_ep
 add_library(sherpa_onnx_jni SHARED IMPORTED GLOBAL)
 set_target_properties(sherpa_onnx_jni PROPERTIES IMPORTED_LOCATION ${SHERPA_SO})
 add_dependencies(sherpa_onnx_jni sherpa_onnx_ep)
-target_link_libraries(bhbrain PRIVATE sherpa_onnx_jni)
+target_link_libraries(${BH_PACKAGER} PRIVATE sherpa_onnx_jni)

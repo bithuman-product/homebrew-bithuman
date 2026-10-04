@@ -76,12 +76,26 @@ rootProject.allprojects {
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
-// ---------------------------------------------------------------- the on-device brain
-// LOCAL mode's native code — llama.cpp (the reply) and sherpa-onnx (speech in: silero VAD +
-// Moonshine; speech out: Supertonic) — is compiled from pinned sources by
-// src/main/cpp/CMakeLists.txt; nothing prebuilt is downloaded or vendored. sherpa-onnx is built
-// without espeak-ng (GPL-3.0; see src/main/cpp/no-espeak/README.md) and with ONNX Runtime linked
-// in statically (essence2-android already ships a libonnxruntime.so of another version).
+// ---------------------------------------------------------------- the on-device brain (OPT-IN)
+// The on-device brain's native code is compiled from pinned sources by src/main/cpp/CMakeLists.txt
+// (nothing prebuilt is downloaded or vendored) — and ONLY for an app that asks for it, in its own
+// android/gradle.properties:
+//
+//   bithuman.hybridBrain=true   speech in (silero VAD + a sherpa-onnx speech-to-text model) and
+//                               Supertonic out, with ONNX Runtime linked in statically: the HYBRID
+//                               brain, whose reply text the app streams in (replyMode "host").
+//                               Adds libsherpa-onnx-jni.so (~24 MB, ~9.5 MB compressed) to the app.
+//   bithuman.localLlm=true      the above PLUS llama.cpp (libbhbrain.so) for LOCAL mode's on-device
+//                               LLM (a .gguf the app supplies). Implies hybridBrain.
+//
+// Neither set (the default): no CMake run, no sherpa-onnx / ONNX Runtime / llama.cpp download or
+// compile, no brain library in the APK; `isLocalModeSupported` answers false and `localAudioStart`
+// says which property to set. The avatar engines and the cloud transports are unaffected.
+// sherpa-onnx is built without espeak-ng (GPL-3.0; see src/main/cpp/no-espeak/README.md) and with
+// ONNX Runtime linked in statically (essence2-android already ships a libonnxruntime.so of another version).
+def bhFlag = { String key -> (project.findProperty(key) ?: rootProject.findProperty(key))?.toString()?.trim()?.toBoolean() ?: false }
+def bhLocalLlm = bhFlag('bithuman.localLlm')
+def bhHybridBrain = bhLocalLlm || bhFlag('bithuman.hybridBrain')
 
 android {
     namespace = 'ai.bithuman.flutter'
@@ -90,32 +104,41 @@ android {
         minSdk = 29   // essence2-android declares 29 (expression2-android 26); the app must match
         ndk { abiFilters 'arm64-v8a' }   // the AAR ships arm64-v8a only
         consumerProguardFiles 'consumer-rules.pro'
-        externalNativeBuild {
-            cmake {
-                // c++_static: the brain's C++ runtime stays inside libbhbrain.so, so it neither
-                // ships a second libc++_shared.so nor depends on essence2-android's copy.
-                def args = ['-DANDROID_STL=c++_static', '-DCMAKE_BUILD_TYPE=Release']
-                // Offline builds: local checkouts / unpacked archives instead of the pinned downloads.
-                ['BH_LLAMA_CPP_DIR', 'BH_SHERPA_ONNX_DIR', 'BH_ORT_STATIC_DIR'].each { k ->
-                    def v = System.getenv(k)
-                    if (v) args << "-D${k}=${v}".toString()
+        // Read by LocalBrainSupport: which brain pieces this build carries (see the header above).
+        buildConfigField 'boolean', 'BH_HYBRID_BRAIN', bhHybridBrain.toString()
+        buildConfigField 'boolean', 'BH_LOCAL_LLM', bhLocalLlm.toString()
+        if (bhHybridBrain) {
+            externalNativeBuild {
+                cmake {
+                    // c++_static: the brain's C++ runtime stays inside its own .so, so it neither
+                    // ships a second libc++_shared.so nor depends on essence2-android's copy.
+                    def args = ['-DANDROID_STL=c++_static', '-DCMAKE_BUILD_TYPE=Release',
+                                "-DBH_WITH_LLAMA=${bhLocalLlm ? 'ON' : 'OFF'}".toString()]
+                    // Offline builds: local checkouts / unpacked archives instead of the pinned downloads.
+                    ['BH_LLAMA_CPP_DIR', 'BH_SHERPA_ONNX_DIR', 'BH_ORT_STATIC_DIR'].each { k ->
+                        def v = System.getenv(k)
+                        if (v) args << "-D${k}=${v}".toString()
+                    }
+                    arguments(*args)
+                    cppFlags '-O3'
                 }
-                arguments(*args)
-                cppFlags '-O3'
             }
         }
     }
-    // The brain's native code (llama.cpp + its JNI) — see src/main/cpp/CMakeLists.txt.
-    externalNativeBuild {
-        cmake {
-            path 'src/main/cpp/CMakeLists.txt'
-            version '3.22.1'
+    buildFeatures { buildConfig = true }
+    if (bhHybridBrain) {
+        // The brain's native code — see src/main/cpp/CMakeLists.txt.
+        externalNativeBuild {
+            cmake {
+                path 'src/main/cpp/CMakeLists.txt'
+                version '3.22.1'
+            }
         }
-    }
-    // Release-optimised native code even in a debug app build: an unoptimised llama.cpp
-    // is ~10x slower and would make a debug build's brain unusable.
-    buildTypes {
-        debug { externalNativeBuild { cmake { arguments '-DCMAKE_BUILD_TYPE=Release' } } }
+        // Release-optimised native code even in a debug app build: an unoptimised ONNX Runtime /
+        // llama.cpp is ~10x slower and would make a debug build's brain unusable.
+        buildTypes {
+            debug { externalNativeBuild { cmake { arguments '-DCMAKE_BUILD_TYPE=Release' } } }
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

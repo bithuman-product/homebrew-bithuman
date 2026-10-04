@@ -63,7 +63,8 @@ internal class ConverseEngine private constructor(
         val maxSentences: Int = 3,
         val ttsSteps: Int = 4,
         val ttsSpeed: Float = 1.0f,
-        val ttsThreads: Int = 2,
+        /** Supertonic's ONNX Runtime threads (see [create] for the measured choice). */
+        val ttsThreads: Int = TTS_THREADS,
         val sttThreads: Int = 2,
         val llmThreads: Int = 4,
         val llmContext: Int = 2048,
@@ -96,20 +97,60 @@ internal class ConverseEngine private constructor(
          * history and the user's turn only).
          */
         val sendSystemPrompt: Boolean = true,
+        /**
+         * The first [clauseChunks] voice chunks of a reply may end at a clause (, ; : —) once they hold
+         * [firstChunkMinWords] words; later ones wait for a sentence end (better prosody). The same rule
+         * as libconverse on Apple (kFirstChunkMinWords = 3, BITHUMAN_CONVERSE_CLAUSE_CHUNKS = 2).
+         */
+        val firstChunkMinWords: Int = 3,
+        val clauseChunks: Int = 2,
+        /**
+         * The first chunk holds at least this many words (0 = no floor). Galaxy Z Flip5 (2026-10-04, the
+         * hybrid harness, both house avatars): neither engine starts a reply's mouth on less than ~1.3 s of
+         * its audio. A 1-3 word first chunk is 1.0-1.3 s of Supertonic audio (it pads a short line, and
+         * synthesizes it no faster under the avatar), and the first mouth frame was then often seconds
+         * late (1-2 words: 7.4 s Essence 2 / 2.9 s Expression 2 p50, n=5 each; 3 words: 4 of 8 openings
+         * were <= 1.31 s of audio, two of them started at 5.3 / 6.5 s), while every 4+ word opening was
+         * >= 1.7 s of audio and started in 0.8-1.2 s.
+         * A higher floor merges a short opening into a long first chunk where punctuation is sparse
+         * ("Great question, friend! A latte is ... on top,": 6.6 s of audio, +1.0-1.3 s), so 4.
+         */
+        val firstChunkFloorWords: Int = FIRST_CHUNK_FLOOR_WORDS,
         /** Spoken when the reply stage fails before saying anything (no network, a timeout). */
         val errorReply: String = "Sorry, I lost my train of thought. Could you say that again?",
+        /** Spoken when the host refuses a turn before saying anything (result 1); "" = [errorReply]. */
+        val refusalReply: String = "",
+        /**
+         * Of reply generation [gen]'s audio, the 24 kHz samples the person has HEARD (the avatar's audio
+         * clock), or null when unknown. Turns a cut into `heardChars` for the host (reply_cancel).
+         */
+        val heardSamples: ((gen: Int) -> Long?)? = null,
     )
 
     fun interface Listener { fun onEvent(kind: Int, state: Int, text: String) }
 
-    private class Turn(val gen: Int, val userText: String, val spoken: Boolean) {
+    private class Turn(val gen: Int, val userText: String, val spoken: Boolean,
+                       /** The user went on after a pause: [userText] is the whole utterance (reply_request continuation). */
+                       val continuation: Boolean = false,
+                       /** A line to speak verbatim (localSpeakText) — no reply stage, no user turn. */
+                       val say: String? = null) {
         @Volatile var audioStarted = false
         @Volatile var audioStartedAt = 0L
         val reply = StringBuilder()
+        /** The reply stage's view of the turn; its hostId names the host request. */
+        val rt = ReplyTurn(userText, continuation)
+        /** The host stream is running (a cut cancels it rather than reporting after the fact). */
+        @Volatile var streaming = false
+        /** A cut of this reply after its stream ended has been reported (once). */
+        @Volatile var cutReported = false
+        /** Per synthesized chunk: (raw characters of the reply text up to its end, its 24 kHz samples). Under [lock]. */
+        val spans = ArrayList<Pair<Int, Int>>()
+        /** Raw characters of the reply text consumed by the chunks emitted so far. */
+        @Volatile var rawEmitted = 0
     }
 
     private sealed class TtsJob(val gen: Int) {
-        class Say(gen: Int, val text: String) : TtsJob(gen)
+        class Say(gen: Int, val text: String, val rawEnd: Int = 0) : TtsJob(gen)
         class End(gen: Int) : TtsJob(gen)
     }
 
@@ -206,6 +247,20 @@ internal class ConverseEngine private constructor(
         }
     }
 
+    /**
+     * The character's own line, verbatim (localSpeakText — the server's greeting): no reply stage and no
+     * user turn; captioned, voiced and interruptible like a reply, and kept in the history as its line.
+     */
+    fun speak(text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty() || !running) return false
+        synchronized(lock) {
+            if (inFlight != null || SystemClock.elapsedRealtime() < synchronized(outLock) { audibleUntil }) interruptLocked(event = false)
+            startTurnLocked("", spoken = false, say = t)
+        }
+        return true
+    }
+
     /** Barge-in: cancel the reply in flight, drop what it synthesized, back to LISTENING. */
     fun interrupt() = synchronized(lock) { interruptLocked(event = false) }
 
@@ -230,9 +285,9 @@ internal class ConverseEngine private constructor(
 
     // ------------------------------------------------------------------ turns
 
-    private fun startTurnLocked(text: String, spoken: Boolean) {
+    private fun startTurnLocked(text: String, spoken: Boolean, continuation: Boolean = false, say: String? = null) {
         val gen = synchronized(outLock) { ++turnGen }
-        val t = Turn(gen, text, spoken)
+        val t = Turn(gen, text, spoken, continuation, say)
         inFlight = t
         setState(STATE_THINKING)
         Log.i(TAG, "[bhbrain] turn gen=$gen start src=${if (spoken) "asr" else "text"} hostMs=${System.currentTimeMillis()} '${text.take(80)}'")
@@ -245,10 +300,23 @@ internal class ConverseEngine private constructor(
         if (event && t != null && t.spoken && t.audioStarted && now - t.audioStartedAt < cfg.mergeWindowMs) {
             pendingMerge = t.userText; pendingMergeAt = now
         }
+        // The host learns how much of the reply was heard BEFORE the ring is cleared and the player cut
+        // (reply_cancel {id, heardChars}): while its stream runs, through the stream's cancel; after it
+        // ended but while its voice still played, reported once.
+        val host = llm as? HostReplyModel
+        val audible = now < synchronized(outLock) { audibleUntil } || (t != null && t === inFlight)
+        val heard = if (host != null && t != null && t.rt.hostId > 0) heardCharsLocked(t) else null
         // The generation moves with the ring cleared under ONE lock, so a pull sees either
         // the old reply's audio under the old gen or nothing under the new one.
         synchronized(outLock) { turnGen++; out.clear(); outHead = null; audibleUntil = 0L }
-        llm.cancel()
+        if (host != null && t != null && t.streaming) host.cancel(heard)
+        else {
+            llm.cancel()
+            if (host != null && t != null && t.rt.hostId > 0 && audible && !t.cutReported) {
+                t.cutReported = true
+                host.reportCancel(t.rt.hostId, heard)
+            }
+        }
         ttsJobs.clear()
         if (t != null && t === inFlight) {
             // What the user heard of it stays in the conversation, so "as I was saying" works.
@@ -280,22 +348,23 @@ internal class ConverseEngine private constructor(
             }
             val cur = inFlight
             var merged = text
+            var continuation = false
             val pm = pendingMerge
             if (pm != null && now - pendingMergeAt < cfg.mergeWindowMs + 5000) {
-                merged = "$pm $text"
+                merged = "$pm $text"; continuation = true
                 Log.i(TAG, "[bhbrain] merge after early cut -> '${merged.take(80)}'")
             }
             pendingMerge = null
             if (cur != null && !cur.audioStarted && cur.spoken && now - lastFinalAt < cfg.mergeWindowMs) {
                 // The user paused mid-thought and the VAD split one turn in two: cancel the
                 // reply to the first half (nothing was said yet) and answer the whole.
-                merged = cur.userText + " " + merged
+                merged = cur.userText + " " + merged; continuation = true
                 Log.i(TAG, "[bhbrain] merge split turn gen=${cur.gen} -> '${merged.take(80)}'")
                 interruptLocked(event = false)
             }
             lastFinalAt = now
             listener.onEvent(EVENT_USER_FINAL, st, merged)
-            startTurnLocked(merged, spoken = true)
+            startTurnLocked(merged, spoken = true, continuation = continuation)
         }
     }
 
@@ -373,10 +442,17 @@ internal class ConverseEngine private constructor(
     private fun reply(turn: Turn) {
         val gen = turn.gen
         val t0 = System.currentTimeMillis()
+        turn.say?.let { line ->
+            Log.i(TAG, "[bhbrain] speak gen=$gen chars=${line.length} — the character's own line, no reply stage")
+            val ch = TextShaping.Chunker(cfg.firstChunkMinWords, clauseChunks = cfg.clauseChunks, firstFloorWords = cfg.firstChunkFloorWords)
+            (ch.pushWithEnds("$line ") + listOfNotNull(ch.flushWithEnd())).forEach { (c, end) -> emitChunk(turn, c, end) }
+            ttsJobs.offer(TtsJob.End(gen))
+            return
+        }
         if (TextShaping.isCrisis(turn.userText)) {
             Log.i(TAG, "[bhbrain] crisis guard gen=$gen — fixed reply, no model")
             // Sentence by sentence, like any reply, so the first words are heard in ~0.3 s.
-            val ch = TextShaping.Chunker()
+            val ch = TextShaping.Chunker(cfg.firstChunkMinWords, clauseChunks = cfg.clauseChunks, firstFloorWords = cfg.firstChunkFloorWords)
             (ch.push(TextShaping.CRISIS_REPLY + " ") + listOfNotNull(ch.flush())).forEach { emitChunk(turn, it) }
             ttsJobs.offer(TtsJob.End(gen))
             return
@@ -384,38 +460,71 @@ internal class ConverseEngine private constructor(
         val messages = ArrayList<Pair<String, String>>()
         if (cfg.sendSystemPrompt) messages.add("system" to system)
         synchronized(lock) {
-            for ((u, a) in history) { messages.add("user" to u); messages.add("assistant" to a) }
+            for ((u, a) in history) { if (u.isNotEmpty()) messages.add("user" to u); messages.add("assistant" to a) }
         }
         messages.add("user" to turn.userText)
 
-        val chunker = TextShaping.Chunker()
+        val chunker = TextShaping.Chunker(cfg.firstChunkMinWords, clauseChunks = cfg.clauseChunks, firstFloorWords = cfg.firstChunkFloorWords)
         var first = true
         var sentences = 0
-        val n = llm.generate(messages, cfg.maxTokens, cfg.temperature) { text ->
-            if (gen != turnGen || !running) return@generate false
-            if (first) { first = false; Log.i(TAG, "[bhbrain] llm first_token gen=$gen ms=${System.currentTimeMillis() - t0} hostMs=${System.currentTimeMillis()}") }
-            for (c in chunker.push(text)) {
-                if (emitChunk(turn, c)) sentences++
-                if (sentences >= cfg.maxSentences) return@generate false
+        turn.streaming = true
+        val n = try {
+            llm.generate(turn.rt, messages, cfg.maxTokens, cfg.temperature) { text ->
+                if (gen != turnGen || !running) return@generate false
+                if (first) { first = false; Log.i(TAG, "[bhbrain] llm first_token gen=$gen ms=${System.currentTimeMillis() - t0} hostMs=${System.currentTimeMillis()}") }
+                for ((c, end) in chunker.pushWithEnds(text)) {
+                    if (emitChunk(turn, c, end)) sentences++
+                    if (sentences >= cfg.maxSentences) {
+                        // The rest is never spoken: the host hears that the reply ends here.
+                        (llm as? HostReplyModel)?.stopAt(turn.rawEmitted)
+                        return@generate false
+                    }
+                }
+                true
             }
-            true
-        }
-        if (gen == turnGen && sentences < cfg.maxSentences) chunker.flush()?.let { emitChunk(turn, it) }
+        } finally { turn.streaming = false }
+        if (gen == turnGen && sentences < cfg.maxSentences) chunker.flushWithEnd()?.let { (c, end) -> emitChunk(turn, c, end) }
         Log.i(TAG, "[bhbrain] llm done gen=$gen tokens=$n ${llm.lastStats()} hostMs=${System.currentTimeMillis()}")
         // The reply stage failed before a word was said: say so instead of going silent.
-        if (n < 0 && gen == turnGen && turn.reply.isBlank() && cfg.errorReply.isNotBlank()) emitChunk(turn, cfg.errorReply)
+        if (n < 0 && gen == turnGen && turn.reply.isBlank()) {
+            val refused = (llm as? HostReplyModel)?.lastResult == HostReplyModel.RESULT_REFUSED
+            val line = if (refused && cfg.refusalReply.isNotBlank()) cfg.refusalReply else cfg.errorReply
+            if (line.isNotBlank()) emitChunk(turn, line)
+        }
         if (gen != turnGen) return
         ttsJobs.offer(TtsJob.End(gen))
     }
 
     /** Clean a chunk, caption it and queue it for the voice. False when nothing speakable was left. */
-    private fun emitChunk(turn: Turn, raw: String): Boolean {
+    private fun emitChunk(turn: Turn, raw: String, rawEnd: Int = -1): Boolean {
         val c = TextShaping.clean(raw).trim()
         if (c.none { it.isLetterOrDigit() } || turn.gen != turnGen) return false
+        // Raw characters of the reply text (as streamed) this chunk ends at: what heardChars counts in.
+        turn.rawEmitted = if (rawEnd >= 0) rawEnd else turn.rawEmitted
         turn.reply.append(c).append(' ')
         listener.onEvent(EVENT_BOT_CHUNK, st, "$c ")
-        ttsJobs.offer(TtsJob.Say(turn.gen, c))
+        ttsJobs.offer(TtsJob.Say(turn.gen, c, turn.rawEmitted))
         return true
+    }
+
+    /**
+     * Characters of [t]'s reply text the person has heard: its chunks' audio against the avatar's audio
+     * clock ([Config.heardSamples]), the chunk in progress pro rata. 0 before any of it was audible;
+     * null when the clock is unknown. Caller holds [lock].
+     */
+    private fun heardCharsLocked(t: Turn): Int? {
+        if (!t.audioStarted) return 0
+        val played = cfg.heardSamples?.invoke(t.gen) ?: return null
+        var at = 0L
+        var prevEnd = 0
+        for ((end, samples) in t.spans) {
+            if (played < at + samples) {
+                val frac = (played - at).coerceAtLeast(0).toDouble() / maxOf(1, samples)
+                return prevEnd + ((end - prevEnd) * frac).toInt()
+            }
+            at += samples; prevEnd = end
+        }
+        return prevEnd
     }
 
     // ------------------------------------------------------------------ TTS thread
@@ -440,6 +549,7 @@ internal class ConverseEngine private constructor(
                         val t = inFlight
                         if (t != null && !t.audioStarted) { t.audioStarted = true; t.audioStartedAt = SystemClock.elapsedRealtime(); firstOfTurn = true }
                         synchronized(outLock) { if (job.gen == turnGen) out.addLast(pcm) }
+                        t?.takeIf { it.gen == job.gen }?.spans?.add(job.rawEnd to pcm.size)
                         setState(STATE_SPEAKING)
                     }
                     Log.i(TAG, "[bhbrain] tts gen=${job.gen} synthMs=$ms audioMs=${pcm.size * 1000 / OUTPUT_SAMPLE_RATE} " +
@@ -506,10 +616,10 @@ internal class ConverseEngine private constructor(
             fun need(p: String): String { require(File(p).isFile) { "missing brain asset: $p" }; return p }
             val tts = OfflineTts(config = OfflineTtsConfig(model = OfflineTtsModelConfig(
                 supertonic = OfflineTtsSupertonicModelConfig(
-                    durationPredictor = need("$st/duration_predictor.int8.onnx"),
-                    textEncoder = need("$st/text_encoder.int8.onnx"),
-                    vectorEstimator = need("$st/vector_estimator.int8.onnx"),
-                    vocoder = need("$st/vocoder.int8.onnx"),
+                    durationPredictor = need(supertonicGraph(st, "duration_predictor")),
+                    textEncoder = need(supertonicGraph(st, "text_encoder")),
+                    vectorEstimator = need(supertonicGraph(st, "vector_estimator")),
+                    vocoder = need(supertonicGraph(st, "vocoder")),
                     ttsJson = need("$st/tts.json"),
                     unicodeIndexer = need("$st/unicode_indexer.bin"),
                     voiceStyle = need("$st/voice.bin"),
@@ -530,9 +640,31 @@ internal class ConverseEngine private constructor(
             val t3 = SystemClock.elapsedRealtime()
             Log.i(TAG, "[bhbrain] loaded tts=${t1 - t0}ms stt=${t2 - t1}ms llm=${t3 - t2}ms total=${t3 - t0}ms " +
                 "stt=${speechIn.kind}:${File(sd).name} reply=${llm.javaClass.simpleName} " +
-                "voice=${cfg.voice} steps=${cfg.ttsSteps} ttsRate=${tts.sampleRate()} speakers=${tts.numSpeakers()}")
+                "voice=${cfg.voice} steps=${cfg.ttsSteps} ttsThreads=${cfg.ttsThreads} " +
+                "ve=${File(supertonicGraph(st, "vector_estimator")).name} voc=${File(supertonicGraph(st, "vocoder")).name} " +
+                "chunks=${cfg.firstChunkMinWords}w/${cfg.clauseChunks}/floor${cfg.firstChunkFloorWords} ttsRate=${tts.sampleRate()} speakers=${tts.numSpeakers()}")
             return ConverseEngine(cfg, listener, llm, tts, vad, asr)
         }
+
+        /**
+         * Supertonic's thread count. Galaxy Z Flip5, int8 graphs: headless 2 and 4 threads are equal (an
+         * 8-line bench), and UNDER THE AVATAR 4 threads were slower for the voice and the mouth both
+         * (2026-10-04, CPU contention with the engines) — so 2.
+         */
+        const val TTS_THREADS = 2
+
+        /** [Config.firstChunkFloorWords]'s default (Android): no 1-3 word first chunk. */
+        const val FIRST_CHUNK_FLOOR_WORDS = 4
+
+        /**
+         * One Supertonic graph in [dir]: `<name>.onnx` (full precision — the original fp32 graph, or the
+         * half-precision STORAGE build libconverse downloads on Apple, which ONNX Runtime widens back to
+         * fp32 at load) when the directory holds it, else sherpa-onnx's `<name>.int8.onnx`. sherpa-onnx's
+         * int8 release quantizes only two of the four graphs (vector_estimator weight-only, vocoder QDQ);
+         * its duration_predictor and text_encoder ARE the fp32 originals, byte for byte.
+         */
+        fun supertonicGraph(dir: String, name: String): String =
+            File(dir, "$name.onnx").takeIf { it.isFile }?.path ?: "$dir/$name.int8.onnx"
 
         /** Supertonic ships its voices sorted F1..F5, M1..M5 in one voice.bin. */
         fun voiceToSid(voice: String, speakers: Int): Int {

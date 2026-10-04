@@ -45,6 +45,9 @@ internal class LocalConverseController(
     @Volatile var muted = false
     /** Test driver hook: while true the microphone is ignored (audio is injected via [injectAudio16k]). */
     @Volatile var micBypass = false
+    /** Testing (`injectAudio`): the injector's noise floor (linear RMS, 0 = digital silence), so the VAD hears a room. */
+    @Volatile private var injectFloor = 0f
+    private val injectNoise = java.util.Random(7)
     @Volatile private var bargePending: String? = null
     private var mic: MicCapture? = null
     private var pullThread: Thread? = null
@@ -64,6 +67,16 @@ internal class LocalConverseController(
         /** Sentences spoken per reply before the rest is dropped; 0 = the engine's default. */
         val maxSentences: Int = 0,
         val enableMic: Boolean = true,
+        /** The pause that ends the user's turn (the VAD endpoint); 0 = the engine's default (400 ms). */
+        val minSilenceMs: Int = 0,
+        /** Spoken when the host refuses a turn before any word (result 1); "" = the error line. */
+        val refusalReply: String = "",
+        /**
+         * Testing (`injectAudio: true`, a debuggable host): the microphone is never opened; [injectWav]
+         * speaks recorded files into the speech-to-text in real time over a noise floor of [injectNoiseDb].
+         */
+        val injectAudio: Boolean = false,
+        val injectNoiseDb: Double = -65.0,
     )
 
     @Volatile private var hostReply: HostReplyModel? = null
@@ -78,23 +91,43 @@ internal class LocalConverseController(
                 // `debug.bh.brain.keeplead=1` keeps Supertonic's leading silence — a debuggable host only (A/B).
                 val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
                 val keepLead = debuggable && AvatarPlayer.devInt("debug.bh.brain.keeplead") == 1
+                // The hybrid contract (VoiceHost.localAudioStart, the same on iOS): reply_request carries the
+                // turn as heard and whether it continues the previous one; reply_cancel how much was heard.
                 val hr = if (host) HostReplyModel(
-                    request = { id, messages, maxTokens -> emit(mapOf("kind" to "reply_request", "id" to id, "maxTokens" to maxTokens,
-                        "messages" to messages.map { (r, c) -> mapOf("role" to r, "content" to c) })) },
-                    cancelRequest = { id -> emit(mapOf("kind" to "reply_cancel", "id" to id)) }) else null
+                    request = { id, messages, maxTokens, text, continuation ->
+                        Log.i(TAG, "[bhbrain] reply_request id=$id msgs=${messages.size} continuation=$continuation hostMs=${System.currentTimeMillis()}")
+                        emit(mapOf("kind" to "reply_request", "id" to id, "maxTokens" to maxTokens, "text" to text,
+                            "continuation" to continuation, "messages" to messages.map { (r, c) -> mapOf("role" to r, "content" to c) })) },
+                    cancelRequest = { id, heardChars ->
+                        Log.i(TAG, "[bhbrain] reply_cancel id=$id heardChars=$heardChars hostMs=${System.currentTimeMillis()}")
+                        emit(if (heardChars != null) mapOf("kind" to "reply_cancel", "id" to id, "heardChars" to heardChars)
+                             else mapOf("kind" to "reply_cancel", "id" to id)) }) else null
                 hostReply = hr
                 var cfg = ConverseEngine.Config(llmPath = a.llm, supertonicDir = a.supertonic, sttDir = a.stt,
                     voice = o.voice ?: "M1", systemPrompt = o.systemPrompt, trimLeadingSilence = !keepLead,
                     // The server owns a house character's persona: send it the conversation only,
                     // unless the app passed a prompt of its own.
                     sendSystemPrompt = !host || !o.systemPrompt.isNullOrBlank(),
-                    replyModel = hr?.let { m -> { _: ConverseEngine.Config -> m } })
+                    replyModel = hr?.let { m -> { _: ConverseEngine.Config -> m } },
+                    refusalReply = o.refusalReply, heardSamples = { gen -> heardSamples(gen) })
                 if (o.maxSentences > 0) cfg = cfg.copy(maxSentences = o.maxSentences)
+                if (o.minSilenceMs > 0) cfg = cfg.copy(minSilenceMs = o.minSilenceMs)
+                injectFloor = if (o.injectAudio) Math.pow(10.0, o.injectNoiseDb / 20.0).toFloat() else 0f
+                if (o.injectAudio) micBypass = true
+                player()?.resetPlayout()        // the fed coordinate the heard position is counted on starts here
+                // A/B levers, a debuggable host only (`adb shell setprop`, 0 = the default):
+                // debug.bh.brain.ttsthreads, debug.bh.brain.firstwords, debug.bh.brain.clausechunks, debug.bh.brain.firstfloor.
+                fun lever(key: String) = if (debuggable) AvatarPlayer.devInt(key) else 0
+                lever("debug.bh.brain.ttsthreads").takeIf { it in 1..8 }?.let { cfg = cfg.copy(ttsThreads = it) }
+                lever("debug.bh.brain.firstwords").takeIf { it in 1..12 }?.let { cfg = cfg.copy(firstChunkMinWords = it) }
+                lever("debug.bh.brain.clausechunks").takeIf { it in 1..9 }?.let { cfg = cfg.copy(clauseChunks = it) }
+                // 1 = no floor (any first chunk of >= 2 words), N = a floor of N words.
+                lever("debug.bh.brain.firstfloor").takeIf { it in 1..20 }?.let { cfg = cfg.copy(firstChunkFloorWords = if (it == 1) 0 else it) }
                 val e = ConverseEngine.create(cfg) { kind, state, text -> onEngineEvent(kind, state, text) }
                 if (!running) { e.destroy(); return@Thread }
                 engine = e
                 pullThread = Thread({ pullLoop(e) }, "bh-brain-pull").also { it.start() }
-                if (o.enableMic) mic = openMic { buf, n -> onMic(buf, n) }
+                if (o.enableMic && !o.injectAudio) mic = openMic { buf, n -> onMic(buf, n) }
                 emit(mapOf("kind" to "ready"))
                 emit(mapOf("kind" to "state", "state" to e.state()))
             } catch (t: Throwable) {
@@ -109,6 +142,27 @@ internal class LocalConverseController(
         val s = e.state()
         if (s == ConverseEngine.STATE_THINKING || s == ConverseEngine.STATE_SPEAKING) bargePending = "text"
         e.pushText(text)
+    }
+
+    /** The hybrid brain: the character's own line, verbatim (localSpeakText). False with no brain running. */
+    fun speakText(text: String): Boolean {
+        val e = engine ?: return false
+        val s = e.state()
+        if (s == ConverseEngine.STATE_THINKING || s == ConverseEngine.STATE_SPEAKING) bargePending = "speak"
+        return e.speak(text)
+    }
+
+    // ---------------------------------------------------------------- what the person has heard
+    // Every sample offered to the player carries its position on the fed coordinate ([fed], 24 kHz,
+    // since start), and the player reports the position the DAC has played ([AvatarPlayer.heardFed]).
+    // A reply generation's heard samples = played - where its first sample was fed.
+    @Volatile private var fed = 0L
+    private val genFedStart = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
+    private fun heardSamples(gen: Int): Long? {
+        val start = genFedStart[gen] ?: return 0L
+        val p = player() ?: return null
+        return (p.heardFed - start).coerceAtLeast(0L)
     }
 
     /** replyMode "host": a piece of the reply to `reply_request` [id] (any thread). */
@@ -128,6 +182,13 @@ internal class LocalConverseController(
      * file's speech onset and speech end (first / last 10 ms block above -45 dBFS), so the
      * measurement can start its clock at the true end of the user's words.
      */
+    /** Adds the injector's noise floor ([injectFloor], uniform noise of that RMS) in place. */
+    private fun withFloor(x: FloatArray): FloatArray {
+        val f = injectFloor
+        if (f > 0f) { val a = f * 1.7320508f; for (i in x.indices) x[i] += (injectNoise.nextFloat() * 2f - 1f) * a }
+        return x
+    }
+
     fun injectWav(path: String, tag: String) {
         micBypass = true
         injectQueue.offer(path to tag)
@@ -140,7 +201,7 @@ internal class LocalConverseController(
             while (running) {
                 val job = injectQueue.poll()
                 if (job == null) {
-                    engine?.pushAudio(silence)
+                    engine?.pushAudio(withFloor(silence.copyOf()))
                     next += 32; SystemClock.sleep(maxOf(0L, next - SystemClock.elapsedRealtime()))
                     continue
                 }
@@ -155,7 +216,7 @@ internal class LocalConverseController(
                 next = SystemClock.elapsedRealtime()
                 while (off < pcm.size && running) {
                     val n = minOf(block, pcm.size - off)
-                    engine?.pushAudio(pcm.copyOfRange(off, off + n))
+                    engine?.pushAudio(withFloor(pcm.copyOfRange(off, off + n)))
                     off += n
                     next += n / 16
                     SystemClock.sleep(maxOf(0L, next - SystemClock.elapsedRealtime()))
@@ -213,9 +274,12 @@ internal class LocalConverseController(
                     if (firstOfReply) {
                         firstOfReply = false
                         p?.noteFirstByte()
+                        genFedStart[gen] = fed
+                        if (genFedStart.size > 16) genFedStart.keys.filter { it < gen - 8 }.forEach { genFedStart.remove(it) }
                         Log.i(TAG, "[bhbrain] first_offer gen=$gen hostMs=${System.currentTimeMillis()}")
                     }
-                    p?.offer(Resampler.floatToPcm16(buf, n))
+                    p?.offer(Resampler.floatToPcm16(buf, n), fed)
+                    fed += n
                     val now = SystemClock.elapsedRealtime()
                     if (now - lastBotLevelAt >= LEVEL_MS) {
                         lastBotLevelAt = now

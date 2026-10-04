@@ -312,7 +312,9 @@ cloud OpenAI-Realtime mode needs neither — it's pure Swift.
 ## Android LOCAL mode (the on-device brain)
 
 `localAudioStart` works on Android (arm64, Android 10+): speech in, the reply and the voice
-all run on the phone, with no cloud and no OpenAI key. The Dart side is the same
+all run on the phone, with no cloud and no OpenAI key. **Opt-in at build time** (see
+[Opting in](#opting-in-the-android-brain-is-built-only-for-an-app-that-asks)): an app that does not
+ask carries none of the brain's native code. The Dart side is the same
 `LocalConverseTransport` that drives Apple's libconverse, with the same channel names and events,
 so an app that runs LOCAL mode on iPhone runs it on a Galaxy unchanged.
 
@@ -376,8 +378,9 @@ Two paths come from Dart (the same two Apple takes); the speech-in models sit be
 | Moonshine tiny, int8 | sherpa-onnx `asr-models/sherpa-onnx-moonshine-tiny-en-int8` | 124 MB | MIT |
 | silero VAD | sherpa-onnx `asr-models/silero_vad.onnx` | 0.6 MB | MIT |
 
-The app adds **26.5 MB** of native code (`libsherpa-onnx-jni.so` 23.6 MB, ONNX Runtime linked in
-statically, and `libbhbrain.so` 3.0 MB, llama.cpp). Nothing in the shipped path is GPL: sherpa-onnx is
+LOCAL mode adds **26.5 MB** of native code (`libsherpa-onnx-jni.so` 23.6 MB, ONNX Runtime linked in
+statically, and `libbhbrain.so` 3.0 MB, llama.cpp); the hybrid brain alone adds 23.6 MB (9.5 MB
+compressed) and no llama.cpp. Nothing in the shipped path is GPL: sherpa-onnx is
 built from source with its espeak-ng dependency replaced by a no-op stand-in
 (`android/src/main/cpp/no-espeak/`, see its README); Supertonic does not phonemize.
 
@@ -430,11 +433,32 @@ Avatar health while speech-to-text and Supertonic ran: 24.9 fps (Essence 2) and 
 (Expression 2) median delivered, speech coverage 94 % / 89 % median, app PSS peak 1.9 / 1.3 GB,
 thermal status 0-1. Brain load (Supertonic + speech-to-text + VAD) 1.3-2.2 s.
 
+### Opting in: the Android brain is built only for an app that asks
+
+The brain's native code is compiled from pinned sources by the plugin's CMake build, and only when
+the app's own `android/gradle.properties` asks for it:
+
+```properties
+# the hybrid brain (replyMode 'host'): speech in + Supertonic out — libsherpa-onnx-jni.so
+bithuman.hybridBrain=true
+# LOCAL mode's on-device LLM as well (llama.cpp, libbhbrain.so); implies hybridBrain
+bithuman.localLlm=true
+```
+
+With neither (the default) there is no CMake run, no sherpa-onnx / ONNX Runtime / llama.cpp
+download or compile and no brain library in the APK: `isLocalModeSupported` answers false and
+`localAudioStart` fails with `unsupported`, naming the property. `bithuman.hybridBrain` alone builds
+no llama.cpp: `localAudioStart(replyMode: 'host')` works, a `.gguf` reply (`replyMode: 'local'`)
+fails with `unsupported` naming `bithuman.localLlm`. The avatar engines and the cloud transports do
+not depend on either.
+
 ### Build notes
 
-The Android native build compiles llama.cpp (pinned commit) and sherpa-onnx v1.13.8 from source
-through CMake (NDK + CMake 3.22.1); the first build takes a few minutes. Offline builds:
-`BH_LLAMA_CPP_DIR=/path/to/llama.cpp` and `BH_SHERPA_ONNX_DIR=/path/to/sherpa-onnx@v1.13.8`.
+The Android native build (when opted in) compiles sherpa-onnx v1.13.8 — and with `bithuman.localLlm`
+llama.cpp (pinned commit) — from source through CMake (NDK + CMake 3.22.1); the first build takes a
+few minutes. Offline builds: `BH_SHERPA_ONNX_DIR=/path/to/sherpa-onnx@v1.13.8`,
+`BH_ORT_STATIC_DIR=/path/to/onnxruntime-android-arm64-v8a-static_lib-1.28.2` and
+`BH_LLAMA_CPP_DIR=/path/to/llama.cpp`.
 The ISA baseline is armv8.2-a + dotprod + fp16 (no i8mm assumed); on a Galaxy S25+ that costs
 nothing measurable against an armv8.7-a build (prefill 237 vs 251 tok/s, generation 69 vs 66).
 

@@ -364,8 +364,11 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 val path = call.argument<String>("path")
                 if (ctl == null || path.isNullOrBlank()) result.error("bad_args", "no local session or no path", null)
                 else if (!debuggableHost()) result.error("unsupported", "localInjectWav needs a debuggable app", null)
-                else { ctl.injectWav(path, call.argument<String>("tag") ?: ""); result.success(null) }
+                else { ctl.injectWav(path, call.argument<String>("tag") ?: ""); result.success(true) }
             }
+            // The hybrid brain: the character's own line, verbatim (the server's greeting) — no
+            // reply_request, no user turn. False with no local session running.
+            "localSpeakText" -> result.success(activeLocal()?.speakText(call.argument<String>("text") ?: "") ?: false)
 
             // --- Apple-only surface, answered honestly ---
             "pipAvailable", "setDisplayMode" -> result.success(false)
@@ -761,7 +764,9 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         val gguf = call.argument<String>("ggufPath")
         if (replyMode != "host" && gguf.isNullOrBlank()) return result.error("bad_args", "ggufPath is required", null)
         if (!LocalBrainSupport.available()) return result.error("unsupported",
-            "the on-device brain needs an arm64 Android 10+ device: ${LocalBrainSupport.reason}", null)
+            "the on-device brain cannot run here: ${LocalBrainSupport.reason}", null)
+        if (replyMode != "host" && !LocalBrainSupport.llmAvailable()) return result.error("unsupported",
+            "LOCAL mode's on-device LLM cannot run here: ${LocalBrainSupport.llmReason}", null)
         stopLocal(s); stopMic(s)          // local mode owns the microphone
         // Registered BEFORE returning: Dart subscribes right after this call completes.
         val ch = EventChannel(messenger, "ai.bithuman.avatar.converse/${s.entry.id()}")
@@ -793,6 +798,11 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             replyMode = replyMode,
             maxSentences = call.argument<Number>("maxSentences")?.toInt() ?: 0,
             enableMic = call.argument<Boolean>("enableMic") ?: true,
+            minSilenceMs = call.argument<Number>("minSilenceMs")?.toInt() ?: 0,
+            refusalReply = call.argument<String>("refusalReply") ?: "",
+            // Testing only, and only in a debuggable app: the microphone is replaced by localInjectWav.
+            injectAudio = debuggableHost() && (call.argument<Boolean>("injectAudio") ?: false),
+            injectNoiseDb = call.argument<Number>("injectNoiseDb")?.toDouble() ?: -65.0,
         ))
         result.success(null)
     }

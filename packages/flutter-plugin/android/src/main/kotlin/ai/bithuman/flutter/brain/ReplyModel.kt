@@ -23,6 +23,14 @@ internal interface ReplyModel {
     fun generate(messages: List<Pair<String, String>>, maxTokens: Int, temperature: Float,
                  onText: (String) -> Boolean): Int
 
+    /**
+     * [generate] for a user turn the engine describes ([ReplyTurn]: the turn as heard, whether it
+     * continues the previous one). A model that keeps no conversation of its own ([HostReplyModel])
+     * forwards it; the default ignores it.
+     */
+    fun generate(turn: ReplyTurn, messages: List<Pair<String, String>>, maxTokens: Int, temperature: Float,
+                 onText: (String) -> Boolean): Int = generate(messages, maxTokens, temperature, onText)
+
     /** Stop a running [generate] as soon as possible. Any thread. */
     fun cancel()
 
@@ -34,3 +42,14 @@ internal interface ReplyModel {
 
     fun close()
 }
+
+/**
+ * One user turn as the engine hands it to the reply stage: [text] as heard (the WHOLE utterance when
+ * [continuation] — the user went on after a pause and the brain cancelled the reply to the first part).
+ * [hostId]: the id a [HostReplyModel] gave the request (-1 = none), so the engine can name it in a
+ * later `reply_cancel`.
+ */
+internal class ReplyTurn(val text: String, val continuation: Boolean) {
+    @Volatile var hostId = -1
+}
+

@@ -312,10 +312,16 @@ class Essence2Engine(
     /** Caller holds the monitor. The driver walk starts where the idle cursor stands. */
     private fun startUtterance() {
         uttBase += uttFed; uttFed = 0; delivered = 0; closed = false
+        val t0 = System.currentTimeMillis()
         clock.reset(uttBase) { avatar.resetAudio(startFrame = synchronized(idleLock) { cursor }) }
         utterances++
         leadPending = true
+        uttStartAt = t0; firstRenderLogged = false
+        Log.i("e2onset", "UTT-START utt=$utterances resetAudioMs=${System.currentTimeMillis() - t0} hostMs=$t0")
     }
+    /** `e2onset` lines: an utterance's start, its first rendered frame, and when its lead was met. */
+    @Volatile private var uttStartAt = 0L
+    @Volatile private var firstRenderLogged = false
 
     @Synchronized override fun feed(f16k: FloatArray) {
         if (f16k.isEmpty()) return
@@ -380,6 +386,12 @@ class Essence2Engine(
                         // by every frame that was skipped.
                         repeat(PlayoutClock.idleSteps(k, delivered, nt)) { stepIdle() }
                         delivered = PlayoutClock.nextDelivered(k, delivered); framesTotal++
+                        if (!firstRenderLogged) {
+                            firstRenderLogged = true
+                            val now = System.currentTimeMillis()
+                            Log.i("e2onset", "FIRST-RENDER utt=$utterances sinceStartMs=${now - uttStartAt} pullMs=${(System.nanoTime() - t0) / 1_000_000} " +
+                                "queued=${avatar.available()} hostMs=$now")
+                        }
                         a
                     }
                 }
@@ -409,6 +421,8 @@ class Essence2Engine(
             if (ready.size >= LEAD && (queued >= 8 || closed || !open)) leadPending = false
             else if (ready.size >= DEPTH || (closed && !open)) leadPending = false
             else return false
+            val now = System.currentTimeMillis()
+            Log.i("e2onset", "LEAD-MET utt=$utterances sinceStartMs=${now - uttStartAt} ready=${ready.size} queued=$queued hostMs=$now")
         }
         return true
     }

@@ -11,6 +11,23 @@
   the bounded history, clause chunking, emoji/markdown stripping, barge-in, and an error reply
   when the host fails before a word was said. The persona is the server's: the system prompt is
   sent only when the app passes one. `maxSentences` caps a spoken reply.
+* **Android brain is OPT-IN at build time:** `bithuman.hybridBrain=true` in the app's
+  `android/gradle.properties` builds speech in + Supertonic out (sherpa-onnx, ONNX Runtime static);
+  `bithuman.localLlm=true` adds llama.cpp for LOCAL mode's on-device LLM. An app that sets neither
+  downloads and compiles none of it and ships no brain library; `isLocalModeSupported` is false and
+  `localAudioStart` says which property to set. The hybrid build no longer compiles llama.cpp (its one
+  built target is an empty `libbhhybrid.so` that carries `libsherpa-onnx-jni.so` into the AAR).
+* **Android brain, first audio sooner:** the first two voice chunks of a reply may end at a clause of 3
+  words (was: the first chunk, 4 words) — libconverse's rule on Apple. Supertonic may use full-precision
+  graphs (`<graph>.onnx` beside or instead of sherpa-onnx's `<graph>.int8.onnx`); on a Galaxy Z Flip5 they
+  were not faster, so the int8 export at 2 threads stays the default (4 threads were slower under the
+  avatar). The FIRST chunk holds at least 4 words (`ConverseEngine.FIRST_CHUNK_FLOOR_WORDS`): a 1-3 word
+  opening ("Hi there!", "Oh heck yes,") synthesizes no faster on the phone and is often too little audio
+  (~1.0-1.3 s) to start either avatar engine, so it was heard seconds later, not sooner.
+* **Android, the unified hybrid API:** `localAudioStart` honours `minSilenceMs`, `refusalReply` and (debuggable
+  apps) `injectAudio` / `injectNoiseDb`; `localSpeakText` speaks the server's opening line verbatim;
+  `reply_request` carries `text` / `continuation` and `reply_cancel` `heardChars`, counted on what the player
+  has actually played.
 * **Android brain:** the speech-to-text model is picked by its directory (`sttDir`):
   Moonshine (both sherpa-onnx exports), Whisper, NVIDIA Parakeet / NeMo transducers and NeMo CTC
   (`brain/SpeechIn.kt`). The VAD endpoint is logged apart from the decode.

@@ -71,29 +71,51 @@ internal object TextShaping {
         cp in 0xE0020..0xE007F || cp == 0x3030 || cp == 0x303D || cp == 0x3297 || cp == 0x3299
 
     /**
-     * Streams model text in, emits speakable chunks out. The FIRST chunk is cut early
-     * (a clause of >= [firstMinWords] words ending in , ; :) so the voice starts while the
-     * model is still writing; later chunks are whole sentences unless a clause runs long.
+     * Streams model text in, emits speakable chunks out. The first [clauseChunks] chunks are cut
+     * early (a clause of >= [firstMinWords] words ending in , ; : —) so the voice starts while the
+     * model is still writing and the second chunk is ready before the first has played; later
+     * chunks are whole sentences unless a clause runs long. Defaults = libconverse on Apple.
      */
-    class Chunker(private val firstMinWords: Int = 4, private val longClauseChars: Int = 90) {
+    class Chunker(private val firstMinWords: Int = 3, private val longClauseChars: Int = 90,
+                  private val clauseChunks: Int = 2,
+                  /**
+                   * The FIRST chunk is never cut (at a clause or a sentence end) before it holds this many
+                   * words; 0 = no floor. Android: the avatar engines start a reply's mouth only once they
+                   * hold ~1.3 s of its audio, and Supertonic voices a 1-3 word line in about the time of
+                   * a 6-word one, so such a first chunk is heard LATER, not sooner (see ConverseEngine).
+                   */
+                  private val firstFloorWords: Int = 0) {
         private val buf = StringBuilder()
         private var emitted = 0
+        /** Characters of the pushed text consumed by the chunks cut so far (where the next chunk starts). */
+        private var consumed = 0
 
-        fun push(text: String): List<String> {
+        fun push(text: String): List<String> = pushWithEnds(text).map { it.first }
+
+        /**
+         * [push], each chunk with the position in the WHOLE pushed text (characters, as streamed) it ends
+         * at — what a host counts heard characters in (reply_cancel `heardChars`).
+         */
+        fun pushWithEnds(text: String): List<Pair<String, Int>> {
             buf.append(text)
-            val out = ArrayList<String>()
+            val out = ArrayList<Pair<String, Int>>()
             while (true) {
                 val cut = findCut() ?: break
                 val chunk = buf.substring(0, cut).trim()
                 buf.delete(0, cut)
-                if (chunk.isNotEmpty()) { out.add(chunk); emitted++ }
+                consumed += cut
+                if (chunk.isNotEmpty()) { out.add(chunk to consumed); emitted++ }
             }
             return out
         }
 
-        fun flush(): String? {
-            val c = buf.toString().trim(); buf.setLength(0)
-            return if (c.isEmpty()) null else c.also { emitted++ }
+        fun flush(): String? = flushWithEnd()?.first
+
+        fun flushWithEnd(): Pair<String, Int>? {
+            val raw = buf.toString(); buf.setLength(0)
+            val c = raw.trim()
+            consumed += raw.trimEnd().length
+            return if (c.isEmpty()) null else (c to consumed).also { emitted++ }
         }
 
         private fun findCut(): Int? {
@@ -104,12 +126,14 @@ internal object TextShaping {
                 // A terminator counts only once the next char proves it is not "3.5" / "Mr." mid-word.
                 if ((ch == '.' || ch == '!' || ch == '?' || ch == '\n') && next != null && (next.isWhitespace() || next == '"')) {
                     if (ch == '.' && isAbbrev(s, i)) continue
-                    if (words(s, i) >= 2 || ch == '\n') return i + 1
+                    if (ch == '\n') return i + 1
+                    val w = words(s, i)
+                    if (w >= 2 && (emitted > 0 || w >= firstFloorWords)) return i + 1
                 }
                 if ((ch == ',' || ch == ';' || ch == ':' || ch == '—') && next != null && next.isWhitespace()) {
                     val w = words(s, i)
-                    if (emitted == 0 && w >= firstMinWords) return i + 1
-                    if (i >= longClauseChars) return i + 1
+                    if (emitted < clauseChunks && w >= firstMinWords && (emitted > 0 || w >= firstFloorWords)) return i + 1
+                    if (i >= longClauseChars && (emitted > 0 || w >= firstFloorWords)) return i + 1
                 }
             }
             return null
