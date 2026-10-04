@@ -90,13 +90,15 @@ LIBCONVERSE_REPO="${LIBCONVERSE_REPO:-bithuman-models}"
 # set: $BITHUMAN_DOWNLOADS_TOKEN (developers and release hosts with access; never a customer; e.g.
 # export BITHUMAN_DOWNLOADS_TOKEN="$(cat ~/.config/bithuman-release/downloads.token)"). The token goes to curl through a
 # config on stdin, never on argv, and is never printed. Without a token nothing private is fetched.
+# The private base defaults to https://downloads.bithuman.ai on its own: pointing BITHUMAN_DOWNLOADS_BASE
+# at a mirror for the public bytes never sends the token to that mirror.
 #   BITHUMAN_REQUIRE_LOCAL_BRAIN=1   a build that must ship the on-device brain (a Live app release
 #                                    build) FAILS when libconverse cannot be staged, instead of
 #                                    building without it.
-# (Through 2.6.36 the public bytes came from GitHub Releases of the tap and the private ones from
+# (Through 2.6.37 the public bytes came from GitHub Releases of the tap and the private ones from
 # `gh release download`; the downloads host serves the identical files, verified by sha256.)
 BITHUMAN_DOWNLOADS_BASE="${BITHUMAN_DOWNLOADS_BASE:-https://downloads.bithuman.ai}"
-BITHUMAN_DOWNLOADS_PRIVATE_BASE="${BITHUMAN_DOWNLOADS_PRIVATE_BASE:-$BITHUMAN_DOWNLOADS_BASE}"
+BITHUMAN_DOWNLOADS_PRIVATE_BASE="${BITHUMAN_DOWNLOADS_PRIVATE_BASE:-https://downloads.bithuman.ai}"
 TAP_DOWNLOADS="${BITHUMAN_DOWNLOADS_BASE%/}/homebrew-bithuman"
 have_private() {
     [ -n "$BITHUMAN_DOWNLOADS_PRIVATE_BASE" ] && [ -n "${BITHUMAN_DOWNLOADS_TOKEN:-}" ]
