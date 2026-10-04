@@ -209,6 +209,9 @@ Pod::Spec.new do |s|
   # against an older vendored brain (the split part is then its own turn).
   if converse_fw
     hdr = Dir.glob(File.join(__dir__, 'Frameworks/libconverse.xcframework/*/Headers/bithuman/libconverse.h')).first
+    # A brain with the HOST voice (bc_session_set_host_tts) can speak with an
+    # Apple system voice; an older one falls back to its built-in voice.
+    conds << 'CONVERSE_HOST_TTS' if hdr && File.read(hdr).include?('bc_session_set_host_tts')
     conds << 'CONVERSE_PUSH_EX' if hdr && File.read(hdr).include?('bc_session_push_text_ex')
   end
   pod_xcconfig['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = conds.join(' ')

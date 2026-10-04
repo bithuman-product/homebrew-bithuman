@@ -315,6 +315,9 @@ final class LocalConverseController: @unchecked Sendable {
         converse.pushText(t)
     }
 
+    /// The voice speaking in this session (ConverseSession.voiceInfo).
+    var voiceInfo: [String: Any] { converse.voiceInfo }
+
     func stop() {
         micCont.finish()
         io?.onMicTap = nil
