@@ -15,6 +15,10 @@ macOS now refuse an engine name they used to replace with Expression 2.
 
 ### Fixed and added
 
+* **Android, Essence 2: a cached private avatar opens only for the account it was downloaded for** (`essence2-android`
+  0.9.4, a security patch). Another API secret on the same phone gets the refusal a download would (`404 Agent not
+  found`). After the update, the first open of each cached avatar asks bitHuman once (nothing is downloaded again), so
+  that open needs the network. Engine, rendering and billing are unchanged.
 * **Android, Expression 2: an installed avatar picks up updates** (`expression2-android` 0.6.0). Opening an
   avatar already on the phone returns at once and checks for a newer published version in the background, at most
   once an hour; a changed file (for example a repaired idle clip) is installed beside the old one and used from the
