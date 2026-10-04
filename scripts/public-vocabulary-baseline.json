@@ -61,6 +61,18 @@
         "why": "a DATED changelog entry (history, 2026-07) that recorded the enterprise-only tier under its legacy name as cloud-only at the time. Owner ruling 2026-09-11: enterprise-only, ad hoc, no public surface names it -- every forward-looking line is gone (protocol, registry, Dart mirror, examples, design doc); a changelog is a contemporaneous record and rewriting it falsifies the record, so this ONE historical mention stays pinned at 1."
       }
     },
+    "packages/flutter-plugin/android/src/main/kotlin/ai/bithuman/flutter/EntitlementWindow.kt": {
+      "V9": {
+        "n": 1,
+        "why": "the platform door's query PARAMETER NAME, not prose: the Android Essence 2 store's member door is `/v1/agent/<code>/model/download?model=essence-2&member=android_store.v1.json&<V9>=android`, the URL essence2-android's MeteredDoorResolver fetches from, and the entitlement window must ask exactly that door (PR #202 round 3). Renaming it is a platform API change (public-api-service), not a text edit. One occurrence: EntitlementWindow.storeDoor's URL."
+      }
+    },
+    "packages/flutter-plugin/android/src/test/kotlin/ai/bithuman/flutter/EntitlementWindowTest.kt": {
+      "V9": {
+        "n": 1,
+        "why": "the platform door's query PARAMETER NAME, not prose: the Android Essence 2 store's member door is `/v1/agent/<code>/model/download?model=essence-2&member=android_store.v1.json&<V9>=android`, the URL essence2-android's MeteredDoorResolver fetches from, and the entitlement window must ask exactly that door (PR #202 round 3). Renaming it is a platform API change (public-api-service), not a text edit. One occurrence: the test asserts storeDoor's exact URL."
+      }
+    },
     "packages/flutter-plugin/docs/TRANSPORT.md": {
       "V6": {
         "n": 1,
