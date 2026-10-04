@@ -5,7 +5,7 @@
 //
 // Install and the current version: https://docs.bithuman.ai/platforms/ios#install
 // Mac apps:  https://docs.bithuman.ai/platforms/macos
-// Examples:  https://github.com/bithuman-product/bithuman-examples/tree/main/swift
+// Examples:  https://gitlab.com/bithuman/sdk/bithuman-examples/-/tree/main/swift
 // Changes:   https://docs.bithuman.ai/changelog
 // Sessions need an API secret (Creator plan or higher from 12 October 2026) and bill
 // active session time: https://docs.bithuman.ai/pricing
