@@ -2,6 +2,19 @@
 
 ### Fixed
 
+* **Android: off screen, the avatar waits instead of polling (battery).** The plugin now follows the app's process
+  lifecycle (`ProcessLifecycleOwner`, ON_START / ON_STOP). While the app is in the background and the avatar has
+  nothing to say, the player's threads (producer, feeder, writer, presenter) and Essence 2's render thread wait on a
+  monitor, with no timer and no polling, until the app is visible again or the session hands over audio. A reply
+  that arrives in the background still plays. Independently, an idle frame or an Essence 2 pull that the engine
+  refuses is asked for again after 2, 4, ... 256 ms (on screen only after a second of refusals, so a frame that is
+  just late keeps the 2 ms cadence). A frame or the app coming back resets the wait. Through 2.6.36 these loops
+  re-asked every 1-4 ms for as long as the app stayed in the background: with the SDKs' 60 s background end
+  (`essence2-android` 0.9.5, `expression2-android` 0.6.1) every ask is refused, about 500 wake-ups a second from
+  the producer alone. Off screen, if the engine gives no frame for 3 s while a reply waits, the reply waits for the
+  app to come back. `bhpark` log lines record each park and resume, and `parks=` / `backoffWaits=` /
+  `presenterParks=` appear on `PROD`. iOS / macOS: no change needed. The display clock ticks every 40 / 50 ms and
+  each tick ends on the first refused pull.
 * **Android: the presenter's starve count ignores sub-frame publish gaps.** A starve (`bhstarve`, `starve=` on the
   `PROD` line) now counts only when the ready-frame queue stays empty for at least 50 ms
   (`StarveCounter.MIN_HOLD_MS`) before frames come back. `expression2-android` 0.6.0 publishes a block frame by frame,
