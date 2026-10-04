@@ -1,7 +1,7 @@
 # The examples moved — this directory is intentionally almost empty
 
 **All bitHuman examples now live in
-[github.com/bithuman-product/bithuman-examples](https://github.com/bithuman-product/bithuman-examples).**
+[gitlab.com/bithuman/sdk/bithuman-examples](https://gitlab.com/bithuman/sdk/bithuman-examples).**
 
 This copy was a byte-identical duplicate of that repository, kept "so existing links keep
 working". It also kept its defects working: a 20 fps engine paced on a 25 fps grid sat here
@@ -14,13 +14,13 @@ clone succeeded and the directory is not here. That is this change, not a broken
 Clone the examples repository instead:
 
 ```bash
-git clone https://github.com/bithuman-product/bithuman-examples.git
+git clone https://gitlab.com/bithuman/sdk/bithuman-examples.git
 cd bithuman-examples
 ```
 
 ## Where each thing went
 
-Most paths are unchanged under the new root. Two moved, so check these if a path does not
+Most paths are unchanged under the new root. One moved, so check it if a path does not
 resolve:
 
 | was, here | is, in `bithuman-examples` |
@@ -29,7 +29,7 @@ resolve:
 | `Examples/android/…` | `android/…` |
 | `Examples/integrations/…` | `integrations/…` |
 | `Examples/python/…` | `python/…` |
-| **`Examples/rest-api/…`** | **`api/rest-api/…`** |
+| `Examples/rest-api/…` | `rest-api/…` |
 | **`Examples/quickstart/…`** | **`python/quickstart/…`** |
 
 Nothing in this repository builds from or resolves into `Examples/` — the Swift package's

@@ -15,7 +15,7 @@ Read facts from the docs, not from memory or from this file. The docs are genera
 
 | The user wants | Use | Docs | Example |
 |---|---|---|---|
-| An iPhone or iPad app | the Swift package, https://gitlab.com/bithuman/sdk/bithuman-swift | https://docs.bithuman.ai/platforms/ios | https://github.com/bithuman-product/bithuman-examples/tree/main/swift |
+| An iPhone or iPad app | the Swift package, https://gitlab.com/bithuman/sdk/bithuman-swift | https://docs.bithuman.ai/platforms/ios | https://gitlab.com/bithuman/sdk/bithuman-examples/-/tree/main/swift |
 | A Mac app | the same Swift package | https://docs.bithuman.ai/platforms/macos | `swift/macos-expression2` in bithuman-examples |
 | A Flutter app (Android, iOS, macOS) | `bithuman: ^3.0.0` from pub.dev | https://docs.bithuman.ai/platforms/flutter | on the docs page |
 | An Android app | maven.bithuman.ai (bitHuman's Maven repository): `ai.bithuman:bithuman-android` 1.0 with `ai.bithuman:bithuman-bom` | https://docs.bithuman.ai/platforms/android | `android/` in bithuman-examples |
@@ -25,7 +25,7 @@ Read facts from the docs, not from memory or from this file. The docs are genera
 | An avatar on a web page | one iframe | https://docs.bithuman.ai/platforms/web | — |
 | Any backend, over HTTPS | the REST API | https://docs.bithuman.ai/platforms/rest | on the docs page |
 
-Examples live in https://github.com/bithuman-product/bithuman-examples. This repository's `Examples/` holds only a README that points there.
+Examples live in https://gitlab.com/bithuman/sdk/bithuman-examples. This repository's `Examples/` holds only a README that points there.
 
 ## Swift package 2.x (critical fixes only)
 
