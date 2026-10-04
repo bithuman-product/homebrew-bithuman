@@ -870,6 +870,54 @@ void main() {
         expect(entitlementGate.markFile(tmp.path, pub, null).existsSync(), isTrue);
       });
 
+      // PR #202 round-3 review LOW: the owner makes the avatar private, the container door says "not yours",
+      // and the member door then does not answer (a 5xx, the shared no-key rate limit, a timeout). The
+      // container's no stands: the marks are dropped as they would be on the container's no alone (fail
+      // closed), and the refusal still says "could not confirm" (the avatar may be public again next time).
+      test('the container\'s no stands when the member door does not answer: every mark is dropped', () async {
+        final dir = install(pub);
+        useGate();
+        const x = 'https://example.invalid/x.avatar', t = 'https://example.invalid/x.tar.gz';
+        final own = entitlementGate.markFile(tmp.path, pub, _other);
+        final public = entitlementGate.markFile(tmp.path, pub, null);
+        // While it is public: B's own mark (24 h), and a PUBLIC mark from a request with no key (7 days).
+        expect(await downloadExpression2Avatar(pub, x, tmp.path, apiSecret: _other), dir);
+        expect(await downloadExpression2Agent(pub, t, tmp.path), dir);
+        expect(own.existsSync() && public.existsSync(), isTrue);
+
+        // Made private, and the member door is down. B's open within 24 h is at once, and the door is asked in
+        // the background: container 404 NOT_FOUND, member 503.
+        memberSays = 'down';
+        now = now.add(const Duration(hours: 1));
+        expect(await downloadExpression2Avatar(pub, x, tmp.path, apiSecret: _other), dir);
+        await entitlementGate.checking(tmp.path, pub, _other);
+        expect(own.existsSync(), isFalse, reason: 'B\'s mark follows the container\'s NOT_FOUND');
+        expect(public.existsSync(), isFalse, reason: 'and so does the public mark (a 404 to a key: not public now)');
+        expect(await entitlementGate.mayOpenWithoutDoor(tmp.path, pub, _other), isFalse);
+        expect(await entitlementGate.mayOpenWithoutDoor(tmp.path, pub, null), isFalse);
+        await expectLater(downloadExpression2Avatar(pub, x, tmp.path, apiSecret: _other), _refused(false),
+            reason: 'asked again: still not confirmed, worded as could-not-confirm (not a refusal)');
+
+        // With no key: the public mark earned again, then the container's 401 and the member door's 503 drop it.
+        memberSays = 'public';
+        expect(await downloadExpression2Agent(pub, t, tmp.path), dir);
+        expect(public.existsSync(), isTrue);
+        memberSays = 'down';
+        now = now.add(const Duration(days: 2));
+        expect(await downloadExpression2Agent(pub, t, tmp.path), dir, reason: 'a fresh public mark opens at once');
+        await entitlementGate.checking(tmp.path, pub, null);
+        expect(public.existsSync(), isFalse, reason: 'the container\'s 401 to no key stands');
+        expect(await entitlementGate.mayOpenWithoutDoor(tmp.path, pub, null), isFalse);
+
+        // The gate's own answer: the container's no, carrying the member door's no-answer for the wording.
+        final a = await entitlementGate.askEntitled(containerDoor(pub, 'expression-2'), _other,
+            publicDoor: memberDoor(pub, 'expression-2'));
+        expect(a.denied, isTrue);
+        expect(a.status, 404);
+        expect(a.memberUnanswered?.status, 503);
+        expect(entitlementGate.refusal('t', a, kept: true).refused, isFalse);
+      });
+
       test('the owner\'s yes never asks the member door; a gate on another door has none (documented)', () async {
         install(pub);
         useGate();

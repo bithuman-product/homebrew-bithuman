@@ -73,7 +73,10 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     /** The owner's 24 h offline window over the SDK stores' entitlement marks (2.6.36; EntitlementWindow.kt). */
     private val entitlement by lazy { EntitlementWindow(java.io.File(context.filesDir, "bithuman/door-auth")) }
     /** Whose credential an engine is created with; sign-out cancels the loads still running (LoadCredentials.kt). */
-    private val credentials = LoadCredentials()
+    private val credentials = LoadCredentials(clearGlobals = {
+        ai.bithuman.expression2.Expression2Credential.set(null)
+        Essence2Credential.set(null)
+    })
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
     private val main = Handler(Looper.getMainLooper())
@@ -350,12 +353,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             // still running is cancelled (`load_cancelled`), and none begun before this creates an engine with
             // its credential (LoadCredentials.kt). Never waits for an engine being created.
             "clearCredentials" -> {
-                credentials.clear(
-                    cancelLoads = { loadEvents.cancelAll() },
-                    clearGlobals = {
-                        ai.bithuman.expression2.Expression2Credential.set(null)
-                        Essence2Credential.set(null)
-                    })
+                credentials.clear(cancelLoads = { loadEvents.cancelAll() })
                 result.success(null)
             }
             "unpackModelContainer" -> result.error("unsupported",

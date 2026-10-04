@@ -237,6 +237,45 @@ class EntitlementWindowTest {
         assertEquals(before + 1, synchronized(asked) { targets.size })
     }
 
+    // PR #202 round-3 review LOW: the avatar was public (the other account earned a record through the member
+    // door), its owner made it private, and the member door then does not answer (5xx, 429, a timeout). The
+    // container's NOT_FOUND stands: the record is dropped (fail closed), and the load says unconfirmed.
+    @Test
+    fun theContainersNoStandsWhenTheMemberDoorDoesNotAnswerAndTheRecordIsDropped() {
+        memberRule = { Triple(200, """{"success": true, "data": {"url": "https://example.invalid/m"}}""", null) }
+        window(member = true).admit(code, "expression-2", other)
+        assertTrue(window(member = true).fresh(code, "expression-2", other))
+        for (down in listOf(Triple(503, "", null), Triple(429, "", null))) {
+            memberRule = { down }
+            val a = window(member = true).renew(code, "expression-2", other)
+            assertTrue("the container's NOT_FOUND stands ($a)", a.denied)
+            assertEquals(404, a.status)
+            assertEquals(down.first, a.memberUnanswered?.status)
+            assertFalse("the record follows the container's no", window(member = true).markFile(code, "expression-2", other).exists())
+            assertFalse(window(member = true).fresh(code, "expression-2", other))
+            // Earn it again for the next round (the member door says yes once more).
+            memberRule = { Triple(200, "{}", null) }
+            window(member = true).admit(code, "expression-2", other)
+        }
+        // A fresh record's background check takes it away too, and the next load is unconfirmed (not refused).
+        memberRule = { Triple(503, "", null) }
+        window(member = true).admit(code, "expression-2", other)   // fresh: at once, the ask is in the background
+        background.forEach { it.run() }
+        assertFalse(window(member = true).fresh(code, "expression-2", other))
+        refused(false) { window(member = true).admit(code, "expression-2", other) }
+        // The member door unreachable (a dead port: a timeout or refused connection) is the same.
+        memberRule = { Triple(200, "{}", null) }
+        window(member = true).admit(code, "expression-2", other)
+        val unreachable = EntitlementWindow(dir, clock = { now },
+            door = { c, m -> URL("http://127.0.0.1:${server.localPort}/v1/agent/$c/model/download?model=$m&redirect=false") },
+            timeoutMs = 3_000, background = { r -> background += r },
+            publicDoor = { c, m -> URL("http://127.0.0.1:$dead/v1/agent/$c/model/download?model=$m&member=catalog&redirect=false") })
+        val a = unreachable.renew(code, "expression-2", other)
+        assertTrue(a.denied)
+        assertTrue("the member door's no-answer rides along ($a)", a.memberUnanswered.let { it != null && it.status == null })
+        assertFalse(window(member = true).fresh(code, "expression-2", other))
+    }
+
     @Test
     fun theOwnersYesNeverAsksTheMemberDoorAndAWindowOnAnotherDoorHasNone() {
         memberRule = { Triple(200, "{}", null) }

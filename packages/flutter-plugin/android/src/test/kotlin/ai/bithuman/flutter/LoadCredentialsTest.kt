@@ -16,6 +16,7 @@ package ai.bithuman.flutter
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -26,7 +27,7 @@ class LoadCredentialsTest {
     @Volatile private var global: String? = null
     private val steps = ArrayList<String>()
     private val closed = ArrayList<String>()
-    private val credentials = LoadCredentials()
+    private val credentials = LoadCredentials(clearGlobals = { global = null })
 
     private class Refusal : Exception("the window refused")
 
@@ -36,11 +37,12 @@ class LoadCredentialsTest {
         gen: Long = credentials.begin(),
         admit: (String) -> Unit = {},
         duringFetch: () -> Unit = {},
+        beforeSetWrites: () -> Unit = {},
         duringCreate: () -> Unit = {},
     ): String = loadInOrder("A99LTC2401", "expression-2", secret, gen, credentials,
         admit = { _, _, s -> synchronized(steps) { steps += "admit:$s" }; admit(s) },
         fetch = { s -> synchronized(steps) { steps += "fetch:$s" }; duringFetch(); "model-of-$s" },
-        setCredential = { s -> synchronized(steps) { steps += "set:$s" }; global = s },
+        setCredential = { s -> synchronized(steps) { steps += "set:$s" }; beforeSetWrites(); global = s },
         // The engine arms its meter with the process-wide credential as create begins.
         create = { m -> synchronized(steps) { steps += "create:$m" }; val armed = "engine armed with $global"; duringCreate(); armed },
         close = { a -> synchronized(closed) { closed += a } },
@@ -55,7 +57,7 @@ class LoadCredentialsTest {
         }
     }
 
-    private fun clear() = credentials.clear(cancelLoads = { synchronized(steps) { steps += "cancel" } }, clearGlobals = { global = null })
+    private fun clear() = credentials.clear(cancelLoads = { synchronized(steps) { steps += "cancel" } })
 
     @Test
     fun aLoadWithoutACredentialIsRefusedBeforeAnythingIsAskedFetchedOrSet() {
@@ -121,6 +123,41 @@ class LoadCredentialsTest {
         cleared { load("sk_a", duringCreate = { clear() }) }
         assertEquals(listOf("engine armed with sk_a"), closed)
         assertNull("sign-out cleared the credential", global)
+    }
+
+    // PR #202 round-3 review LOW: clear takes no lock, so it can land after create's generation check and
+    // before the set writes. The set then puts the signed-out key back into the process-wide credential after
+    // clear emptied it; through round 3 the load still ended Cleared (its engine closed) but the global kept
+    // the key until the next load. Now create checks again right after the set and empties it.
+    @Test
+    fun signOutBetweenTheCheckAndTheSetNeverLeavesTheSignedOutKeyBehind() {
+        cleared { load("sk_a", beforeSetWrites = { clear() }) }
+        assertNull("the signed-out account's key is not left in the process-wide credential", global)
+        assertTrue("nothing was created with it", "create:model-of-sk_a" !in steps)
+        assertEquals(emptyList<String>(), closed)
+        // A load begun after the sign-out sets its own and runs.
+        assertEquals("engine armed with sk_b", load("sk_b"))
+        assertEquals("sk_b", global)
+
+        // The same race across threads: load A is held inside its set (past the check) while sign-out runs on
+        // another thread (the platform thread, which never waits for the lock); then A's set writes.
+        val inSet = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        var outcome: Throwable? = null
+        val a = Thread {
+            try {
+                load("sk_a", beforeSetWrites = { inSet.countDown(); release.await(5, TimeUnit.SECONDS) })
+            } catch (e: Throwable) { outcome = e }
+        }.apply { start() }
+        assertTrue(inSet.await(5, TimeUnit.SECONDS))
+        val signOut = Thread { clear() }.apply { start() }
+        signOut.join(5000)
+        assertFalse("sign-out did not wait for the load's lock", signOut.isAlive)
+        assertNull(global)
+        release.countDown()
+        a.join(5000)
+        assertTrue("A ended cancelled ($outcome)", outcome is LoadCredentials.Cleared)
+        assertNull("A's late set was undone under the lock", global)
     }
 
     @Test
