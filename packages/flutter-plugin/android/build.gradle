@@ -113,7 +113,13 @@ dependencies {
     // never fails to open because the network is down. A first open killed mid-prepare finishes in the
     // background (a JobScheduler service in the AAR's manifest); idle frames bill from the first frame.
     // Security: a cached private avatar opens only for a credential the door has said yes to.
-    implementation 'ai.bithuman:expression2-android:0.6.0'
+    // 0.6.1 (2026-10-04, maven.bithuman.ai): billing patch, meter only (engine, rendering and native libraries are
+    // 0.6.0's). A session ends 60 s after the app goes to the background or stops asking for frames, billed to
+    // that 60 s; after a background end `pull` returns null and `Expression2IdleLoop.next` returns -1 until the app
+    // is visible again, and the next visible frame opens a new session. The meter names the agent: a secret whose
+    // account may not render it is refused (403 AGENT_NOT_ENTITLED) before anything is billed. Installation id now
+    // written on Android. AAR sha256 828dcb2c012c7e9a… (as served).
+    implementation 'ai.bithuman:expression2-android:0.6.1'
     // 0.5.10 (public on Central since 2026-09-16, lastUpdated 20260916205927): A BARGE-IN
     // NO LONGER REWINDS THE DRIVER VIDEO TO ITS FIRST FRAME. Interrupt the agent mid-reply
     // and the video behind the avatar used to snap back to the start of its clip — every
@@ -222,7 +228,11 @@ dependencies {
     // 0.9.4 (2026-10-04, maven.bithuman.ai): SECURITY — a cached private avatar opens only for a credential the
     // door has said yes to (another account gets the door's 404 NOT_FOUND); the first open of each cached avatar
     // after the upgrade asks the door once. Store-only change: engine, rendering and billing are 0.9.3's.
-    implementation 'ai.bithuman:essence2-android:0.9.4'
+    // 0.9.5 (2026-10-04, maven.bithuman.ai): billing patch, meter only (engine, rendering and lible_jni are 0.9.4's).
+    // The same 60 s background / unobserved session end as expression2-android 0.6.1 (after a background end every
+    // frame call answers "no frame" until the app is visible again), the agent named at the meter's open
+    // (403 AGENT_NOT_ENTITLED refused, nothing billed), installation id written. AAR sha256 8573f2fb55298baa… (as served).
+    implementation 'ai.bithuman:essence2-android:0.9.5'
 
     // Plain-JVM unit tests of the platform-free parts (src/test/kotlin: EngineUsersTest — dispose
     // closes an engine only after its threads returned). Test scope only: nothing ships in the AAR.

@@ -2,6 +2,12 @@
 
 ### Fixed
 
+* **Android: a session nobody is watching ends after 60 s** (`essence2-android` 0.9.5, `expression2-android` 0.6.1,
+  billing patches; engines and rendering unchanged). When the app has been in the background for more than 60 s, or
+  has not asked for a frame for more than 60 s, the session ends and is billed up to that 60 s. After a background
+  end the SDK hands out no frames until the app is visible again (the idle producer sees `-1` / `false` and waits);
+  the next frame shown on screen starts a new session. An API secret whose account may not render the agent is
+  refused at open (`403 AGENT_NOT_ENTITLED`) before anything is billed.
 * **Android: off screen, the avatar waits instead of polling (battery).** The plugin now follows the app's process
   lifecycle (`ProcessLifecycleOwner`, ON_START / ON_STOP). While the app is in the background and the avatar has
   nothing to say, the player's threads (producer, feeder, writer, presenter) and Essence 2's render thread wait on a
