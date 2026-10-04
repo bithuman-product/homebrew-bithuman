@@ -20,9 +20,8 @@ One repo, **one tag prefix per artifact**. Don't mix the namespaces.
 
 ## Where releases are published (2026-10: downloads.bithuman.ai, not GitHub)
 
-Every release of this repository is published to bitHuman's download origin in one fixed
-layout. The installers, the formula and every check in this repository read it; none of them reads
-GitHub Releases (the ones published before the move stay readable):
+This repository moved to https://gitlab.com/bithuman/sdk/homebrew-bithuman, and every release is
+published to bitHuman's download origin in one fixed layout:
 
 ```
 https://downloads.bithuman.ai/homebrew-bithuman/<tag>/<asset>      immutable, edge-cached a year
@@ -416,6 +415,6 @@ origin cannot be read). No install makes a GitHub request.
 - **Flutter plugin** — enable *Automated Publishing* on `pub.dev/packages/bithuman/admin` once, bump `packages/flutter-plugin/pubspec.yaml`, run `flutter test` there on that commit (it must pass: `test/release_pins_test.dart` refuses a 2.6.36+ version whose Android engines are below `essence2-android` 0.9.4 / `expression2-android` 0.6.0 or whose Apple engines are below `essence2-v1.15.4` / `v2.20.3`, the cross-account cache fixes), and `scripts/check-apple-engine-pin.sh`, then `git tag flutter-v<x.y.z>`.
 - **CLI** — build in the CLI repo, publish every tarball of **`cli-v<x.y.z>`** in ONE `scripts/downloads-publish.py publish` call (section "Where releases are published"), bump `Formula/bithuman-cli.rb` (`url` = `https://downloads.bithuman.ai/homebrew-bithuman/cli-v<x.y.z>/bithuman-aarch64-apple-darwin.tar.gz`, `sha256`), then **mirror it** (section above). The installers pick it up from latest.json at once; the mirror is the second copy.
 - **Flutter plugin vendor bundle** — `flutter-plugin-vendor-v<n>`, hand-cut and **immutable**: the public build outputs `packages/flutter-plugin/scripts/bootstrap.sh` fetches anonymously against digests **pinned in that script** (`embody-models.tar.gz`, `onnxruntime.xcframework.zip`, and `manifest.json` for a human to verify against). `scripts/downloads-publish.py publish` never makes it latest.json. Never re-upload an asset under an existing vendor tag — cut `-v<n+1>` and bump the pins.
-- **Swift SDK** — cut a bare `v<x.y.z>` **above** the highest existing bare tag, **tag-only** (no release on the downloads host, so `install.sh` ignores it), with `Package.swift`'s `binaryTarget` URL+checksum pointing at a hosted xcframework (publish it with `scripts/downloads-publish.py publish`, never latest.json). Consumers pin `.package(url: …/homebrew-bithuman, from: "<x.y.z>")`.
+- **Swift SDK** — cut a bare `v<x.y.z>` **above** the highest existing bare tag, with `Package.swift`'s `binaryTarget` URL+checksum pointing at an xcframework published to `https://downloads.bithuman.ai/homebrew-bithuman/v<x.y.z>/` (never latest.json). SwiftPM resolves the git tag, so the tag must exist on GitLab. Consumers pin `.package(url: "https://gitlab.com/bithuman/sdk/homebrew-bithuman.git", from: "<x.y.z>")`.
 
 > PyPI is **yank-only**, pub.dev is **retract-only** — publishes are permanent. Tag deliberately; dry-run first.
