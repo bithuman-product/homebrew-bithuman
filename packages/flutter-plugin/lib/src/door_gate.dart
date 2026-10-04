@@ -43,6 +43,22 @@
 // cache directory can write one; such a writer can read the avatar's files directly anyway, and the gate
 // is about this package never handing them out by itself.
 //
+// WHO THE DOOR SAYS YES TO (PR #202 round 3). The platform decides who may render an avatar (P11, platform
+// #1324): its owner, an active member of the workspace it is shared into, or anyone when it is public or
+// featured. The container door (`/v1/agent/<code>/model/download?model=<family>`, the one Essence2Kit and
+// the Dart installers ask) serves the first two and bitHuman's showcase; another account's PUBLIC avatar
+// that is not in the showcase gets 404 NOT_FOUND there, while the member door (`&member=<catalog>`, the
+// one the Android stores fetch from) serves it to any credential and to none. So when the container door
+// answers a key 404 NOT_FOUND (no key: 401) for an Essence 2 or Expression 2 avatar, the gate asks the
+// member door for the family's catalog once ([DoorGate.askEntitled]): its yes is a yes (the avatar is
+// public), its no leaves the container's no, and no answer is no answer. A featured avatar that is
+// private, which P11 also admits, is served by neither door to another account and stays refused.
+//
+// SAVED PATHS (round 3). `BithumanAvatar.load` gates a path one of the installers returned by what it IS on
+// disk, not by how it is spelled: symlinks are resolved and `.`, `..` and `//` folded first, then the
+// nearest directory holding `.door-auth/` names the cache, and the first component below it the install
+// ([DoorGate.openPath]).
+//
 // Apache-2.0; (c) bitHuman.
 import 'dart:async';
 import 'dart:convert';
@@ -78,6 +94,25 @@ class BithumanEntitlementException extends BithumanAvatarException {
 
 /// bitHuman's model doors: the platform API and the site (the apex redirects every path to www).
 const Set<String> kBithumanDoorHosts = {'api.bithuman.ai', 'www.bithuman.ai', 'bithuman.ai'};
+
+/// [host] as DNS compares it: lower case, without the root's trailing dot (`API.Bithuman.AI.` is
+/// `api.bithuman.ai`).
+String normalizeHost(String host) {
+  var h = host.toLowerCase();
+  while (h.endsWith('.')) {
+    h = h.substring(0, h.length - 1);
+  }
+  return h;
+}
+
+/// Whether [host] is one of [hosts], compared as DNS compares names ([normalizeHost]).
+bool hostIn(Set<String> hosts, String host) {
+  final h = normalizeHost(host);
+  return hosts.any((x) => normalizeHost(x) == h);
+}
+
+/// The member catalog the door serves for each on-device family (platform `utils._MEMBER_BUNDLES`).
+const Map<String, String> kDoorMemberCatalog = {'expression-2': 'web_manifest.json', 'essence-2': 'manifest.json'};
 
 /// The native stores' credential tag (Essence2Kit / Expression2Download `credentialTag`): 32 hex of
 /// SHA-256 over a fixed salt + the credential ("" when there is none). Never the credential.
@@ -157,12 +192,18 @@ class DoorGate {
   DoorGate({
     DateTime Function()? clock,
     Uri Function(String code, String model)? door,
+    Uri? Function(String code, String family)? publicDoor,
     this.doorHosts = kBithumanDoorHosts,
     this.allowInsecure = false,
     this.timeout = const Duration(seconds: 20),
     this.log,
   })  : clock = clock ?? DateTime.now,
-        door = door ?? bithumanEntitlementDoor;
+        door = door ?? bithumanEntitlementDoor,
+        // bitHuman's member door goes with bitHuman's container door; a gate on another door (a test's
+        // loopback) has a public door only when it names one.
+        publicDoor = publicDoor ?? (door == null ? bithumanPublicDoor : _noPublicDoor);
+
+  static Uri? _noPublicDoor(String code, String family) => null;
 
   /// bitHuman's door hosts: a redirect to one of them is never a door's yes ([ask]).
   final Set<String> doorHosts;
@@ -171,6 +212,10 @@ class DoorGate {
 
   /// The platform door for an agent code and model family (`?redirect=false`: a JSON grant, no file).
   final Uri Function(String code, String model) door;
+
+  /// The door that serves a PUBLIC avatar's members to any credential, for [askEntitled]: the family's
+  /// member catalog at the platform door. Null for a family with no members (an `.imx` of unknown family).
+  final Uri? Function(String code, String family) publicDoor;
 
   /// Tests only: plain-http loopback doors.
   final bool allowInsecure;
@@ -332,15 +377,16 @@ class DoorGate {
         } else {
           await res.listen((_) {}).cancel();   // the status is the answer: never the file
         }
-        // A redirect is the door's yes only when it points at the signed file URL the door minted: OFF
-        // the asked host and off bitHuman's door hosts. A redirect from one door host to another (the
-        // apex to www, a trailing slash) answers nothing about this credential (PR #202 review).
+        // A redirect is the door's yes only when it points at the signed file URL the door minted: https,
+        // OFF the asked host and off bitHuman's door hosts, compared as DNS compares names (case, a trailing
+        // dot). A redirect from one door host to another (the apex to www, a trailing slash) answers nothing
+        // about this credential (PR #202 review), nor does a cleartext one.
         if (status >= 300 && status < 400) {
           final loc = res.headers.value(HttpHeaders.locationHeader);
           final next = (loc == null || loc.isEmpty) ? null : u.resolve(loc);
-          if (next == null || next.host == u.host || doorHosts.contains(next.host)) {
+          if (!redirectIsAnswer(u, next)) {
             return DoorAnswer.unreachable(BithumanAvatarException(
-                'HTTP $status to ${next?.host ?? 'no location'}: a redirect within bitHuman\'s door hosts is no answer'));
+                'HTTP $status to ${next?.host ?? 'no location'}: a redirect within bitHuman\'s door hosts (or not https) is no answer'));
           }
         }
         return DoorAnswer(status, code: code);
@@ -353,17 +399,44 @@ class DoorGate {
     }
   }
 
+  /// Whether a door's redirect from [asked] to [next] is an answer (the door's yes): it points at the signed
+  /// file URL the door minted, so it is https (http only for a test gate's loopback), OFF the asked host and off
+  /// bitHuman's door hosts, compared as DNS compares names ([hostIn]). Anything else (no location, cleartext,
+  /// the same host, another door host) is no answer.
+  @visibleForTesting
+  bool redirectIsAnswer(Uri asked, Uri? next) =>
+      next != null &&
+      (next.scheme == 'https' || (allowInsecure && next.scheme == 'http')) &&
+      normalizeHost(next.host) != normalizeHost(asked.host) &&
+      !hostIn(doorHosts, next.host);
+
+  /// The door's answer about [credential] for an avatar, as the platform decides who may render it (P11): the
+  /// container door [door] first; when it says "not yours" (404 NOT_FOUND to a key, 401 to no key) and the
+  /// family has a member catalog ([publicDoor]), that door is asked once with the same credential, because
+  /// it serves a PUBLIC avatar outside bitHuman's showcase to anyone while the container door serves it only
+  /// to its owner. Its yes is the answer; its no leaves the container's no; no answer is no answer (not a
+  /// no: [refusal] says "could not confirm"). A 401 / 403 to a key is about the key and is not asked again.
+  Future<DoorAnswer> askEntitled(Uri door, String? credential, {Uri? publicDoor}) async {
+    final a = await ask(door, credential);
+    if (publicDoor == null || !a.denied) return a;
+    final notYours = _norm(credential) == null ? a.status == 401 : a.status == 404;
+    if (!notYours) return a;
+    final m = await ask(publicDoor, credential);
+    if (m.granted) return m;
+    return m.denied ? a : m;
+  }
+
   /// The rule for a KEPT copy whose door is a separate request ([doorUrl]): returns when [credential]
   /// may open it, throws [BithumanEntitlementException] when it may not. With a fresh mark the open is
   /// immediate and (with [checkLater]) the door is asked in the background; without one the door is
   /// asked first.
   Future<void> openKept(String cacheDir, String entry, Uri doorUrl, String? credential,
-      {required String what, bool checkLater = true}) async {
+      {required String what, bool checkLater = true, Uri? publicDoor}) async {
     if (await mayOpenWithoutDoor(cacheDir, entry, credential)) {
-      if (checkLater) _checkLater(cacheDir, entry, doorUrl, credential, what: what);
+      if (checkLater) _checkLater(cacheDir, entry, doorUrl, credential, what: what, publicDoor: publicDoor);
       return;
     }
-    final a = await ask(doorUrl, credential);
+    final a = await askEntitled(doorUrl, credential, publicDoor: publicDoor);
     await note(cacheDir, entry, credential, a);
     if (a.granted) return;
     throw refusal(what, a, kept: true);
@@ -372,40 +445,100 @@ class DoorGate {
   /// A path an app hands straight to `BithumanAvatar.load` (or `setExpression2AgentDir`), which no
   /// installer here sees (2.6.36, defence in depth). The installers return predictable paths
   /// (`<cacheDir>/<id>.imx`, `<cacheDir>/<id>.elevatedir`, `<cacheDir>/<code>`), so an app that saved one
-  /// and loads it later would skip every gate. When [path] sits in a directory that holds this package's
-  /// marks (`.door-auth/`), it opens only as an installer would open it: a fresh mark for [credential], or
-  /// the platform door's yes asked now (fail closed). A path anywhere else is the app's own file: not gated.
+  /// and loads it later would skip every gate. The path is first made what the file system opens
+  /// ([canonicalPath]: symlinks resolved, `.` / `..` / `//` folded), so no other spelling of an install
+  /// (`<dir>/.`, `<dir>/sub/..`, `<cacheDir>//<code>`, a link to it from elsewhere) and no file inside one
+  /// (`<id>.elevatedir/meta.json`) escapes. Then the nearest directory above it that holds this package's
+  /// marks (`.door-auth/`) is the cache, and the first component below that directory is the install: it
+  /// opens only as an installer would open it, a fresh mark for [credential] or the door's yes asked now
+  /// (fail closed). A path with no such directory above it is the app's own file: not gated (an Android
+  /// agent code, which names no file, is gated by the native window).
+  ///
+  /// The door asked is the installer's: an `.imx` the platform door's container rule
+  /// (`downloadAgentImx`), a `.elevatedir` Essence 2's and a directory Expression 2's, each with the
+  /// family's member door for a public avatar ([askEntitled]).
   Future<void> openPath(String path, String? credential) async {
-    var p = path;
-    while (p.length > 1 && (p.endsWith('/') || p.endsWith(r'\'))) {
-      p = p.substring(0, p.length - 1);
+    if (path.isEmpty) return;
+    final parts = canonicalPath(path).split('/').where((s) => s.isNotEmpty).toList();
+    for (var i = parts.length - 1; i >= 0; i--) {
+      final dir = '/${parts.sublist(0, i).join('/')}';
+      if (!Directory('${dir == '/' ? '' : dir}/$_dir').existsSync()) continue;
+      final name = parts[i];
+      final (String code, String model, String family) = name.endsWith('.imx')
+          ? (name.substring(0, name.length - 4), '', '')                       // downloadAgentImx: the container
+          : name.endsWith('.elevatedir')
+              ? (name.substring(0, name.length - 11), 'essence-2', 'essence-2') // downloadEssence2Bundle
+              : (name, 'expression-2', 'expression-2');                         // the Expression 2 installers
+      if (code.isEmpty || name == _dir) {
+        // Inside a cache directory but no install this package can name (its own marks, an `.imx` with no
+        // id): never opened unasked.
+        throw BithumanEntitlementException('load:$name: $path is inside an avatar cache but names no avatar it '
+            'can check; pass the path the installer returned', refused: false);
+      }
+      await openKept(dir, name, door(code, model), credential,
+          what: 'load:$name', checkLater: false, publicDoor: family.isEmpty ? null : publicDoor(code, family));
+      return;
     }
-    final cut = p.lastIndexOf(RegExp(r'[/\\]'));
-    if (cut <= 0) return;   // an agent code (Android), or a bare name: not a kept path
-    final dir = p.substring(0, cut), name = p.substring(cut + 1);
-    if (name.isEmpty || !Directory('$dir/$_dir').existsSync()) return;
-    final (String code, String model) = name.endsWith('.imx')
-        ? (name.substring(0, name.length - 4), '')                      // downloadAgentImx: the agent's own model
-        : name.endsWith('.elevatedir')
-            ? (name.substring(0, name.length - 11), 'essence-2')        // downloadEssence2Bundle
-            : (name, 'expression-2');                                     // the Expression 2 installers
-    if (code.isEmpty) return;
-    await openKept(dir, name, door(code, model), credential, what: 'load:$name', checkLater: false);
+  }
+
+  /// [path] as the file system opens it: an existing path with its symlinks resolved (and `.`, `..`, `//`
+  /// with them); a path that does not exist folded lexically against the current directory, and its
+  /// longest existing prefix resolved.
+  @visibleForTesting
+  static String canonicalPath(String path) {
+    String? real(String p) {
+      try {
+        final t = FileSystemEntity.typeSync(p);
+        if (t == FileSystemEntityType.notFound) return null;
+        return (t == FileSystemEntityType.directory ? Directory(p) : File(p)).resolveSymbolicLinksSync();
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final r = real(path);
+    if (r != null) return r;
+    String cwd;
+    try {
+      cwd = Directory.current.path;
+    } catch (_) {
+      cwd = '/';
+    }
+    final abs = path.startsWith('/') ? path : '$cwd/$path';
+    final out = <String>[];
+    for (final s in abs.split('/')) {
+      if (s.isEmpty || s == '.') continue;
+      if (s == '..') {
+        if (out.isNotEmpty) out.removeLast();
+        continue;
+      }
+      out.add(s);
+    }
+    for (var i = out.length; i > 0; i--) {
+      final r = real('/${out.sublist(0, i).join('/')}');
+      if (r != null) {
+        final rest = out.sublist(i);
+        return rest.isEmpty ? r : '${r == '/' ? '' : r}/${rest.join('/')}';
+      }
+    }
+    return '/${out.join('/')}';
   }
 
   /// Before a download whose bytes come from somewhere other than the door: the door says yes to
   /// [credential] first (and its mark is written), or the call fails and nothing is downloaded.
-  Future<void> admit(String cacheDir, String entry, Uri doorUrl, String? credential, {required String what}) async {
-    final a = await ask(doorUrl, credential);
+  Future<void> admit(String cacheDir, String entry, Uri doorUrl, String? credential,
+      {required String what, Uri? publicDoor}) async {
+    final a = await askEntitled(doorUrl, credential, publicDoor: publicDoor);
     await note(cacheDir, entry, credential, a);
     if (!a.granted) throw refusal(what, a, kept: false);
   }
 
-  void _checkLater(String cacheDir, String entry, Uri doorUrl, String? credential, {required String what}) {
+  void _checkLater(String cacheDir, String entry, Uri doorUrl, String? credential,
+      {required String what, Uri? publicDoor}) {
     final k = _key(cacheDir, entry, credential);
     if (_checking.containsKey(k)) return;
     final run = () async {
-      final a = await ask(doorUrl, credential);
+      final a = await askEntitled(doorUrl, credential, publicDoor: publicDoor);
       await note(cacheDir, entry, credential, a);
       if (a.denied) log?.call('door-auth:$what the door refused this credential ($a): the next open is refused');
     }();
@@ -437,6 +570,17 @@ class DoorGate {
 /// about the agent's own model (an `.imx`, whatever its family), as [downloadAgentImx]'s door does.
 Uri bithumanEntitlementDoor(String code, String model) => Uri.https('api.bithuman.ai',
     '/v1/agent/${Uri.encodeComponent(code)}/model/download', {if (model.isNotEmpty) 'model': model, 'redirect': 'false'});
+
+/// The platform's member door for [code]'s [family] catalog (`&member=<catalog>&redirect=false`), which serves
+/// a PUBLIC avatar's members to any credential and to none ([DoorGate.askEntitled]); null for a family with
+/// no member catalog. One request, a JSON grant, no file (metered at 0 credits to the owner, as the
+/// container door's grant is).
+Uri? bithumanPublicDoor(String code, String family) {
+  final catalog = kDoorMemberCatalog[family];
+  if (catalog == null) return null;
+  return Uri.https('api.bithuman.ai', '/v1/agent/${Uri.encodeComponent(code)}/model/download',
+      {'model': family, 'member': catalog, 'redirect': 'false'});
+}
 
 DoorGate _entitlementGate = DoorGate();
 

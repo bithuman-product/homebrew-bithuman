@@ -714,4 +714,194 @@ void main() {
       expect((await g.ask(u, null)).granted, isTrue, reason: 'to the storage host: the door minted a signed URL');
     });
   });
+
+  // ───────────────────────────────────────────── PR #202 round 3 (the second security review's LOW items)
+  group('round 3', () {
+    late DoorGate saved;
+    setUp(() => saved = entitlementGate);
+    tearDown(() => entitlementGate = saved);
+
+    AgentImxDownloader dl({bool up = true, Set<String> doorHosts = const {'127.0.0.1'}}) => AgentImxDownloader(
+        allowInsecure: true,
+        clock: () => now,
+        doorHosts: doorHosts,
+        door: (code) => up
+            ? door.url('127.0.0.1', '/v1/agent/$code/model/download')
+            : Uri.parse('http://127.0.0.1:$dead/v1/agent/$code/model/download'));
+    const allowed = {'127.0.0.1', 'localhost'};
+    File kept(String id) => File('${tmp.path}/$id.imx');
+
+    // Each HIGH fix is caught on its own (review: reverting either one alone left the suite green).
+
+    test('HIGH#2 alone (agent_imx.dart, the stale path): a non-door row\'s 200 never opens the kept file when the '
+        'download then fails', () async {
+      // The owner's private file is kept from before the re-publish. A no-key row names the code with a model_url
+      // on a NON-door host that answers 200 with a body under 1 MB: the re-download fails its size check. The
+      // row's 200 is not the platform door's yes; the platform door (asked with no key: 401) decides.
+      await dl().download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner);
+      await kept(_private).setLastModified(DateTime.utc(2026, 9, 30));
+      final tiny = await _Srv.start((req) async {
+        req.response.add(Uint8List(1000));
+        await req.response.close();
+      });
+      addTearDown(() => tiny.server.close(force: true));
+      final row = _agent(_private, tiny.url('localhost', '/files/$_private.imx').toString());
+      final asked = door.keys.length;
+      await expectLater(dl().download(row, tmp.path, allowedHosts: allowed), _refused(true));
+      expect(tiny.paths, ['/files/$_private.imx'], reason: 'the row\'s file was tried (and was too small)');
+      expect(door.keys.sublist(asked), [null], reason: 'then the platform door, with no credential: 401');
+      expect(await kept(_private).readAsBytes(), published, reason: 'kept, not opened, not replaced');
+      expect(dl().gate.markFile(tmp.path, AgentImxDownloader.markEntry(_private), null).existsSync(), isFalse);
+    });
+
+    test('HIGH#1 alone (agent_imx.dart _open): a keyed download whose platform door 307s to ANOTHER door host '
+        'that answers 404 marks nothing, and the next call with the door down is refused', () async {
+      final next = await _Srv.start((req) => _answer(req, 404, '{"error": "Agent not found"}'));
+      addTearDown(() => next.server.close(force: true));
+      doorRule = (req, _) => req.response.redirect(next.url('localhost', req.uri.path), status: 307);
+      const both = {'127.0.0.1', 'localhost'};   // two of bitHuman's door hosts (the apex and www, say)
+      final d = dl(doorHosts: both);
+      await expectLater(d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _other),
+          throwsA(isA<BithumanAvatarException>()));
+      expect(next.paths, ['/v1/agent/$_private/model/download'], reason: 'the redirect was followed');
+      final entry = AgentImxDownloader.markEntry(_private);
+      expect(d.gate.markFile(tmp.path, entry, _other).existsSync(), isFalse,
+          reason: 'a redirect between door hosts is not the door\'s yes');
+      // The owner's file is on the device (as the owner's own download leaves it); the door is down.
+      kept(_private).writeAsBytesSync(published);
+      await expectLater(dl(up: false, doorHosts: both).download(_agent(_private, 'unused'), tmp.path, apiSecret: _other),
+          _refused(false));
+      expect(await kept(_private).readAsBytes(), published);
+    });
+
+    test('hosts compare as DNS names: a trailing dot or letter case on a door host is still a door host', () async {
+      final g = DoorGate(allowInsecure: true, doorHosts: const {'localhost'});
+      final u = door.url('127.0.0.1', '/v1/agent/$_private/model/download');
+      for (final loc in ['http://localhost.:1/x', 'http://LOCALHOST:1/x', 'http://LocalHost.:1/x']) {
+        doorRule = (req, _) async {
+          req.response.statusCode = 302;
+          req.response.headers.set(HttpHeaders.locationHeader, loc);
+          await req.response.close();
+        };
+        final a = await g.ask(u, null);
+        expect([a.status, a.granted], [null, isFalse], reason: '$loc is a door host: no answer');
+      }
+      // The rule itself, on a real (https-only) gate: only an https Location off the door hosts is a yes.
+      final real = DoorGate();
+      final asked = Uri.parse('https://api.bithuman.ai/v1/agent/$_private/model/download?redirect=false');
+      expect(real.redirectIsAnswer(asked, Uri.parse('https://storage.example.invalid/signed/x.imx?t=1')), isTrue);
+      expect(real.redirectIsAnswer(asked, Uri.parse('http://storage.example.invalid/signed/x.imx?t=1')), isFalse,
+          reason: 'a cleartext redirect is no answer');
+      expect(real.redirectIsAnswer(asked, Uri.parse('https://WWW.BITHUMAN.AI./api/agents/$_private')), isFalse);
+      expect(real.redirectIsAnswer(asked, Uri.parse('https://api.bithuman.ai./v1/agent/$_private/model/download/')), isFalse);
+      expect(real.redirectIsAnswer(asked, null), isFalse);
+      expect(normalizeHost('API.Bithuman.AI.'), 'api.bithuman.ai');
+      expect(hostIn(kBithumanDoorHosts, 'WWW.bithuman.ai.'), isTrue);
+      expect(hostIn(kBithumanDoorHosts, 'storage.bithuman.ai'), isFalse);
+    });
+
+    // The platform's own rule for who may render an avatar (P11, platform #1324): its owner, an active member
+    // of the workspace it is shared into, or anyone when it is public / featured. The container door serves
+    // the first two and bitHuman's showcase; another account's PUBLIC avatar outside the showcase is 404
+    // NOT_FOUND there and is served by the member door, the one the Android stores fetch from.
+    group('P11: another account\'s public avatar', () {
+      const pub = 'A11PUB0001'; // public, owned by _owner, not in bitHuman's showcase
+      var memberSays = 'public';
+      setUp(() {
+        memberSays = 'public';
+        doorRule = (req, _) async {
+          final key = req.headers.value('api-secret');
+          if (req.uri.queryParameters.containsKey('member')) {
+            // The member door: a public avatar's catalog to any credential and to none.
+            if (memberSays == 'public' || key == _owner) {
+              return _answer(req, 200, jsonEncode({'success': true, 'data': {'url': 'https://example.invalid/m'}}));
+            }
+            if (memberSays == 'down') return _answer(req, 503, '');
+            return key == null ? _answer(req, 401, _missingAuth) : _answer(req, 404, _notFound);
+          }
+          if (key == _owner) {
+            return _answer(req, 200, jsonEncode({'success': true, 'data': {'url': 'https://example.invalid/x'}}));
+          }
+          return key == null ? _answer(req, 401, _missingAuth) : _answer(req, 404, _notFound);
+        };
+      });
+
+      Uri containerDoor(String code, String model) =>
+          door.url('127.0.0.1', '/v1/agent/$code/model/download').replace(queryParameters: {'model': model, 'redirect': 'false'});
+      Uri memberDoor(String code, String family) => door.url('127.0.0.1', '/v1/agent/$code/model/download')
+          .replace(queryParameters: {'model': family, 'member': kDoorMemberCatalog[family]!, 'redirect': 'false'});
+      void useGate({bool member = true}) => entitlementGate = DoorGate(
+          clock: () => now, allowInsecure: true, door: containerDoor, publicDoor: member ? memberDoor : null);
+
+      String install(String code) {
+        for (final m in const [
+          'manifest.json',
+          'student_v4_forward_frame_cpuAndNE.mlpackage/Manifest.json',
+          'dec_p2_v3_all.mlpackage/Manifest.json',
+        ]) {
+          File('${tmp.path}/$code/$m')
+            ..createSync(recursive: true)
+            ..writeAsStringSync('x');
+        }
+        return '${tmp.path}/$code';
+      }
+
+      test('a kept Expression 2 install opens after the member door\'s yes; its no or no answer does not', () async {
+        final dir = install(pub);
+        useGate();
+        expect(await downloadExpression2Avatar(pub, 'https://example.invalid/x.avatar', tmp.path, apiSecret: _other), dir);
+        expect(door.keys, [_other, _other], reason: 'the container door, then the member door, with the same key');
+        expect(door.paths, ['/v1/agent/$pub/model/download', '/v1/agent/$pub/model/download']);
+        final mark = entitlementGate.markFile(tmp.path, pub, _other);
+        expect(mark.existsSync(), isTrue, reason: 'the yes is this account\'s mark (24 h)');
+        // Made private: the member door's NOT_FOUND keeps the container's no; the mark is dropped.
+        memberSays = 'private';
+        now = now.add(const Duration(hours: 25));
+        await expectLater(downloadExpression2Avatar(pub, 'https://example.invalid/x.avatar', tmp.path, apiSecret: _other),
+            _refused(true));
+        expect(mark.existsSync(), isFalse);
+        // The member door does not answer: could not confirm (not a refusal).
+        memberSays = 'down';
+        await expectLater(downloadExpression2Avatar(pub, 'https://example.invalid/x.avatar', tmp.path, apiSecret: _other),
+            _refused(false));
+        // With no key: the container's 401, then the member door with no key: a PUBLIC mark (7 days, anyone).
+        memberSays = 'public';
+        expect(await downloadExpression2Agent(pub, 'https://example.invalid/x.tar.gz', tmp.path), dir);
+        expect(entitlementGate.markFile(tmp.path, pub, null).existsSync(), isTrue);
+      });
+
+      test('the owner\'s yes never asks the member door; a gate on another door has none (documented)', () async {
+        install(pub);
+        useGate();
+        await downloadExpression2Avatar(pub, 'https://example.invalid/x.avatar', tmp.path, apiSecret: _owner);
+        expect(door.paths.length, 1);
+        useGate(member: false);
+        await expectLater(downloadExpression2Avatar(pub, 'https://example.invalid/x.avatar', tmp.path, apiSecret: _other),
+            _refused(true));
+      });
+
+      test('a kept Essence 2 bundle asks the member door for its agent (manifest.json)', () async {
+        final dir = Directory('${tmp.path}/$pub.elevatedir')..createSync();
+        File('${dir.path}/meta.json').writeAsStringSync('{}');
+        useGate();
+        final e = Essence2CatalogEntry(agentId: pub, url: 'https://127.0.0.1:$dead/x.tar.gz', sha256: '', size: 0,
+            formatVersion: 'elevatedir-v2');
+        expect(await downloadEssence2Bundle(e, tmp.path, apiSecret: _other), dir.path);
+        expect(door.keys, [_other, _other]);
+      });
+
+      test('bitHuman\'s gate asks the platform\'s container door, then the member door the stores fetch from', () {
+        expect(bithumanEntitlementDoor('A11PUB0001', 'essence-2').toString(),
+            'https://api.bithuman.ai/v1/agent/A11PUB0001/model/download?model=essence-2&redirect=false');
+        expect(bithumanPublicDoor('A11PUB0001', 'expression-2').toString(),
+            'https://api.bithuman.ai/v1/agent/A11PUB0001/model/download?model=expression-2&member=web_manifest.json&redirect=false');
+        expect(bithumanPublicDoor('A11PUB0001', 'essence-2').toString(),
+            'https://api.bithuman.ai/v1/agent/A11PUB0001/model/download?model=essence-2&member=manifest.json&redirect=false');
+        expect(bithumanPublicDoor('A11PUB0001', ''), isNull, reason: 'an .imx: the container rule only');
+        expect(DoorGate().publicDoor('A11PUB0001', 'expression-2'), bithumanPublicDoor('A11PUB0001', 'expression-2'));
+        expect(DoorGate(door: containerDoor).publicDoor('A11PUB0001', 'expression-2'), isNull,
+            reason: 'a gate on another door never reaches bitHuman\'s member door by accident');
+      });
+    });
+  });
 }

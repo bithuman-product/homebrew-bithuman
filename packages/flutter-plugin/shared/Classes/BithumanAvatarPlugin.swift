@@ -80,6 +80,10 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
   // property type; the entry path casts back under `#available(macOS 26, iOS 26, *)`.
   private var converseControllers: [Int64: AnyObject] = [:]
   private var converseChannels: [Int64: FlutterEventChannel] = [:]
+  /// The Expression 2 agent dir THIS channel named (setExpression2AgentDir), and what it resolved to: a load
+  /// renders the dir its Dart side gated and sent, never one another channel or an earlier session set
+  /// (2.6.36, security; Expression2AgentDir.swift).
+  private var expression2AgentDir = Expression2AgentDirState()
   #endif
 
   // FlutterPluginRegistrar exposes the binary messenger + texture registry
@@ -113,6 +117,11 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
     instance.registrar = registrar
     instance.channel = channel
     registrar.addMethodCallDelegate(instance, channel: channel)
+    #if os(macOS) || os(iOS)
+    // A new engine attach starts with no Expression 2 agent dir (2.6.36, security): the process-wide one an
+    // earlier engine (or a Dart side before a hot restart) set is not this engine's to render.
+    Expression2Engine.activeAgentDir = nil
+    #endif
 
     // Tear LOCAL converse sessions down BEFORE the process exits. Otherwise the
     // window-close → terminate: → exit() path runs ggml-metal's static
@@ -228,6 +237,17 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // Essence 2 presenter (2.6.31): voice-gated with a stall guard by default; `voiceClock: true` opts in to
       // the voice on its own clock (a 200 ms cushion).
       texture.voiceClockOption = args["voiceClock"] as? Bool
+      #if os(macOS) || os(iOS)
+      // ★Expression 2 renders the agent dir the load SENT (2.6.36, security): the one its Dart side gated with
+      // this load's credential ("" = the bundled default), set right before the engine is created below, so a
+      // dir set out of band by another engine, or before a hot restart or a sign-out, is never rendered.
+      if texture.engineKind == "expression2" {
+        let dir = expression2AgentDir.dirForLoad(requested: args["agentDir"] as? String,
+                                                 resolve: { bhResolveExpression2AgentDir($0) })
+        Expression2Engine.activeAgentDir = dir
+        NSLog("[BithumanAvatar] load: Expression 2 agent dir %@", dir ?? "<bundled default>")
+      }
+      #endif
       let textureId = textureRegistry.register(texture)
       texture.textureId = textureId
       texture.registry = textureRegistry
@@ -316,6 +336,10 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
     // runs or bills as the account that signed out. Every load sets (or clears) its own anyway.
     case "clearCredentials":
       EngineRegistry.clearCredentials()
+      // ...and the Expression 2 agent dir an account named: the next Expression 2 load renders the bundled
+      // default unless a dir is named again.
+      expression2AgentDir.clear()
+      Expression2Engine.activeAgentDir = nil
       result(nil)
 
     // dual-accept: "setExpression2AgentDir" is canonical; "setEmbodyAgentDir" stays
@@ -339,8 +363,9 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // main before `result`, so the `load` Dart awaits next still sees it.
       bhExpandQueue.async {
         let resolved = bhResolveExpression2AgentDir(dir)
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
           Expression2Engine.activeAgentDir = resolved
+          self?.expression2AgentDir.set(named: dir, resolved: resolved)
           NSLog("[BithumanAvatar] setExpression2AgentDir → %@", resolved ?? "<bundled default>")
           result(nil)
         }

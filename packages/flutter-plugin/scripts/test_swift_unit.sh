@@ -18,3 +18,7 @@ swiftc -O -module-name EngineSelectionTest -o "$T/engine_selection" \
   shared/Classes/Protocol/BithumanEngine.swift shared/Classes/ModelRefusal.swift shared/Classes/EngineSelection.swift \
   "$T/es/main.swift"
 "$T/engine_selection"
+# Which agent dir an Expression 2 load renders (2.6.36, security): Expression2AgentDir.swift on its own.
+mkdir -p "$T/ad"; cp test/swift/agent_dir_test.swift "$T/ad/main.swift"
+swiftc -O -module-name AgentDirTest -o "$T/agent_dir" shared/Classes/Expression2AgentDir.swift "$T/ad/main.swift"
+"$T/agent_dir"

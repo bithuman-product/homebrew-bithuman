@@ -162,12 +162,17 @@ class BithumanAvatar implements VoiceHost {
     final pendingDir = _agentDirPending;
     if (pendingDir != null) await pendingDir;
     // ★Defence in depth (2.6.36, security): a kept install handed straight to load (a saved path) opens
-    // only as its installer would open it, for THIS call's credential (DoorGate.openPath). An app's own
-    // files, outside this package's cache directories, are not gated.
+    // only as its installer would open it, for THIS call's credential (DoorGate.openPath), whatever the
+    // spelling (symlinks resolved, `.` / `..` folded). An app's own files, outside this package's cache
+    // directories, are not gated.
     final gate = entitlementGate;
     await gate.openPath(imxPath, apiSecret);
-    final agentDir = _agentDir;
-    if (agentDir != null && agentDir.isNotEmpty && agentDir != imxPath && _expression2Engines.contains(engine)) {
+    // Expression 2 on iOS / macOS renders the agent dir set out of band (setExpression2AgentDir). The dir
+    // gated here is sent WITH the load ('' = none: the bundled default) and the native side renders exactly
+    // that one, so a native dir this Dart never gated (a Dart hot restart, another FlutterEngine, a sign-out)
+    // is never used.
+    final agentDir = _expression2Engines.contains(engine) ? (_agentDir ?? '') : null;
+    if (agentDir != null && agentDir.isNotEmpty && agentDir != imxPath) {
       await gate.openPath(agentDir, apiSecret);
     }
     final int? id;
@@ -176,6 +181,7 @@ class BithumanAvatar implements VoiceHost {
         'path': imxPath,
         if (apiSecret != null && apiSecret.isNotEmpty) 'apiSecret': apiSecret,
         'engine': engine,
+        'agentDir': ?agentDir,
         'motionDir': ?motionDir,
         'chunk': chunk,
         'skipAhead': ?skipAhead,
@@ -648,17 +654,24 @@ class BithumanAvatar implements VoiceHost {
 
   static Future<void>? _agentDirPending;
 
-  /// The dir the last [setExpression2AgentDir] named: [load] gates it like its own path (2.6.36).
+  /// The dir the last [setExpression2AgentDir] named: [load] gates it like its own path and sends it with
+  /// the load (2.6.36).
   static String? _agentDir;
   static const Set<String> _expression2Engines = {'expression2', 'expression-2', 'embody'};
 
   /// Sign-out (2.6.36, security): the native engines forget the API secret a [load] set for this process
   /// (Android: `Expression2Credential` and `Essence2Credential`; iOS / macOS: the Expression 2 and
-  /// Essence 2 engines' credential). Every [load] passes its own [apiSecret] and a load without one never
-  /// runs as an earlier account, so this is belt and braces: call it when an account signs out, before
-  /// another signs in. The kept avatars stay on disk; each opens again only for a credential the door
-  /// says yes to.
-  static Future<void> clearCredentials() => _channel.invokeMethod<void>('clearCredentials');
+  /// Essence 2 engines' credential), and the Expression 2 agent dir [setExpression2AgentDir] named (the next
+  /// Expression 2 load renders the bundled default unless a dir is set again). On Android a load still
+  /// running ends with `load_cancelled`, and none started before this call ever runs, or bills, as the
+  /// account that signed out. Every [load] passes its own [apiSecret] and a load without one never runs as
+  /// an earlier account, so this is belt and braces: call it when an account signs out, before another
+  /// signs in. The kept avatars stay on disk; each opens again only for a credential the door says yes to.
+  static Future<void> clearCredentials() {
+    _agentDir = null;
+    _agentDirPending = null;
+    return _channel.invokeMethod<void>('clearCredentials');
+  }
 
   /// Current microphone authorization: `authorized` | `notDetermined` | `denied`.
   /// Drives the main-screen status chip (yellow when not yet `authorized`).
@@ -869,11 +882,12 @@ Future<String> downloadExpression2Agent(
   final decoder = File('${destDir.path}/$_kExpression2Decoder');
   final gate = entitlementGate;
   final door = gate.door(code, 'expression-2');
+  final pub = gate.publicDoor(code, 'expression-2');
   // Installed = the engine can start it. A bundle without the per-identity
   // decoder is one the engine refuses, so it is re-fetched rather than re-used.
   // ★A kept install opens only for a credential the door has said yes to (2.6.36).
   if (await marker.exists() && await decoder.exists()) {
-    await gate.openKept(cacheDir, safe, door, apiSecret, what: 'expression-2:$code');
+    await gate.openKept(cacheDir, safe, door, apiSecret, what: 'expression-2:$code', publicDoor: pub);
     return destDir.path;
   }
 
@@ -885,7 +899,7 @@ Future<String> downloadExpression2Agent(
     throw BithumanAvatarException('bundle_url host not allowed: ${uri.host}');
   }
   // The door says yes to this credential before a byte is downloaded (2.6.36).
-  await gate.admit(cacheDir, safe, door, apiSecret, what: 'expression-2:$code');
+  await gate.admit(cacheDir, safe, door, apiSecret, what: 'expression-2:$code', publicDoor: pub);
   final tmpDir = Directory(cacheDir);
   if (!await tmpDir.exists()) await tmpDir.create(recursive: true);
   final tgz = File('$cacheDir/$safe.tar.gz.partial');
@@ -968,9 +982,13 @@ const String _kExpression2Decoder = 'dec_p2_v3_all.mlpackage/Manifest.json';
 /// (2.6.36, security). [cacheDir] belongs to your app, not to an account: until
 /// 2.6.35 an install kept for account A was returned to account B signed in on the
 /// same device, private or not. Pass [apiSecret], the signed-in account's key (no
-/// key: only public avatars, the gallery's showcase). The door
+/// key: only public avatars). The door
 /// (`GET https://api.bithuman.ai/v1/agent/<code>/model/download?model=expression-2`,
-/// owner-scoped) is asked with exactly that credential:
+/// owner-scoped) is asked with exactly that credential, as the platform decides who
+/// may render an avatar: its owner, a member of the workspace it is shared into, or
+/// anyone for a public avatar (another account's public avatar outside bitHuman's
+/// showcase is confirmed at the member door, `&member=web_manifest.json`, which the
+/// Android store fetches from):
 ///  * before a download: its yes is required, so another account's private avatar
 ///    is never downloaded or installed;
 ///  * on a kept install: with this credential's entitlement on this device (the door
@@ -998,10 +1016,11 @@ Future<String> downloadExpression2Avatar(
   final decoder = File('${destDir.path}/$_kExpression2Decoder');
   final gate = entitlementGate;
   final door = gate.door(code, 'expression-2');
+  final pub = gate.publicDoor(code, 'expression-2');
   // Installed = the engine can start it. An earlier install without the
   // per-identity decoder is re-fetched, not re-used: the engine refuses it.
   if (await marker.exists() && await student.exists() && await decoder.exists()) {
-    await gate.openKept(cacheDir, safe, door, apiSecret, what: 'expression-2:$code');
+    await gate.openKept(cacheDir, safe, door, apiSecret, what: 'expression-2:$code', publicDoor: pub);
     return destDir.path;
   }
 
@@ -1012,7 +1031,7 @@ Future<String> downloadExpression2Avatar(
   if (allowedHosts != null && allowedHosts.isNotEmpty && !allowedHosts.contains(uri.host)) {
     throw BithumanAvatarException('avatar_url host not allowed: ${uri.host}');
   }
-  await gate.admit(cacheDir, safe, door, apiSecret, what: 'expression-2:$code');
+  await gate.admit(cacheDir, safe, door, apiSecret, what: 'expression-2:$code', publicDoor: pub);
   final tmpDir = Directory(cacheDir);
   if (!await tmpDir.exists()) await tmpDir.create(recursive: true);
   final zip = File('$cacheDir/$safe.avatar.partial');
@@ -1320,14 +1339,15 @@ Future<String> downloadEssence2Bundle(
   // kept bundle opens for a fresh entitlement (or the door's yes now); a download needs its yes first.
   final gate = entitlementGate;
   final door = gate.door(entry.agentId, 'essence-2');
+  final pub = gate.publicDoor(entry.agentId, 'essence-2');
   final what = 'essence-2:${entry.agentId}';
   if (await marker.exists()) {
-    await gate.openKept(cacheDir, '$safe.elevatedir', door, apiSecret, what: what);
+    await gate.openKept(cacheDir, '$safe.elevatedir', door, apiSecret, what: what, publicDoor: pub);
     return destDir.path;
   }
   // The door says yes to this credential before a byte is downloaded; its yes is the mark (public only
   // when it was asked with no credential).
-  await gate.admit(cacheDir, '$safe.elevatedir', door, apiSecret, what: what);
+  await gate.admit(cacheDir, '$safe.elevatedir', door, apiSecret, what: what, publicDoor: pub);
   final tmpDir = Directory(cacheDir);
   if (!await tmpDir.exists()) await tmpDir.create(recursive: true);
   final tgz = File('$cacheDir/$safe.elevatedir.tar.gz.partial');

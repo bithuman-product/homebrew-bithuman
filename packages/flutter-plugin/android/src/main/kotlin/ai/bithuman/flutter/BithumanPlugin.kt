@@ -72,6 +72,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     private lateinit var context: Context
     /** The owner's 24 h offline window over the SDK stores' entitlement marks (2.6.36; EntitlementWindow.kt). */
     private val entitlement by lazy { EntitlementWindow(java.io.File(context.filesDir, "bithuman/door-auth")) }
+    /** Whose credential an engine is created with; sign-out cancels the loads still running (LoadCredentials.kt). */
+    private val credentials = LoadCredentials()
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
     private val main = Handler(Looper.getMainLooper())
@@ -344,10 +346,16 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             "isModelContainer" -> result.success(null)
 
             // Sign-out (2.6.36, security): the process-wide credentials the engines and the stores' doors
-            // fall back to are cleared, so nothing after this runs as the account that signed out.
+            // fall back to are cleared, so nothing after this runs as the account that signed out; every load
+            // still running is cancelled (`load_cancelled`), and none begun before this creates an engine with
+            // its credential (LoadCredentials.kt). Never waits for an engine being created.
             "clearCredentials" -> {
-                ai.bithuman.expression2.Expression2Credential.set(null)
-                Essence2Credential.set(null)
+                credentials.clear(
+                    cancelLoads = { loadEvents.cancelAll() },
+                    clearGlobals = {
+                        ai.bithuman.expression2.Expression2Credential.set(null)
+                        Essence2Credential.set(null)
+                    })
                 result.success(null)
             }
             "unpackModelContainer" -> result.error("unsupported",
@@ -395,9 +403,11 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         textures.loadStarted(texture)
         val handle = loadEvents.begin(code)
         val t0 = handle.t0
+        // In call order with clearCredentials (both on this thread): a sign-out after this cancels this load.
+        val gen = credentials.begin()
         Thread({
             try {
-                val avatar: AvatarEngine = if (essence2) loadEssence2(code, secret, t0, handle, skipAhead) else loadExpression2(code, secret, t0, handle)
+                val avatar: AvatarEngine = if (essence2) loadEssence2(code, secret, t0, handle, gen, skipAhead) else loadExpression2(code, secret, t0, handle, gen)
                 // A cancel that came while the engine was being created: close it, start no player.
                 if (!handle.finish()) {
                     runCatching { avatar.close() }
@@ -423,8 +433,9 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     result.success(entry.id().toInt())
                 }
             } catch (e: Throwable) {
-                // Asked for (BithumanAvatar.cancelLoad): its own error code, and not an error in the log.
-                val cancelled = handle.cancelled
+                // Asked for (BithumanAvatar.cancelLoad, or clearCredentials): its own error code, and not an
+                // error in the log.
+                val cancelled = handle.cancelled || e is LoadCredentials.Cleared
                 // The exception's own words in the line itself: android.util.Log prints NO stack
                 // trace when the cause chain holds an UnknownHostException, so a bare "load failed"
                 // was all a failed fetch ever logged.
@@ -452,33 +463,40 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     }
 
     /** Fetch by code into the SDK's store and open the engine — expression-2. Off the platform thread. */
-    private fun loadExpression2(code: String, secret: String?, t0: Long, handle: LoadHandle): AvatarEngine {
+    private fun loadExpression2(code: String, secret: String?, t0: Long, handle: LoadHandle, gen: Long): AvatarEngine {
         // ★2.6.36 (security): THIS load's credential, never an earlier one. Through 2.6.35 a load with no
         // secret built `Expression2ModelStore(context)`, whose door resolver falls back to the process-wide
         // Expression2Credential, which only a load WITH a secret ever set and nothing cleared: after
         // account A loaded, a credential-less load in the same process (a Dart hot restart included)
         // asked the door as A and got A's private avatar, metered to A. The engine refuses a session
         // without a credential anyway (0.4.9+), so a load without one is refused here, by name, as the
-        // essence-2 path does, and the process-wide value is this load's before the store is built.
-        if (secret.isNullOrBlank()) throw IllegalArgumentException(
-            "expression-2 on Android needs the app's credential (apiSecret): the door is asked as that account and every session is metered")
-        ai.bithuman.expression2.Expression2Credential.set(secret)
-        // The owner's offline window (EntitlementWindow): 24 h after the door's last yes to this credential.
-        entitlement.admit(code, "expression-2", secret)
-        val store = Expression2ModelStore(context, java.io.File(context.filesDir, "expression2"),
-            3L * 1024 * 1024 * 1024, Expression2ModelStore.MeteredDoorResolver(secret))
-        val model = store.fetch(code, false, handle.storeCancel) { member, done, total ->
-            if (total > 0 && done == total) Log.i(TAG, "fetched $member")
-            loadEvents.fetchProgress(handle, done, total)
-        }
-        loadEvents.fetched(handle)
-        handle.throwIfCancelled()
-        loadEvents.stage(handle, LoadHandle.STAGE_PREPARE)
-        // From expression2-android 0.4.9 the engine meters the session it serves and refuses
-        // to create one without an API secret: 0.4.10's one setter (above, before the store) arms it.
-        val avatar = try { Expression2Avatar.create(context, model) } catch (e: Exception) {
-            throw ModelRejection.expression2(e)?.let { ModelRejectedException(it, e) } ?: e
-        }
+        // essence-2 path does. ★Round 3: the store asks with this load's own resolver, and the process-wide
+        // value (which arms the meter at create) is set only right before create, under LoadCredentials,
+        // after the door's yes: a load cancelled by clearCredentials never creates an engine with its key.
+        val avatar = loadInOrder(code, "expression-2", secret, gen, credentials,
+            admit = { c, m, s -> entitlement.admit(c, m, s) },   // the owner's offline window (EntitlementWindow)
+            fetch = { s ->
+                val store = Expression2ModelStore(context, java.io.File(context.filesDir, "expression2"),
+                    3L * 1024 * 1024 * 1024, Expression2ModelStore.MeteredDoorResolver(s))
+                val model = store.fetch(code, false, handle.storeCancel) { member, done, total ->
+                    if (total > 0 && done == total) Log.i(TAG, "fetched $member")
+                    loadEvents.fetchProgress(handle, done, total)
+                }
+                loadEvents.fetched(handle)
+                handle.throwIfCancelled()
+                loadEvents.stage(handle, LoadHandle.STAGE_PREPARE)
+                model
+            },
+            // From expression2-android 0.4.9 the engine meters the session it serves and refuses to create
+            // one without an API secret: 0.4.10's one setter arms it.
+            setCredential = { s -> ai.bithuman.expression2.Expression2Credential.set(s) },
+            create = { model ->
+                try { Expression2Avatar.create(context, model) } catch (e: Exception) {
+                    throw ModelRejection.expression2(e)?.let { ModelRejectedException(it, e) } ?: e
+                }
+            },
+            close = { a -> a.close() },
+            blankMessage = "expression-2 on Android needs the app's credential (apiSecret): the door is asked as that account and every session is metered")
         loadEvents.stage(handle, LoadHandle.STAGE_PREPARED)
         // The idle loop the agent plays between turns is the SDK's: the identity's own
         // clip from the same store as the weights, decoded in place, every frame of it.
@@ -495,59 +513,42 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
      * the SDK's store — the shared audio frontend among them — and the credential also
      * arms the engine's own meter, which refuses every frame without one (0.5.7).
      */
-    private fun loadEssence2(code: String, secret: String?, t0: Long, handle: LoadHandle, skipAhead: Boolean? = null): AvatarEngine {
-        if (secret.isNullOrBlank()) throw IllegalArgumentException(
-            "essence-2 on Android needs the app's credential: members are served through the metered door and every frame is metered")
-        Essence2Credential.set(secret)   // 0.5.15: the one setter for the door and the meter
-        // The owner's offline window (EntitlementWindow): 24 h after the door's last yes to this credential.
-        entitlement.admit(code, "essence-2", secret)
-        val store = Essence2ModelStore(context, java.io.File(context.filesDir, "essence2"),
-            3L * 1024 * 1024 * 1024, Essence2ModelStore.MeteredDoorResolver(secret))
-        // ★THE CACHED COPY OPENS FIRST; THE DOOR IS ASKED AFTER (2.6.28). Since essence2-android
-        // 0.5.6 a cache hit in `fetch` asks the door whether a member changed before it returns
-        // (one short attempt, up to 8 s), so every cold open of a character already on the phone
-        // waited on the network: 1.5-5.8 s, median ~3 s, of Sofia's ~8 s launch on a Galaxy Z
-        // Fold5 / Flip5 (2026-10-01). `cached` is the same verified bundle with no request
-        // (member lengths and recorded digests checked on disk); the engine opens on it now,
-        // and the door's answer is applied in the background once the engine is up — a changed
-        // member is downloaded, verified and swapped in under the store's journal, so the NEXT
-        // open uses it. Nothing on the phone (or a swap left half-done): the full fetch as before.
-        val hit = runCatching { store.cached(code) }.getOrNull()
-        val bundle = hit ?: store.fetch(code, false, handle.storeCancel) { member, done, total ->
-            if (total > 0 && done == total) Log.i(TAG, "fetched $member")
-            loadEvents.fetchProgress(handle, done, total)
-        }
-        if (hit != null) Log.i(TAG, "$code: the cached copy opens now (+${(System.nanoTime() - t0) / 1_000_000} ms); the door is asked after the load")
-        loadEvents.fetched(handle)
-        handle.throwIfCancelled()
-        loadEvents.stage(handle, LoadHandle.STAGE_PREPARE)
-        val avatar = try {
-            Essence2Avatar.create(bundle.dir, java.io.File(bundle.dir, Essence2Avatar.W2V_MEMBER), 0)
-        } catch (e: IllegalStateException) {
-            if (e.message?.contains("REFUSED for identity '") != true) {
-                throw ModelRejection.essence2(e)?.let { ModelRejectedException(it, e) } ?: e
-            }
-            // ★AN INSTALL PUBLISHED BEFORE THE MOUTH-CORNER FIX IS FETCHED AGAIN, ONCE (2026-10-02). The
-            // engine refuses it ("... REFUSED for identity '<code>'"); the door serves every live identity's
-            // current bundle. essence2-android's store already skips such an install in
-            // `cached`, so this is the belt for a check that passed and an engine that still
-            // refused: a forced fetch (only the changed members) and one more open. A second
-            // refusal is MODEL_REJECTED (2.6.29), as is any other refusal the engine names.
-            Log.i(TAG, "$code: the installed bundle is out of date; fetching it again (once)")
-            val fresh = store.fetch(code, true, handle.storeCancel) { _, done, total ->
-                loadEvents.fetchProgress(handle, done, total)
-            }
-            handle.throwIfCancelled()
-            // The door served a file this engine cannot open: the app or the engine is out of date.
-            try {
-                Essence2Avatar.create(fresh.dir, java.io.File(fresh.dir, Essence2Avatar.W2V_MEMBER), 0)
-            } catch (e2: Exception) {
-                throw ModelRejection.essence2(e2)?.let { ModelRejectedException(it, e2) } ?: e2
-            }
-        } catch (e: RuntimeException) {
-            // The store's audio-frontend refusal (not an IllegalStateException).
-            throw ModelRejection.essence2(e)?.let { ModelRejectedException(it, e) } ?: e
-        }
+    private fun loadEssence2(code: String, secret: String?, t0: Long, handle: LoadHandle, gen: Long, skipAhead: Boolean? = null): AvatarEngine {
+        // ★Round 3 (security): as Expression 2. The store asks with this load's own resolver; the process-wide
+        // Essence2Credential (0.5.15: the one setter for the door and the meter, which arms at create) is set
+        // only right before create, under LoadCredentials, after the door's yes.
+        var store: Essence2ModelStore? = null
+        var hit: Essence2ModelStore.Bundle? = null
+        val avatar = loadInOrder(code, "essence-2", secret, gen, credentials,
+            admit = { c, m, s -> entitlement.admit(c, m, s) },   // the owner's offline window (EntitlementWindow)
+            fetch = { s ->
+                val st = Essence2ModelStore(context, java.io.File(context.filesDir, "essence2"),
+                    3L * 1024 * 1024 * 1024, Essence2ModelStore.MeteredDoorResolver(s))
+                store = st
+                // ★THE CACHED COPY OPENS FIRST; THE DOOR IS ASKED AFTER (2.6.28). Since essence2-android
+                // 0.5.6 a cache hit in `fetch` asks the door whether a member changed before it returns
+                // (one short attempt, up to 8 s), so every cold open of a character already on the phone
+                // waited on the network: 1.5-5.8 s, median ~3 s, of Sofia's ~8 s launch on a Galaxy Z
+                // Fold5 / Flip5 (2026-10-01). `cached` is the same verified bundle with no request
+                // (member lengths and recorded digests checked on disk); the engine opens on it now,
+                // and the door's answer is applied in the background once the engine is up — a changed
+                // member is downloaded, verified and swapped in under the store's journal, so the NEXT
+                // open uses it. Nothing on the phone (or a swap left half-done): the full fetch as before.
+                hit = runCatching { st.cached(code) }.getOrNull()
+                val bundle = hit ?: st.fetch(code, false, handle.storeCancel) { member, done, total ->
+                    if (total > 0 && done == total) Log.i(TAG, "fetched $member")
+                    loadEvents.fetchProgress(handle, done, total)
+                }
+                if (hit != null) Log.i(TAG, "$code: the cached copy opens now (+${(System.nanoTime() - t0) / 1_000_000} ms); the door is asked after the load")
+                loadEvents.fetched(handle)
+                handle.throwIfCancelled()
+                loadEvents.stage(handle, LoadHandle.STAGE_PREPARE)
+                bundle
+            },
+            setCredential = { s -> Essence2Credential.set(s) },
+            create = { bundle -> createEssence2(store!!, code, bundle, handle) },
+            close = { a -> a.close() },
+            blankMessage = "essence-2 on Android needs the app's credential: members are served through the metered door and every frame is metered")
         loadEvents.stage(handle, LoadHandle.STAGE_PREPARED)
         // Zero-copy delivery by default (2.6.19). `debug.bh.e2.copy=1` keeps the copy path for a
         // same-bytes A/B, and only a DEBUGGABLE host app honours it (see AvatarPlayer.debuggable).
@@ -563,9 +564,41 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             "${if (forceCopy) ", debug.bh.e2.copy=1" else ""}, skip-ahead clock ${if (clockOn) "on" else "off"}" +
             " (${when { clockLever == 1 || clockLever == 2 -> "debug.bh.e2.clock=$clockLever"; skipAhead != null -> "load option"; else -> "default" }})" +
             ") +${(System.nanoTime() - t0) / 1_000_000} ms")
-        if (hit != null) revalidateLater(store, code)
+        if (hit != null) store?.let { revalidateLater(it, code) }
         return e
     }
+
+    /**
+     * Creates the Essence 2 engine on [bundle] (inside [LoadCredentials.create]: the process-wide credential is
+     * this load's). ★AN INSTALL PUBLISHED BEFORE THE MOUTH-CORNER FIX IS FETCHED AGAIN, ONCE (2026-10-02). The
+     * engine refuses it ("... REFUSED for identity '<code>'"); the door serves every live identity's current
+     * bundle. essence2-android's store already skips such an install in `cached`, so this is the belt for a
+     * check that passed and an engine that still refused: a forced fetch (only the changed members, with this
+     * load's own resolver) and one more open. A second refusal is MODEL_REJECTED (2.6.29), as is any other
+     * refusal the engine names.
+     */
+    private fun createEssence2(store: Essence2ModelStore, code: String, bundle: Essence2ModelStore.Bundle, handle: LoadHandle): Essence2Avatar =
+        try {
+            Essence2Avatar.create(bundle.dir, java.io.File(bundle.dir, Essence2Avatar.W2V_MEMBER), 0)
+        } catch (e: IllegalStateException) {
+            if (e.message?.contains("REFUSED for identity '") != true) {
+                throw ModelRejection.essence2(e)?.let { ModelRejectedException(it, e) } ?: e
+            }
+            Log.i(TAG, "$code: the installed bundle is out of date; fetching it again (once)")
+            val fresh = store.fetch(code, true, handle.storeCancel) { _, done, total ->
+                loadEvents.fetchProgress(handle, done, total)
+            }
+            handle.throwIfCancelled()
+            // The door served a file this engine cannot open: the app or the engine is out of date.
+            try {
+                Essence2Avatar.create(fresh.dir, java.io.File(fresh.dir, Essence2Avatar.W2V_MEMBER), 0)
+            } catch (e2: Exception) {
+                throw ModelRejection.essence2(e2)?.let { ModelRejectedException(it, e2) } ?: e2
+            }
+        } catch (e: RuntimeException) {
+            // The store's audio-frontend refusal (not an IllegalStateException).
+            throw ModelRejection.essence2(e)?.let { ModelRejectedException(it, e) } ?: e
+        }
 
     /**
      * The door check a cached open skipped, off every thread that matters: `fetch` on a cache

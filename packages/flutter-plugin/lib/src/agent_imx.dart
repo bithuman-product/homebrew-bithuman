@@ -130,7 +130,7 @@ class AgentImxDownloader {
     // A poisoned / MITM'd catalog could point model_url at an attacker host whose bytes reach the
     // native parser: with an allow-list, the first hop must be on it (or be bitHuman's own).
     if (allowedHosts != null && allowedHosts.isNotEmpty &&
-        !allowedHosts.contains(src.host) && !doorHosts.contains(src.host)) {
+        !hostIn(allowedHosts, src.host) && !hostIn(doorHosts, src.host)) {
       throw BithumanAvatarException('model_url host not allowed: ${src.host}');
     }
     final trusted = {...doorHosts, ...?allowedHosts};
@@ -253,7 +253,7 @@ class AgentImxDownloader {
     for (var hop = 0; hop <= 5; hop++) {
       final req = await client.getUrl(u);
       req.followRedirects = false;
-      if (key != null && u.host == src.host) req.headers.set('api-secret', key);
+      if (key != null && normalizeHost(u.host) == normalizeHost(src.host)) req.headers.set('api-secret', key);
       final res = await req.close();
       final code = res.statusCode;
       if (code >= 300 && code < 400) {
@@ -264,13 +264,14 @@ class AgentImxDownloader {
         }
         final next = u.resolve(loc);
         _checkUrl(next, 'redirect');
-        if (!doorHosts.contains(u.host) && !trusted.contains(next.host)) {
+        if (!hostIn(doorHosts, u.host) && !hostIn(trusted, next.host)) {
           throw BithumanAvatarException('.imx download: refusing a redirect to an untrusted host: ${next.host}');
         }
         // A door's yes is its redirect OFF bitHuman's door hosts (the signed file URL it minted). A
         // redirect from one door host to another (the apex to www, a trailing slash) is not an answer:
-        // it is followed, and the next door's answer counts.
-        if (door == null && doorHosts.contains(u.host) && !doorHosts.contains(next.host)) door = DoorAnswer(code);
+        // it is followed, and the next door's answer counts. Hosts compare as DNS names (case, a trailing
+        // dot: `www.bithuman.ai.` is a door host).
+        if (door == null && hostIn(doorHosts, u.host) && !hostIn(doorHosts, next.host)) door = DoorAnswer(code);
         u = next;
         continue;
       }

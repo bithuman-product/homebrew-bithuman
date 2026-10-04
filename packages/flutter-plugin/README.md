@@ -228,7 +228,7 @@ A 3rd engine appends one `EngineDescriptor` here (and one line in
 | `audioInterruptions` | The platform took the session's sound away (`began`: a phone call ringing or answered, also from its banner or notification; Siri or an assistant; another app's call) or gave it back, as `BithumanAudioInterruption`s with a `reason` (`call`, `focus`, `system`). iOS and Android; macOS never. |
 | `dispose()` | Drop the native runtime. Idempotent. |
 | `static loadEvents` | Android: what a running `load` is doing, as `BithumanLoadEvent`s — `fetch` (exact bytes of the identity's download), `fetched`, `prepare`, `prepared`. Filter on `code`. iOS/macOS send none. |
-| `static clearCredentials()` | Sign-out: the engines forget the API secret the last `load` set (2.6.36). |
+| `static clearCredentials()` | Sign-out: the engines forget the API secret the last `load` set; Android cancels every `load` still running (`load_cancelled`); iOS / macOS forget the Expression 2 agent dir (2.6.36). |
 | `static cancelLoad(code)` | Android: stop a running `load` of `code`; it throws `PlatformException` `load_cancelled`, and the download keeps what it has for next time. |
 
 Plus catalog helpers (anonymous, no auth):
@@ -250,7 +250,9 @@ Avatar downloads (iOS / macOS; Android's `load` downloads by code itself):
 bitHuman's door has said yes to for it: pass the signed-in account's `apiSecret` (none: public avatars only). With
 that yes on the device the kept copy opens at once, also offline: for 24 hours after the door last answered for an
 account's own avatar, 7 days for a public one. Otherwise the door is asked first, and a refusal (another account's
-private avatar) or a door that cannot be asked throws `BithumanEntitlementException` (`refused` says which). The key
+private avatar) or a door that cannot be asked throws `BithumanEntitlementException` (`refused` says which; it is a
+`BithumanAvatarException`, not a `PlatformException`). Who the door says yes to is the platform's rule: the avatar's
+owner, a member of the workspace it is shared into, or anyone for a public avatar. The key
 is sent only to bitHuman's door and is never written to disk. The same rule holds for `downloadEssence2Bundle` (pass
 `apiSecret`), for a path one of these functions returned that you pass to `load` later (`load` checks it with its own
 `apiSecret`), and on Android, where `load` asks the door when the credential's last yes is more than 24 hours old.
