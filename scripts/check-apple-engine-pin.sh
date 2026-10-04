@@ -57,22 +57,50 @@
 #                      essence2Tag and EngineCore binaryTarget checksum (macOS link, from
 #                      essence2-v1.15.0), when Package.swift declares EngineCore.
 #
+# WHERE THE TWO HALVES LIVE (2026-10). The Flutter plugin moved to its own project
+# (gitlab.com/bithuman/sdk/bithuman-flutter); this repository keeps the Swift 2.x manifest. Here,
+# with no plugin in the tree, only A7 runs (Essence2Kit lives here); the plugin's project grades
+# A1-A6 and A8 with this same script against this repository's Package.swift
+# (BITHUMAN_SWIFT_MANIFEST). Overrides: BITHUMAN_PLUGIN_BOOTSTRAP (the plugin's bootstrap.sh),
+# BITHUMAN_SWIFT_MANIFEST (a Package.swift).
+#
 # Usage:  check-apple-engine-pin.sh [repo-root]
 # Exit:   0 PASS   1 REFUSE   2 could not run (never a silent pass)
 # Apache-2.0; (c) bitHuman.
 set -uo pipefail
 
 ROOT="${1:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
-BOOT="$ROOT/packages/flutter-plugin/scripts/bootstrap.sh"
-MANIFEST="$ROOT/Package.swift"
+BOOT="${BITHUMAN_PLUGIN_BOOTSTRAP:-$ROOT/packages/flutter-plugin/scripts/bootstrap.sh}"
+MANIFEST="${BITHUMAN_SWIFT_MANIFEST:-$ROOT/Package.swift}"
 
 cannot() { echo "::error::check-apple-engine-pin: $*" >&2; exit 2; }
-[ -f "$BOOT" ]     || cannot "no $BOOT"
 [ -f "$MANIFEST" ] || cannot "no $MANIFEST"
 
 FAIL=0
 refuse() { echo "REFUSE  $*"; echo "::error::check-apple-engine-pin: $*" >&2; FAIL=1; }
 pass()   { echo "ok      $*"; }
+
+# No plugin in this tree (it moved to sdk/bithuman-flutter, which grades A1-A6 and A8 against this
+# manifest): grade A7 only. It must still have a subject: no Essence2Kit either is "cannot run".
+if [ ! -f "$BOOT" ] && [ -z "${BITHUMAN_PLUGIN_BOOTSTRAP:-}" ]; then
+    KIT="$ROOT/Sources/Essence2Kit/Essence2Engine.swift"
+    [ -f "$KIT" ] || cannot "no plugin bootstrap and no $KIT: nothing to grade"
+    SPM_TAG="$(sed -n 's/^let essence2Tag = "\([^"]*\)"$/\1/p' "$MANIFEST" | head -1)"
+    [ -n "$SPM_TAG" ] || cannot "could not read essence2Tag out of $MANIFEST"
+    KIT_TAG="$(sed -n 's/^ *public static let releaseTag = "\([^"]*\)"$/\1/p' "$KIT" | head -1)"
+    echo "skip    A1-A6, A8: the Flutter plugin is not in this tree (sdk/bithuman-flutter grades them against this Package.swift)"
+    if [ -z "$KIT_TAG" ]; then
+        refuse "A7 could not read Essence2Resources.releaseTag out of $KIT — this check has lost its subject"
+    elif [ "$KIT_TAG" != "$SPM_TAG" ]; then
+        refuse "A7 Essence2Kit fetches its runtime files from '$KIT_TAG', SwiftPM serves the engine '$SPM_TAG' — roll releaseTag (and its sha256 pins) with essence2Tag"
+    else
+        pass "A7 Essence2Kit's runtime files come from $SPM_TAG, the engine SwiftPM serves"
+    fi
+    [ "$FAIL" -eq 0 ] || exit 1
+    echo "PASS — Essence2Kit names the engine Package.swift serves (A7)."
+    exit 0
+fi
+[ -f "$BOOT" ] || cannot "no $BOOT"
 
 # Read a `NAME="${NAME:-VALUE}"` default out of bootstrap.sh. Deliberately
 # strict: `${NAME-VALUE}` (no colon) is a different operator and an empty export

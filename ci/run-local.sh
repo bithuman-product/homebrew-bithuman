@@ -12,13 +12,9 @@ WF="python3 ci/wf-step.py ci/github-workflows-disabled"
 # name | heavy(1=cap) | required tools | description | command
 STEPS=(
   "no-large-files|0|git|no blob over 10 MB in origin/main..HEAD (no-large-files.yml)|BASE_REF=\${BASE_REF:-main} $WF/no-large-files.yml size-check"
-  "apple-engine-pin|0|git|one engine tag on both Apple paths + negative control (apple-engine-pin.yml)|$WF/apple-engine-pin.yml pin"
+  "apple-engine-pin|0|git|Essence2Kit names the engine Package.swift serves (A7) + negative control; the pod arms run in sdk/bithuman-flutter (apple-engine-pin.yml)|$WF/apple-engine-pin.yml pin"
   "manifest-truth|0|python3 strings curl|formula licence + Package.swift vs shipped binaries + mutation proof (manifest-truth.yml)|$WF/manifest-truth.yml manifest-truth"
   "public-vocabulary|0|python3|no internal vocabulary in the tracked tree (public-vocabulary.yml:vocabulary)|$WF/public-vocabulary.yml vocabulary"
-  "platform-guards|0|python3|bare #if os(macOS) states its reason + control (plugin-platform-guards.yml:guards)|$WF/plugin-platform-guards.yml guards"
-  "android-coordinates|0|python3 curl|pinned Android coordinates + transitive deps served by their home (ai.bithuman: maven.bithuman.ai; else Central) + controls (plugin-platform-guards.yml)|$WF/plugin-platform-guards.yml android-coordinates-on-central"
-  "dev-levers|0|python3|dev levers go through their door + controls (plugin-platform-guards.yml:dev-levers)|$WF/plugin-platform-guards.yml dev-levers"
-  "voice-render-edge-dart|0|python3|Dart voice module does not import render + controls (plugin-platform-guards.yml)|$WF/plugin-platform-guards.yml voice-render-edge-dart"
   "latest-badge-selftest|0|python3|Latest-badge detector can refuse, no network (latest-badge.yml, --selftest only)|python3 tools/verify_latest_badge.py --selftest"
   "release-coverage|0|python3 curl|newest CLI release carries every platform (release-coverage.yml:coverage)|$WF/release-coverage.yml coverage"
   "formula-pin-anonymous|0|python3 curl|formula asset anonymously fetchable + mutation proof (release-coverage.yml)|$WF/release-coverage.yml formula-pin-is-anonymously-fetchable"
@@ -29,7 +25,6 @@ STEPS=(
   "downloads-publish-selftest|0|python3|the publish wrapper: cli-v* only for latest.json, refusals map to exit 1, no publisher is exit 2 (scripts/downloads-publish.py)|python3 scripts/downloads-publish.py --self-test"
   "explicit-tap|0|python3|every brew tap/install line names the tap's GitLab URL; no shortened form (github.com/bithuman is not ours) + planted regressions (scripts/check-explicit-tap.py)|python3 scripts/check-explicit-tap.py . && python3 scripts/check-explicit-tap.py --selftest"
   "install-worker|0|node|the install.bithuman.ai Worker source parses (workers/install-bithuman-ai.mjs)|node --check workers/install-bithuman-ai.mjs"
-  "flutter-plugin-tests|1|flutter|flutter plugin census + flutter test (flutter-plugin-tests.yml)|$WF/flutter-plugin-tests.yml plugin"
 )
 
 # slower / scheduled / non-PR jobs that still run on this host (read-only)
@@ -39,16 +34,12 @@ FULL_STEPS=(
 )
 
 MANUAL=(
-  "dev-levers-release-arm   [macOS host] python3 ci/wf-step.py ci/github-workflows-disabled/plugin-platform-guards.yml dev-levers-release-arm   (./scripts/prove_dev_levers_release.sh + control)"
-  "voice-render-edge        [macOS host] python3 ci/wf-step.py ci/github-workflows-disabled/plugin-platform-guards.yml voice-render-edge   (check_voice_render_edge.sh, prove_lipsync_sink_headless.sh + controls)"
   "swift-package            [macOS 26 + Xcode] swift build --disable-keychain && swift test --disable-keychain   (swift-package.yml)"
-  "flutter-plugin-android-unit [Android SDK + a Flutter app that depends on the plugin] packages/flutter-plugin/scripts/test_android_unit.sh <app dir>   (JVM unit tests: EngineUsersTest)"
   "latest-badge --heal      [WRITES latest.json on downloads.bithuman.ai; bucket credentials] python3 tools/verify_latest_badge.py --heal   (latest-badge.yml; run only after a release)"
   "preflight                [secret BITHUMAN_MODELS_SSH_KEY] probe the models deploy key: see preflight.yml"
   "release-pypi             [RELEASE; macOS+Linux x86_64+aarch64 hosts, docker, secrets BITHUMAN_MODELS_SSH_KEY PYPI_API_TOKEN] recipe: ci/github-workflows-disabled/release-pypi.yml; RELEASE.md"
   "publish-cli-wheel        [RELEASE; secret PYPI_API_TOKEN] sha256 pin check + twine check + twine upload dist/bithuman-cli/<wheel>   (publish-cli-wheel.yml)"
   "publish-mcp              [RELEASE; secret PYPI_API_TOKEN] cd packages/python-mcp && python -m build && twine upload dist/*   (publish-mcp.yml, tag mcp-v*)"
-  "publish-pubdev           [RELEASE; pub.dev credentials] cd packages/flutter-plugin && no _unpackImxContainer in lib/ && dart pub publish   (publish-pubdev.yml, tag flutter-v*)"
   "publish-essence2-apple   [RELEASE; macOS host, bucket credentials] graded essence2-apple archives -> scripts/downloads-publish.py publish essence2-v<x> <files> (never latest.json)   (recipe: publish-essence2-apple.yml, still written for gh)"
 )
 
