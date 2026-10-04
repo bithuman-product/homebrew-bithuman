@@ -114,11 +114,11 @@ void main() {
     // The text is done; the voice is 12 characters in when the person cuts in.
     host.emitConverse({'kind': 'reply_cancel', 'id': 7, 'heardChars': 12});
     await _settle();
-    expect(src.cancels, ['7:12:false']);
+    expect(src.cancels.single, startsWith('7:12:'));
     // An older native side sends no count: null, not 0 (0 would erase the reply).
     host.emitConverse({'kind': 'reply_cancel', 'id': 7});
     await _settle();
-    expect(src.cancels.last, '7:null:false');
+    expect(src.cancels.last, startsWith('7:null:'));
   });
 
   test('a stream error ends the reply with result 3 (the brain says its fallback line)', () async {

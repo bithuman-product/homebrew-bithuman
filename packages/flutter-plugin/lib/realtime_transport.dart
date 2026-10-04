@@ -422,6 +422,7 @@ class LocalConverseTransport implements RealtimeTransport {
   /// Speak a greeting when the brain is ready. With a [replySource] it is the
   /// source's own line ([HostReplySource.greeting], spoken verbatim; none when it
   /// has none); without, the on-device model greets in character.
+  final bool greet;
   /// Testing: no microphone; feed files with [VoiceHost.localInjectWav].
   final bool injectAudio;
   /// The Llama GGUF. Null is fine when Apple's on-device model runs the brain

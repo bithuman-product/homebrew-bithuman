@@ -20,12 +20,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show Random;
 
 import 'host_reply.dart';
 
 /// The relay refused the session at the handshake: [status] 401 (key), 402
 /// INSUFFICIENT_BALANCE (show the paywall), 403 PERSONA_FORBIDDEN (not your agent),
-/// 503 (capacity; retry), 400 (a bad request or the mode is off on this relay).
+/// 503 (capacity; retry), 400 (a bad request or the mode is off on this relay); [code] is
+/// the relay's own error code. Status 0: no answer ([code] TIMEOUT / NETWORK / CLOSED).
 class RelayTextBrainRefused implements Exception {
   RelayTextBrainRefused(this.status, this.code);
   final int status;
@@ -89,24 +91,7 @@ class RelayTextBrain extends HostReplySource {
       'agent': agentCode,
       if (!greet) 'greet': '0',
     });
-    final WebSocket ws;
-    try {
-      ws = await WebSocket.connect(uri.toString(), headers: {'api-secret': apiSecret}).timeout(timeout);
-    } on WebSocketException catch (e) {
-      // dart:io reports a refused upgrade as "... HTTP status code: 402"; map the status.
-      final m = RegExp(r'status code: (\d{3})').firstMatch(e.message);
-      final status = m == null ? 0 : int.parse(m.group(1)!);
-      throw RelayTextBrainRefused(
-          status,
-          const {
-                400: 'VALIDATION_ERROR',
-                401: 'UNAUTHORIZED',
-                402: 'INSUFFICIENT_BALANCE',
-                403: 'FORBIDDEN',
-                503: 'SERVICE_UNAVAILABLE',
-              }[status] ??
-              'UPSTREAM_ERROR');
-    }
+    final ws = await _upgrade(uri, apiSecret, timeout);
     ws.pingInterval = const Duration(seconds: 20);
     final frames = StreamIterator(ws
         .where((d) => d is String)
@@ -145,6 +130,52 @@ class RelayTextBrain extends HostReplySource {
         (limits['max_session_s'] as num?)?.toDouble() ?? 3600, frames, greet);
     brain._pump();
     return brain;
+  }
+
+  /// The WebSocket upgrade by hand, so a refusal's HTTP status and the relay's error code
+  /// (`{"error":{"code":...}}`) reach the caller — dart:io's WebSocket.connect hides both.
+  static Future<WebSocket> _upgrade(Uri uri, String apiSecret, Duration timeout) async {
+    final client = HttpClient()..connectionTimeout = timeout;
+    final httpUri = uri.replace(scheme: uri.scheme == 'wss' ? 'https' : 'http');
+    final rnd = Random.secure();
+    final key = base64.encode(List<int>.generate(16, (_) => rnd.nextInt(256)));
+    try {
+      final req = await client.openUrl('GET', httpUri).timeout(timeout);
+      req.headers
+        ..set(HttpHeaders.connectionHeader, 'Upgrade')
+        ..set(HttpHeaders.upgradeHeader, 'websocket')
+        ..set('Sec-WebSocket-Key', key)
+        ..set('Sec-WebSocket-Version', '13')
+        ..set('api-secret', apiSecret);
+      final resp = await req.close().timeout(timeout);
+      if (resp.statusCode != HttpStatus.switchingProtocols) {
+        var code = const {
+              400: 'VALIDATION_ERROR',
+              401: 'UNAUTHORIZED',
+              402: 'INSUFFICIENT_BALANCE',
+              403: 'FORBIDDEN',
+              503: 'SERVICE_UNAVAILABLE',
+            }[resp.statusCode] ??
+            'UPSTREAM_ERROR';
+        try {
+          final body = jsonDecode(await utf8.decodeStream(resp).timeout(timeout));
+          final c = body is Map ? (body['error'] is Map ? body['error']['code'] : null) : null;
+          if (c is String && c.isNotEmpty) code = c;
+        } catch (_) {}
+        client.close(force: true);
+        throw RelayTextBrainRefused(resp.statusCode, code);
+      }
+      final socket = await resp.detachSocket();
+      return WebSocket.fromUpgradedSocket(socket, serverSide: false);
+    } on RelayTextBrainRefused {
+      rethrow;
+    } on TimeoutException {
+      client.close(force: true);
+      throw RelayTextBrainRefused(0, 'TIMEOUT');
+    } on IOException {
+      client.close(force: true);
+      throw RelayTextBrainRefused(0, 'NETWORK');
+    }
   }
 
   Future<void> _pump() async {
@@ -242,7 +273,7 @@ class RelayTextBrain extends HostReplySource {
       'type': 'user.turn',
       'turn': id,
       'text': request.text,
-      if (replaces != null) 'replaces': replaces,
+      'replaces': ?replaces,
     });
     if (_ws.readyState != WebSocket.open) {
       _turns.remove(id);

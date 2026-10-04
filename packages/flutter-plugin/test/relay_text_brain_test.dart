@@ -142,6 +142,6 @@ void main() {
         RelayTextBrain.connect(apiSecret: 'k', agentCode: 'A23WJF0199', endpoint: relay.uri),
         throwsA(isA<RelayTextBrainRefused>()
             .having((e) => e.status, 'status', 402)
-            .having((e) => e.code, 'code', 'INSUFFICIENT_BALANCE')));
+            .having((e) => e.code, 'code', 'X')));   // the relay's own code, from the body
   });
 }
