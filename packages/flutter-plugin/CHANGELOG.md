@@ -64,7 +64,9 @@ you update: some calls that worked before now fail by name.
     `NOT_FOUND` there but is served by the member door the native stores fetch from (`&member=web_manifest.json`
     for Expression 2, `&member=manifest.json` for Essence 2; Android's store: `&member=android_store.v1.json&plane=android`).
     So after the container door's "not yours" (404 `NOT_FOUND` to a key, 401 to no key), the gate asks that member
-    door once with the same credential: its yes is a yes, its no keeps the no, no answer is "could not confirm". An
+    door once with the same credential: its yes is a yes; anything else keeps the container's no, so the kept copy's
+    marks are dropped (fail closed), and when the member door did not answer (a 5xx, a 429, a timeout) the
+    exception says "could not confirm" (`refused: false`; the next open asks again). An
     Expression 2 or Essence 2 avatar another account published therefore opens as it did through 2.6.35. Exactly
     two cases differ from `validate`: a kept `.imx` (`downloadAgentImx`) follows the container door alone, as its
     download does (the platform serves another account's container only for the showcase), and a featured avatar
@@ -115,7 +117,9 @@ you update: some calls that worked before now fail by name.
   process-wide credential (which arms the session meter) only after the door's yes, immediately before the engine
   is created, under one lock: a load still downloading when the app calls `clearCredentials` is cancelled
   (`load_cancelled`) and never creates an engine with its credential, so another account signing in meanwhile is
-  never billed for it, and a refused load leaves the credential as it was. On iOS and macOS a load without
+  never billed for it; a sign-out that lands just as such a load sets its credential is caught under that lock and
+  the signed-out key is emptied again, never left in the process-wide credential; and a refused load leaves the
+  credential as it was. On iOS and macOS a load without
   `apiSecret` clears the engines' credential instead of keeping the last one, and an Expression 2 load renders the
   agent dir its own Dart side checked and sent with the load (`''` for none), never one another Flutter engine, a
   Dart side before a hot restart, or an account before `clearCredentials` named. New:

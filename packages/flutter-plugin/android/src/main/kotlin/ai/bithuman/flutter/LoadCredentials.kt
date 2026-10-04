@@ -21,8 +21,18 @@ import java.util.concurrent.atomic.AtomicLong
  * [Cleared], which the plugin answers as `load_cancelled`. [clear] also cancels every load still running
  * (their fetches stop at the next read) and never waits for the lock, so sign-out never blocks the
  * platform thread behind an engine being created.
+ *
+ * Because [clear] takes no lock, it can land between [create]'s generation check and its set: the set then
+ * writes the signed-out key after [clear] emptied the process-wide credentials. So [create] checks the
+ * generation again right after the set and, on a clear, empties them again ([clearGlobals]) under the lock
+ * before it throws [Cleared] (PR #202 round-3 review LOW): the signed-out key never stays in the
+ * process-wide credential, where a host app's own use of the native SDK (its default store or meter) would
+ * act as that account.
  */
-internal class LoadCredentials {
+internal class LoadCredentials(
+    /** Empties the process-wide credentials (`Expression2Credential`, `Essence2Credential`). */
+    private val clearGlobals: () -> Unit,
+) {
     private val lock = Any()
     private val generation = AtomicLong(0)
 
@@ -36,7 +46,7 @@ internal class LoadCredentials {
      * Sign-out: every load begun before this never creates an engine with its credential; [cancelLoads]
      * stops the ones still running, [clearGlobals] empties the process-wide credentials. No lock.
      */
-    fun clear(cancelLoads: () -> Unit, clearGlobals: () -> Unit) {
+    fun clear(cancelLoads: () -> Unit) {
         generation.incrementAndGet()
         cancelLoads()
         clearGlobals()
@@ -44,11 +54,18 @@ internal class LoadCredentials {
 
     /**
      * Sets the load's credential ([set]) and creates its engine ([create]) under the lock, only if no
-     * [clear] came since [gen]. A clear during [create] closes the engine ([close]) and throws [Cleared].
+     * [clear] came since [gen]. A clear that lands just before the set (it takes no lock) is caught right
+     * after it: the process-wide credentials are emptied again and nothing is created. A clear during
+     * [create] closes the engine ([close]). Either way the load throws [Cleared].
      */
     fun <A> create(gen: Long, set: () -> Unit, create: () -> A, close: (A) -> Unit): A = synchronized(lock) {
         if (generation.get() != gen) throw Cleared(CLEARED)
         set()
+        if (generation.get() != gen) {
+            // [clear] ran between the check above and the set: the set wrote the signed-out key back.
+            clearGlobals()
+            throw Cleared(CLEARED)
+        }
         val a = create()
         if (generation.get() != gen) {
             runCatching { close(a) }

@@ -45,9 +45,11 @@ import javax.crypto.spec.SecretKeySpec
  * avatar outside the showcase gets 404 NOT_FOUND there, while the member door the stores fetch from
  * (`&member=web_manifest.json` for Expression 2, `&member=android_store.v1.json&plane=android` for
  * Essence 2) serves it to any credential. So a 404 NOT_FOUND from the container door is asked again, once,
- * at the store's member door ([publicDoor]): its yes is a yes (what the store itself would fetch), its no
- * leaves the container's no, no answer is no answer. Through 2.6.35 the stores loaded such an avatar; this
- * window does not narrow that.
+ * at the store's member door ([publicDoor]): its yes is a yes (what the store itself would fetch); anything
+ * else leaves the container's no, so the record is dropped (fail closed). When the member door did not
+ * answer (a 5xx, a 429, a timeout) the load still fails as `entitlement_unconfirmed`, not
+ * `entitlement_refused`: the avatar may be public, and the next load asks again. Through 2.6.35 the stores
+ * loaded such an avatar; this window does not narrow that.
  */
 internal class EntitlementWindow(
     private val dir: File,
@@ -73,15 +75,19 @@ internal class EntitlementWindow(
         val channelCode: String get() = if (refused) "entitlement_refused" else "entitlement_unconfirmed"
     }
 
-    /** What the door answered one request, or that it could not be asked ([status] null). */
-    data class Answer(val status: Int?, val code: String? = null, val error: Throwable? = null) {
+    /**
+     * What the door answered one request, or that it could not be asked ([status] null). [memberUnanswered]:
+     * set on the container door's "not yours" when the member door asked next did not answer ([askEntitled]);
+     * the answer is still the container's no (the record follows it), only the refusal's wording changes.
+     */
+    data class Answer(val status: Int?, val code: String? = null, val error: Throwable? = null, val memberUnanswered: Answer? = null) {
         /** 2xx (the JSON grant), or a 3xx to the signed file URL. */
         val granted: Boolean get() = status != null && status in 200..399
         /** 401/403, or 404 with error.code NOT_FOUND. Not a no: 404 MODEL_ARTIFACT_NOT_READY, a 5xx. */
         val denied: Boolean get() = status == 401 || status == 403 || (status == 404 && code == "NOT_FOUND")
         override fun toString(): String =
             if (status == null) "no answer (${error?.javaClass?.simpleName}: ${error?.message})"
-            else "HTTP $status${code?.let { " $it" } ?: ""}"
+            else "HTTP $status${code?.let { " $it" } ?: ""}${memberUnanswered?.let { "; the public-avatar door: $it" } ?: ""}"
     }
 
     private val renewing = HashSet<String>()
@@ -152,8 +158,10 @@ internal class EntitlementWindow(
 
     /**
      * The container door's answer, and for its 404 NOT_FOUND the store's member door's (a PUBLIC avatar
-     * outside the showcase; see the class note): its yes is the answer, its no leaves the container's no, no
-     * answer is no answer. A 401 / 403 is about the key and is not asked again.
+     * outside the showcase; see the class note): its yes is the answer; anything else leaves the container's
+     * no, so [renew] drops the record (fail closed: a member door that is down, rate limited or slow never
+     * keeps a record the container door just took away). A no-answer rides along as [Answer.memberUnanswered]
+     * for the refusal's wording. A 401 / 403 is about the key and is not asked again.
      */
     fun askEntitled(code: String, model: String, credential: String): Answer {
         val a = ask(code, model, credential)
@@ -163,7 +171,7 @@ internal class EntitlementWindow(
         return when {
             m.granted -> m
             m.denied -> a
-            else -> m
+            else -> a.copy(memberUnanswered = m)
         }
     }
 
@@ -213,7 +221,7 @@ internal class EntitlementWindow(
     }
 
     private fun refusal(code: String, model: String, a: Answer): Refused =
-        if (a.denied) Refused(
+        if (a.denied && a.memberUnanswered == null) Refused(
             "$model:$code: bitHuman refused this credential for this avatar ($a). A private avatar opens only " +
                 "for the account that owns it; pass that account's apiSecret (the copy kept on this device was not opened)",
             refused = true, status = a.status)

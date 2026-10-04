@@ -51,8 +51,10 @@
 // one the Android stores fetch from) serves it to any credential and to none. So when the container door
 // answers a key 404 NOT_FOUND (no key: 401) for an Essence 2 or Expression 2 avatar, the gate asks the
 // member door for the family's catalog once ([DoorGate.askEntitled]): its yes is a yes (the avatar is
-// public), its no leaves the container's no, and no answer is no answer. A featured avatar that is
-// private, which P11 also admits, is served by neither door to another account and stays refused.
+// public); anything else leaves the container's no, so the marks follow that no (fail closed). When the
+// member door did not answer (a 5xx, a 429, a timeout), the refusal still says "could not confirm", not
+// "refused": the avatar may be public, and the next open asks again. A featured avatar that is private,
+// which P11 also admits, is served by neither door to another account and stays refused.
 //
 // SAVED PATHS (round 3). `BithumanAvatar.load` gates a path one of the installers returned by what it IS on
 // disk, not by how it is spelled: symlinks are resolved and `.`, `..` and `//` folded first, then the
@@ -121,11 +123,12 @@ String credentialTag(String? credential) =>
 
 /// What the door answered ONE request, or that it could not be asked.
 class DoorAnswer {
-  const DoorAnswer(this.status, {this.code, this.answeredByAskedHost = true}) : error = null;
+  const DoorAnswer(this.status, {this.code, this.answeredByAskedHost = true, this.memberUnanswered}) : error = null;
   const DoorAnswer.unreachable(Object this.error)
       : status = null,
         code = null,
-        answeredByAskedHost = false;
+        answeredByAskedHost = false,
+        memberUnanswered = null;
 
   /// The HTTP status; null when the door could not be asked.
   final int? status;
@@ -139,6 +142,11 @@ class DoorAnswer {
 
   /// Why the door could not be asked.
   final Object? error;
+
+  /// Set on the container door's "not yours" when the member door, asked next for a public avatar
+  /// ([DoorGate.askEntitled]), did not answer: what it said. The answer is still the container's no (the
+  /// marks follow it: fail closed); only the refusal's wording is "could not confirm" ([DoorGate.refusal]).
+  final DoorAnswer? memberUnanswered;
 
   /// The door said yes to this credential: 2xx, or its redirect to the signed file URL.
   bool get granted => status != null && answeredByAskedHost && status! >= 200 && status! < 400;
@@ -154,7 +162,8 @@ class DoorAnswer {
   String toString() =>
       status == null
           ? 'no answer ($error)'
-          : 'HTTP $status${code == null ? '' : ' $code'}${answeredByAskedHost ? '' : ' (behind a redirect)'}';
+          : 'HTTP $status${code == null ? '' : ' $code'}${answeredByAskedHost ? '' : ' (behind a redirect)'}'
+              '${memberUnanswered == null ? '' : '; the public-avatar door: $memberUnanswered'}';
 }
 
 /// `error.code` of a door error body (`{"error": {"code": "NOT_FOUND", ...}}`), or null.
@@ -414,8 +423,11 @@ class DoorGate {
   /// container door [door] first; when it says "not yours" (404 NOT_FOUND to a key, 401 to no key) and the
   /// family has a member catalog ([publicDoor]), that door is asked once with the same credential, because
   /// it serves a PUBLIC avatar outside bitHuman's showcase to anyone while the container door serves it only
-  /// to its owner. Its yes is the answer; its no leaves the container's no; no answer is no answer (not a
-  /// no: [refusal] says "could not confirm"). A 401 / 403 to a key is about the key and is not asked again.
+  /// to its owner. Its yes is the answer. Anything else leaves the container's no, and [note] drops the marks
+  /// on it (fail closed: a member door that is down, rate limited or slow never keeps a mark the container
+  /// door just took away); when the member door did not answer, the no carries that ([DoorAnswer.memberUnanswered])
+  /// and [refusal] says "could not confirm" rather than "refused". A 401 / 403 to a key is about the key and is
+  /// not asked again.
   Future<DoorAnswer> askEntitled(Uri door, String? credential, {Uri? publicDoor}) async {
     final a = await ask(door, credential);
     if (publicDoor == null || !a.denied) return a;
@@ -423,7 +435,8 @@ class DoorGate {
     if (!notYours) return a;
     final m = await ask(publicDoor, credential);
     if (m.granted) return m;
-    return m.denied ? a : m;
+    if (m.denied) return a;
+    return DoorAnswer(a.status, code: a.code, answeredByAskedHost: a.answeredByAskedHost, memberUnanswered: m);
   }
 
   /// The rule for a KEPT copy whose door is a separate request ([doorUrl]): returns when [credential]
@@ -540,7 +553,11 @@ class DoorGate {
     final run = () async {
       final a = await askEntitled(doorUrl, credential, publicDoor: publicDoor);
       await note(cacheDir, entry, credential, a);
-      if (a.denied) log?.call('door-auth:$what the door refused this credential ($a): the next open is refused');
+      if (a.denied) {
+        log?.call(a.memberUnanswered == null
+            ? 'door-auth:$what the door refused this credential ($a): the next open is refused'
+            : 'door-auth:$what the door did not confirm this credential ($a): its mark is dropped, the next open asks');
+      }
     }();
     _checking[k] = run;
     unawaited(run.whenComplete(() => _checking.remove(k)));
@@ -548,7 +565,7 @@ class DoorGate {
 
   /// The exception for a door that did not say yes about [what].
   BithumanEntitlementException refusal(String what, DoorAnswer a, {required bool kept}) {
-    if (a.denied) {
+    if (a.denied && a.memberUnanswered == null) {
       return BithumanEntitlementException(
           '$what: bitHuman refused this credential for this avatar ($a). A private avatar opens only for '
           'the account that owns it; pass that account\'s apiSecret'
