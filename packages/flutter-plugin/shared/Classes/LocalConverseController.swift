@@ -153,7 +153,17 @@ final class LocalConverseController: @unchecked Sendable {
             let wasSilent = self.botAudibleUntil < Date()
             let base = max(self.botAudibleUntil, Date())
             self.botAudibleUntil = base.addingTimeInterval(secs)
+            let until = self.botAudibleUntil
             self.lock.unlock()
+            // Measurement: `audible_end` once the voice has gone quiet (nothing more was queued
+            // behind this chunk) — a harness starts its next "after the reply" step from it.
+            if self.options.injected {
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + until.timeIntervalSinceNow + 0.02) { [weak self] in
+                    guard let self else { return }
+                    self.lock.lock(); let same = self.botAudibleUntil == until; self.lock.unlock()
+                    if same { self.metric(["ev": "audible_end"]) }
+                }
+            }
             if wasSilent, self.dbgBarge { NSLog("[barge-dbg] %@ BOT speaking ▶", Self.ts()) }
             self.lock.lock()
             if self.replyAudibleAt == nil { self.replyAudibleAt = Date() }
