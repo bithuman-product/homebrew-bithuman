@@ -90,10 +90,35 @@ enum EngineRegistry {
   /// What a `load(engine:)` names (2.6.36): the load handler refuses an unknown slug, or an engine
   /// this build does not carry, BEFORE anything is created — never the expression2 fallback above.
   static func select(_ slug: String) -> EngineSelection {
-    EngineSelection.resolve(slug, among: descriptors.map { $0.id }, inBuild: isInBuild)
+    EngineSelection.resolve(slug, among: descriptors.map { $0.id }, inBuild: isInBuild, unmetOS: unmetOS)
+  }
+
+  /// The OS an engine needs when this device runs an older one (2.6.36): Essence 2 renders on iOS 26 /
+  /// macOS 26 and later. A no-op while the pod's floor is 26 (the staged libessence2 is built for 26);
+  /// it is what refuses Essence 2 by name on iOS 16-25 once a libessence2 rebuilt at the package floor
+  /// (#1826) lets the app run there.
+  static func unmetOS(_ canonical: String) -> (need: String, running: String)? {
+    guard canonical == "essence2" else { return nil }
+    if #available(iOS 26.0, macOS 26.0, *) { return nil }
+    let v = ProcessInfo.processInfo.operatingSystemVersion
+    #if os(iOS)
+    let os = "iOS"
+    #else
+    let os = "macOS"
+    #endif
+    return (need: "\(os) 26", running: "\(os) \(v.majorVersion).\(v.minorVersion)")
   }
 
   #if os(macOS) || os(iOS)
+  /// Sign-out (2.6.36, security; `BithumanAvatar.clearCredentials`): both engines forget the API secret a
+  /// load set for this process, so nothing after this runs (or bills) as the account that signed out.
+  static func clearCredentials() {
+    Expression2Credential.set(nil)
+    #if ESSENCE2_AVAILABLE
+    _ = be_essence2_set_api_secret(nil)
+    #endif
+  }
+
   /// Create the engine for a slug. The ONLY place a concrete engine type is
   /// named. Returns `any BithumanEngine`; the caller drives it purely through the
   /// protocol + `capabilities.driveModel`. essence2 is gated on
@@ -115,8 +140,13 @@ enum EngineRegistry {
       // be set BEFORE be_essence2_create (which arms the meter first, before any
       // work). Without it the engine's own fallback is the process environment
       // (BITHUMAN_API_SECRET), which an installed app never has.
+      // ★THIS load's credential, never an earlier one (2.6.36, security): a load without one CLEARS the
+      // process-wide secret (NULL clears it), so it is refused by name instead of running, and billing,
+      // as the account of an earlier load (a sign-out and sign-in, a Dart hot restart).
       if let s = ref.apiSecret, !s.isEmpty {
         _ = s.withCString { be_essence2_set_api_secret($0) }
+      } else {
+        _ = be_essence2_set_api_secret(nil)
       }
       return Essence2Engine()
     }
@@ -130,7 +160,9 @@ enum EngineRegistry {
     // a credential — an installed app has no BITHUMAN_API_SECRET in its environment,
     // so without this line every Expression2 app built on the plugin renders NOTHING.
     // Set BEFORE init, exactly as the essence2 branch above sets its secret.
-    if let s = ref.apiSecret, !s.isEmpty { Expression2Credential.set(s) }
+    // ★THIS load's credential (2.6.36, security): `set(nil)` clears it, so a load without one never runs
+    // as the account of an earlier load (the engine refuses it by name instead).
+    Expression2Credential.set(ref.apiSecret)
     return Expression2PluginEngine()
   }
   #endif

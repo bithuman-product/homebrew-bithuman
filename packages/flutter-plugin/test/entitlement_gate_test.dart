@@ -1,0 +1,955 @@
+// The entitlement gate on this package's own avatar caches (2.6.36, security; lib/src/door_gate.dart).
+//
+// The gap these arms pin shut: a cache directory belongs to the app, not to an account, and through 2.6.35
+// every installer here handed a kept avatar to whoever called next, so account B, signed in where
+// account A had opened its PRIVATE avatar, got A's files. The door is owner-scoped: these doors answer
+// another account's key with the body bitHuman's door answered on 2026-10-03, byte for byte.
+//
+// Every cache path is covered: `downloadAgentImx` (the `.imx`), `downloadExpression2Avatar` and
+// `downloadExpression2Agent` (the Expression 2 directory), `downloadEssence2Bundle` (the `.elevatedir`).
+// Per path: another account is refused after asking the door; the same account opens with the door down
+// for 24 h after the door's last yes; a public avatar opens for 7 days; another account with the door
+// down is refused (fail closed); a tampered or missing mark makes the door be asked again.
+//
+// Loopback servers stand in for the door and for storage (plain http, which only a test gate accepts).
+// No real network. Apache-2.0; (c) bitHuman.
+
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:bithuman/bithuman.dart';
+import 'package:bithuman/src/agent_imx.dart';
+import 'package:bithuman/src/door_gate.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+const _owner = 'sk_test_owner';
+const _other = 'sk_test_other';
+const _private = 'A99LTC2401'; // owned by _owner
+const _public = 'A52DHS2219'; // the gallery's: served to anyone
+
+// What bitHuman's door answered another account's key for A99LTC2401 on 2026-10-03.
+const _notFound = '{"error": {"code": "NOT_FOUND", "message": "Agent not found for code: A99LTC2401", '
+    '"httpStatus": 404}, "status": "error", "status_code": 404}';
+const _missingAuth = '{"error": {"code": "MISSING_AUTH", "message": "This agent\'s model requires a credential: '
+    'send the api-secret header or Authorization: Bearer <api-secret | runtime token>", "httpStatus": 401}, '
+    '"status": "error", "status_code": 401}';
+const _notReady = '{"error": {"code": "MODEL_ARTIFACT_NOT_READY", "message": "not downloadable yet", '
+    '"httpStatus": 404}, "status": "error", "status_code": 404}';
+
+/// A loopback server: [handler] answers; every request's path and key are recorded.
+class _Srv {
+  _Srv(this.server, this.handler) {
+    server.listen((req) async {
+      paths.add(req.uri.path);
+      keys.add(req.headers.value('api-secret'));
+      await handler(req);
+    });
+  }
+  final HttpServer server;
+  Future<void> Function(HttpRequest req) handler;
+  final paths = <String>[];
+  final keys = <String?>[];
+  Uri url(String host, String path) => Uri.parse('http://$host:${server.port}$path');
+  static Future<_Srv> start(Future<void> Function(HttpRequest) h) async =>
+      _Srv(await HttpServer.bind(InternetAddress.loopbackIPv4, 0), h);
+}
+
+Future<void> _answer(HttpRequest req, int status, [String body = '']) async {
+  req.response.statusCode = status;
+  req.response.headers.contentType = ContentType.json;
+  req.response.write(body);
+  await req.response.close();
+}
+
+/// A port nothing listens on: the door is down.
+Future<int> _deadPort() async {
+  final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+  final p = s.port;
+  await s.close();
+  return p;
+}
+
+Uint8List _imx(int size, int fill) {
+  final b = Uint8List(size)..fillRange(0, size, fill);
+  b.setRange(0, 3, 'IMX'.codeUnits);
+  return b;
+}
+
+BithumanAgent _agent(String id, String modelUrl) => BithumanAgent(
+    id: id, name: id, description: '', category: '', imageUrl: '', modelUrl: modelUrl,
+    systemPrompt: '', voiceId: '', modelType: 'essence-2');
+
+Matcher _refused(bool refused) => throwsA(isA<BithumanEntitlementException>()
+    .having((e) => e.refused, 'refused', refused)
+    .having((e) => e, 'is a BithumanAvatarException', isA<BithumanAvatarException>()));
+
+/// Every byte under [dir], to prove a credential never reaches the disk.
+String _allBytes(Directory dir) => dir
+    .listSync(recursive: true)
+    .whereType<File>()
+    .map((f) => latin1.decode(f.readAsBytesSync(), allowInvalid: true) + f.path)
+    .join('\n');
+
+void main() {
+  late Directory tmp;
+  late _Srv door, storage;
+  late Uint8List published;
+  late int dead;
+  // The test clock; 2026-10-03 12:00Z unless an arm moves it.
+  var now = DateTime.utc(2026, 10, 3, 12);
+
+  /// The owner-scoped door: the owner's key (and anyone, for the public avatar) gets the grant; another
+  /// key gets production's 404 NOT_FOUND, no key the 401. [grant] is the yes ('302' or '200').
+  late Future<void> Function(HttpRequest, String grant) doorRule;
+  Future<void> ownerScoped(HttpRequest req, String grant) async {
+    final key = req.headers.value('api-secret');
+    final isPublic = req.uri.path.contains('/$_public/');
+    if (isPublic || key == _owner) {
+      if (grant == '302') {
+        await req.response.redirect(storage.url('localhost', '/signed/${req.uri.pathSegments[2]}.imx?t=x'), status: 302);
+      } else {
+        await _answer(req, 200, jsonEncode({'success': true, 'data': {'url': 'https://example.invalid/x'}}));
+      }
+      return;
+    }
+    if (key == null) return _answer(req, 401, _missingAuth);
+    return _answer(req, 404, _notFound);
+  }
+
+  setUp(() async {
+    now = DateTime.utc(2026, 10, 3, 12);
+    tmp = await Directory.systemTemp.createTemp('entitlement_gate_test');
+    published = _imx(1200000, 7);
+    dead = await _deadPort();
+    storage = await _Srv.start((req) async {
+      req.response.headers.contentLength = published.length;
+      req.response.add(published);
+      await req.response.close();
+    });
+    doorRule = ownerScoped;
+    door = await _Srv.start((req) => doorRule(req, req.uri.queryParameters['redirect'] == 'false' ? '200' : '302'));
+  });
+
+  tearDown(() async {
+    await door.server.close(force: true);
+    await storage.server.close(force: true);
+    await tmp.delete(recursive: true);
+  });
+
+  // ───────────────────────────────────────────────── downloadAgentImx (the `.imx`)
+  group('downloadAgentImx', () {
+    // [up]: the door answers; false: nothing listens where the door should be.
+    AgentImxDownloader dl({bool up = true}) => AgentImxDownloader(
+        allowInsecure: true,
+        clock: () => now,
+        doorHosts: const {'127.0.0.1'},
+        door: (code) => up
+            ? door.url('127.0.0.1', '/v1/agent/$code/model/download')
+            : Uri.parse('http://127.0.0.1:$dead/v1/agent/$code/model/download'));
+    const allowed = {'127.0.0.1', 'localhost'};
+    File kept(String id) => File('${tmp.path}/$id.imx');
+    BithumanAgent publicAgent({bool up = true}) => _agent(
+        _public,
+        up
+            ? door.url('127.0.0.1', '/v1/agent/$_public/model/download').toString()
+            : 'http://127.0.0.1:$dead/v1/agent/$_public/model/download');
+
+    Future<void> ownerDownloads() async {
+      final d = dl();
+      await d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner);
+      expect(await kept(_private).readAsBytes(), published);
+    }
+
+    test('another account is refused after ONE door ask; the owner\'s kept file is untouched', () async {
+      await ownerDownloads();
+      final storageHits = storage.paths.length;
+      final d = dl();
+      await expectLater(d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _other), _refused(true));
+      expect(door.keys, [_owner, _other], reason: 'the owner\'s download, then exactly one ask with the other key');
+      expect(storage.paths.length, storageHits, reason: 'nothing fetched for the other account');
+      expect(await kept(_private).readAsBytes(), published);
+      expect(d.gate.markFile(tmp.path, AgentImxDownloader.markEntry(_private), _other).existsSync(), isFalse);
+    });
+
+    test('the owner reopens with the door down for 24 h after the door\'s yes, then fails closed', () async {
+      await ownerDownloads();
+      now = now.add(const Duration(hours: 23));
+      final d = dl(up: false);
+      expect(await d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), kept(_private).path);
+      await d.refreshing(_private);
+      now = now.add(const Duration(hours: 2)); // 25 h
+      await expectLater(d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), _refused(false));
+      expect(await kept(_private).readAsBytes(), published, reason: 'a refusal never deletes the kept file');
+    });
+
+    test('with the door up, a marked owner opens at once and the door\'s yes renews the 24 h', () async {
+      await ownerDownloads();
+      now = now.add(const Duration(hours: 20));
+      final d = dl();
+      final asked = door.keys.length;
+      await d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner);
+      await d.refreshing(_private);
+      expect(door.keys.length, asked + 1, reason: 'one background ask, after the open');
+      now = now.add(const Duration(hours: 20)); // 40 h after the download, 20 h after the renewal
+      expect(await dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), kept(_private).path);
+    });
+
+    test('a public file (served with no credential) opens for ANY credential for 7 days with the door down', () async {
+      final p = await dl().download(publicAgent(), tmp.path, allowedHosts: allowed);
+      expect(await File(p).readAsBytes(), published);
+      expect(door.keys, [null], reason: 'asked with no credential: a yes to that is public');
+      now = now.add(const Duration(days: 6));
+      final d = dl(up: false);
+      expect(await d.download(publicAgent(up: false), tmp.path, allowedHosts: allowed, apiSecret: _other), p);
+      await d.refreshing(_public);
+      expect(await d.download(publicAgent(up: false), tmp.path, allowedHosts: allowed), p);
+      await d.refreshing(_public);
+      now = now.add(const Duration(days: 2)); // 8 days
+      await expectLater(d.download(publicAgent(up: false), tmp.path, allowedHosts: allowed, apiSecret: _other),
+          _refused(false));
+    });
+
+    test('a public file made private: the door\'s NOT_FOUND to any account drops the public mark', () async {
+      final p = await dl().download(publicAgent(), tmp.path, allowedHosts: allowed);
+      final publicMark = dl().gate.markFile(tmp.path, AgentImxDownloader.markEntry(_public), null);
+      expect(publicMark.existsSync(), isTrue);
+      // The owner makes it private: the door answers another account 404 NOT_FOUND, no credential 401.
+      doorRule = (req, _) =>
+          req.headers.value('api-secret') == null ? _answer(req, 401, _missingAuth) : _answer(req, 404, _notFound);
+      final d = dl();
+      expect(await d.download(publicAgent(), tmp.path, allowedHosts: allowed, apiSecret: _other), p,
+          reason: 'the public mark opens it at once; the door is asked in the background');
+      await d.refreshing(_public);
+      expect(publicMark.existsSync(), isFalse, reason: 'NOT_FOUND for one account: the avatar is not public now');
+      await expectLater(dl(up: false).download(publicAgent(up: false), tmp.path, allowedHosts: allowed, apiSecret: _other),
+          _refused(false));
+      await expectLater(dl().download(publicAgent(), tmp.path, allowedHosts: allowed, apiSecret: _other), _refused(true));
+      expect(await File(p).readAsBytes(), published, reason: 'kept, never deleted');
+    });
+
+    test('door down + another account + a private file: refused, nothing written for it', () async {
+      await ownerDownloads();
+      final d = dl(up: false);
+      await expectLater(d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _other), _refused(false));
+      expect(await kept(_private).readAsBytes(), published);
+      expect(d.gate.markFile(tmp.path, AgentImxDownloader.markEntry(_private), _other).existsSync(), isFalse);
+      // ...and with no credential at all (the owner signed out):
+      await expectLater(d.download(_agent(_private, 'http://127.0.0.1:$dead/x'), tmp.path), _refused(false));
+    });
+
+    test('a cache from before 2.6.36 (no mark): one door ask, no download; then it is marked', () async {
+      kept(_private).writeAsBytesSync(published);
+      final d = dl();
+      expect(await d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), kept(_private).path);
+      expect(door.keys, [_owner]);
+      expect(storage.paths.length, 1, reason: 'the published-length check follows the redirect: headers only');
+      expect(await kept(_private).readAsBytes(), published);
+      expect(await d.gate.mayOpenWithoutDoor(tmp.path, AgentImxDownloader.markEntry(_private), _owner), isTrue);
+      // ...and with the door down instead, the same unmarked cache fails closed for the owner too.
+      kept(_public).writeAsBytesSync(published);
+      await expectLater(dl(up: false).download(publicAgent(up: false), tmp.path, allowedHosts: allowed, apiSecret: _owner),
+          _refused(false));
+    });
+
+    test('a tampered, copied, unreadable or future-dated mark counts as none: the door is asked', () async {
+      await ownerDownloads();
+      final gate = dl().gate;
+      final entry = AgentImxDownloader.markEntry(_private);
+      final ownerMark = gate.markFile(tmp.path, entry, _owner);
+      final original = ownerMark.readAsStringSync();
+
+      // 1. The owner's mark, re-dated to look fresh 25 h later: the seal breaks.
+      now = now.add(const Duration(hours: 25));
+      final j = jsonDecode(original) as Map<String, dynamic>;
+      ownerMark.writeAsStringSync(jsonEncode({...j, 'checked': now.millisecondsSinceEpoch}));
+      await expectLater(dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), _refused(false));
+      // ...flipped to "public" (7 days): the seal breaks too.
+      ownerMark.writeAsStringSync(jsonEncode({...j, 'public': true}));
+      await expectLater(dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _other), _refused(false));
+      now = now.subtract(const Duration(hours: 25));
+
+      // 2. The owner's mark copied under the other credential's name: does not verify for it.
+      ownerMark.writeAsStringSync(original);
+      final copied = gate.markFile(tmp.path, entry, _other)..writeAsStringSync(original);
+      await expectLater(dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _other), _refused(false));
+      final asked = door.keys.length;
+      await expectLater(dl().download(_agent(_private, 'unused'), tmp.path, apiSecret: _other), _refused(true));
+      expect(door.keys.sublist(asked), [_other], reason: 'with the door up it was asked, and refused');
+      expect(copied.existsSync(), isFalse, reason: 'the refusal dropped what was under the other name');
+
+      // 3. Unreadable.
+      ownerMark.writeAsStringSync('not a mark');
+      await expectLater(dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), _refused(false));
+
+      // 4. Sealed correctly, but dated a day ahead of the device clock.
+      final ahead = DoorGate(clock: () => now.add(const Duration(days: 1)));
+      await ahead.noteGranted(tmp.path, entry, _owner);
+      await expectLater(dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), _refused(false));
+
+      // 5. Gone: the door is asked, its yes opens, the mark is back.
+      ownerMark.deleteSync();
+      expect(await dl().download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), kept(_private).path);
+      expect(ownerMark.existsSync(), isTrue);
+    });
+
+    test('a kept file is asked about at the platform door for ITS code, never at the row\'s model_url', () async {
+      await ownerDownloads();
+      // A catalog row (stale, or tampered in transit) naming the private avatar's code with another,
+      // public avatar's door as its model_url, opened with no credential (the owner signed out).
+      final crafted = _agent(_private, door.url('127.0.0.1', '/v1/agent/$_public/model/download').toString());
+      final asked = door.paths.length;
+      await expectLater(dl().download(crafted, tmp.path, allowedHosts: allowed), _refused(true));
+      expect(door.paths.sublist(asked), ['/v1/agent/$_private/model/download'],
+          reason: 'one ask, at the private avatar\'s own door, with no credential: 401');
+      expect(door.keys.last, isNull);
+      expect(await kept(_private).readAsBytes(), published, reason: 'kept, not opened, not replaced');
+    });
+
+    test('a row whose model_url names ANOTHER code never marks this code (no public mark from a crafted row)', () async {
+      // The owner's private file is kept from before the re-publish, so a call re-downloads it from the
+      // row's model_url first. A crafted row (the private code, a public avatar's door) with no credential
+      // gets the PUBLIC avatar's bytes; that yes is about the public avatar, not about this code's file.
+      await ownerDownloads();
+      await kept(_private).setLastModified(DateTime.utc(2026, 9, 30));
+      final crafted = _agent(_private, door.url('127.0.0.1', '/v1/agent/$_public/model/download').toString());
+      final gate = dl().gate;
+      final entry = AgentImxDownloader.markEntry(_private);
+      await dl().download(crafted, tmp.path, allowedHosts: allowed);
+      expect(gate.markFile(tmp.path, entry, null).existsSync(), isFalse,
+          reason: 'a yes about the public avatar wrote no public mark for the private code');
+      // The owner's own file comes back (as the owner's next refresh would put it), and another account,
+      // with the door down, is still refused: there is no public mark to open it with.
+      kept(_private).writeAsBytesSync(published);
+      await expectLater(dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _other), _refused(false));
+      // ...and with no kept file at all, the crafted row's download marks nothing either.
+      kept(_private).deleteSync();
+      await dl().download(crafted, tmp.path, allowedHosts: allowed);
+      expect(gate.markFile(tmp.path, entry, null).existsSync(), isFalse);
+      expect(await gate.mayOpenWithoutDoor(tmp.path, entry, _other), isFalse);
+    });
+
+    // PR #202 review (POC-1/2/4): bitHuman's own hosts redirect ANY code (measured 2026-10-03 with a made-up
+    // code: the apex https://bithuman.ai 307s every path to www; www 308s /api/agents/<code>/model/download/
+    // to the same path without the slash). Through 8eee064 the first such 3xx counted as the door's yes, so a
+    // no-credential row naming a PRIVATE code wrote a PUBLIC mark for it, and another account then opened
+    // the owner's kept file. 127.0.0.1 stands for bitHuman's door hosts here.
+    Future<_Srv> wwwDoor() => _Srv.start((req) async {
+          if (req.uri.path.endsWith('/')) {
+            final p = req.uri.path.substring(0, req.uri.path.length - 1);
+            await req.response.redirect(Uri.parse('http://127.0.0.1:${req.connectionInfo!.localPort}$p'), status: 308);
+            return;
+          }
+          // www answers an anonymous request for a code outside the gallery like this (no error.code).
+          await _answer(req, 404, '{"error": "Agent not found"}');
+        });
+    Future<_Srv> apexDoor(_Srv www) =>
+        _Srv.start((req) => req.response.redirect(www.url('127.0.0.1', req.uri.path), status: 307));
+
+    for (final (poc, slash) in [('POC-1: the apex\'s 307 to www', false), ('POC-4: www\'s 308 for a trailing slash', true)]) {
+      test('$poc is not a yes: no public mark for a private code, another account stays refused', () async {
+        final www = await wwwDoor();
+        final apex = await apexDoor(www);
+        addTearDown(() async {
+          await www.server.close(force: true);
+          await apex.server.close(force: true);
+        });
+        final row = slash
+            ? _agent(_private, www.url('127.0.0.1', '/api/agents/$_private/model/download/').toString())
+            : _agent(_private, apex.url('127.0.0.1', '/api/agents/$_private/model/download').toString());
+        final entry = AgentImxDownloader.markEntry(_private);
+        // 1. No credential, nothing kept: the row's download fails (the private code is not in the gallery).
+        await expectLater(dl().download(row, tmp.path, allowedHosts: allowed), throwsA(isA<BithumanAvatarException>()));
+        expect(dl().gate.markFile(tmp.path, entry, null).existsSync(), isFalse, reason: 'a redirect wrote no public mark');
+        // 2. The owner downloads its private avatar; 3. another account asks with the door DOWN, then up.
+        await ownerDownloads();
+        await expectLater(dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _other), _refused(false));
+        await expectLater(dl().download(_agent(_private, 'unused'), tmp.path, apiSecret: _other), _refused(true));
+        // The same row once the owner's file is kept: refused at the platform door (401 with no key).
+        await expectLater(dl().download(row, tmp.path, allowedHosts: allowed), _refused(true));
+        expect(await kept(_private).readAsBytes(), published);
+      });
+    }
+
+    test('POC-2: a kept file from before the re-publish never opens for a no-credential row in ONE call', () async {
+      // The re-download from the row's model_url fails, but its first hop is a door host's 3xx. Through
+      // 8eee064 that counted as a yes and the stale path returned the owner's private kept file at once.
+      final www = await wwwDoor();
+      final apex = await apexDoor(www);
+      addTearDown(() async {
+        await www.server.close(force: true);
+        await apex.server.close(force: true);
+      });
+      await ownerDownloads();
+      await kept(_private).setLastModified(DateTime.utc(2026, 9, 30));
+      final row = _agent(_private, apex.url('127.0.0.1', '/api/agents/$_private/model/download').toString());
+      final asked = door.keys.length;
+      await expectLater(dl().download(row, tmp.path, allowedHosts: allowed), _refused(true));
+      expect(door.keys.sublist(asked), [null], reason: 'the platform door was asked, with no credential: 401');
+      expect(await kept(_private).readAsBytes(), published, reason: 'kept, not opened, not replaced');
+      // The owner's own call on the same stale file still opens (its fresh mark).
+      expect(await dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), kept(_private).path);
+    });
+
+    test('a no-key download of a public avatar from the gallery\'s row is marked by the PLATFORM door\'s answer', () async {
+      // The row's model_url (www, here a separate host) serves the public avatar; the platform door is then
+      // asked with no credential, and ITS yes is the public mark (7 days).
+      final gallery = await _Srv.start((req) => req.response.redirect(storage.url('localhost', '/signed/p.imx'), status: 302));
+      addTearDown(() => gallery.server.close(force: true));
+      final row = _agent(_public, gallery.url('127.0.0.1', '/api/agents/$_public/model/download').toString());
+      final p = await dl().download(row, tmp.path, allowedHosts: allowed);
+      expect(door.paths, ['/v1/agent/$_public/model/download']);
+      expect(door.keys, [null]);
+      final mark = dl().gate.markFile(tmp.path, AgentImxDownloader.markEntry(_public), null);
+      expect(mark.existsSync(), isTrue);
+      now = now.add(const Duration(days: 6));
+      final d = dl(up: false);
+      expect(await d.download(row, tmp.path, allowedHosts: allowed, apiSecret: _other), p);
+      await d.refreshing(_public);
+    });
+
+    test('the door refusing the owner later (a revoked key): this open finishes, the next is refused', () async {
+      await ownerDownloads();
+      doorRule = (req, _) => _answer(req, 401, _missingAuth);
+      final d = dl();
+      expect(await d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), kept(_private).path);
+      await d.refreshing(_private);
+      await expectLater(dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), _refused(false));
+      await expectLater(dl().download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), _refused(true));
+    });
+
+    test('404 MODEL_ARTIFACT_NOT_READY (the owner\'s re-bake) and a storage 404 behind the redirect are not a no', () async {
+      await ownerDownloads();
+      doorRule = (req, _) => _answer(req, 404, _notReady);
+      final d = dl();
+      await d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner);
+      await d.refreshing(_private);
+      doorRule = ownerScoped;
+      storage.handler = (req) => _answer(req, 404, '<Error><Code>NoSuchKey</Code></Error>');
+      await d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner);
+      await d.refreshing(_private);
+      now = now.add(const Duration(hours: 1));
+      expect(await dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner), kept(_private).path,
+          reason: 'the owner\'s mark survived both');
+    });
+
+    test('a kept file from before the re-publish: another account\'s re-download is refused, the kept file not opened', () async {
+      await ownerDownloads();
+      await kept(_private).setLastModified(DateTime.utc(2026, 9, 30));
+      await expectLater(dl().download(_agent(_private, 'unused'), tmp.path, apiSecret: _other), _refused(true));
+      await expectLater(dl(up: false).download(_agent(_private, 'unused'), tmp.path, apiSecret: _other), _refused(false));
+      expect(await kept(_private).readAsBytes(), published);
+    });
+
+    test('the mark is a salted hash of the credential (the native stores\' name); the credential is never written', () async {
+      await ownerDownloads();
+      final mark = dl().gate.markFile(tmp.path, AgentImxDownloader.markEntry(_private), _owner);
+      // sha256("bithuman.door.auth.v1\0sk_test_owner")[:32], as essence2-android / expression2-android / Swift compute it.
+      expect(credentialTag(_owner), '6aa0c9c2b25dc45d3ab28b9b311939b2');
+      expect(credentialTag(null), credentialTag(''));
+      expect(mark.path.endsWith('/.door-auth/$_private.imx/${credentialTag(_owner)}'), isTrue);
+      expect(_allBytes(tmp).contains(_owner), isFalse);
+    });
+  });
+
+  // ───────────────────────────────── downloadExpression2Avatar / downloadExpression2Agent (the directory)
+  group('Expression 2 installs', () {
+    late DoorGate saved;
+    setUp(() => saved = entitlementGate);
+    tearDown(() => entitlementGate = saved);
+
+    void useGate({bool up = true}) => entitlementGate = DoorGate(
+        clock: () => now,
+        allowInsecure: true,
+        door: (code, model) => up
+            ? door.url('127.0.0.1', '/v1/agent/$code/model/download').replace(queryParameters: {'model': model, 'redirect': 'false'})
+            : Uri.parse('http://127.0.0.1:$dead/v1/agent/$code/model/download?model=$model&redirect=false'));
+
+    // A complete install, as either installer leaves it.
+    String install(String code) {
+      for (final m in const [
+        'manifest.json',
+        'student_v4_forward_frame_cpuAndNE.mlpackage/Manifest.json',
+        'audiotokenizer_cpuAndNE.mlpackage/Manifest.json',
+        'dec_p2_v3_all.mlpackage/Manifest.json',
+        'canon.f32',
+      ]) {
+        File('${tmp.path}/$code/$m')
+          ..createSync(recursive: true)
+          ..writeAsStringSync('x');
+      }
+      return '${tmp.path}/$code';
+    }
+
+    Future<String> avatar(String code, {String? key}) =>
+        downloadExpression2Avatar(code, 'https://example.invalid/$code.avatar', tmp.path, apiSecret: key);
+    Future<String> legacy(String code, {String? key}) =>
+        downloadExpression2Agent(code, 'https://example.invalid/$code.tar.gz', tmp.path, apiSecret: key);
+
+    for (final (name, open) in [('downloadExpression2Avatar', avatar), ('downloadExpression2Agent', legacy)]) {
+      group(name, () {
+        test('another account is refused after ONE door ask; the owner opens', () async {
+          final dir = install(_private);
+          useGate();
+          await expectLater(open(_private, key: _other), _refused(true));
+          expect(door.keys, [_other]);
+          expect(door.paths.single, '/v1/agent/$_private/model/download');
+          expect(await open(_private, key: _owner), dir);
+          expect(Directory(dir).existsSync(), isTrue, reason: 'a refusal never deletes the install');
+        });
+
+        test('the owner reopens with the door down for 24 h after the door\'s yes, then fails closed', () async {
+          final dir = install(_private);
+          useGate();
+          expect(await open(_private, key: _owner), dir);
+          now = now.add(const Duration(hours: 23));
+          useGate(up: false);
+          expect(await open(_private, key: _owner), dir);
+          await entitlementGate.checking(tmp.path, _private, _owner);
+          now = now.add(const Duration(hours: 2));
+          await expectLater(open(_private, key: _owner), _refused(false));
+        });
+
+        test('a public avatar (a yes with no credential) opens for any account for 7 days with the door down', () async {
+          final dir = install(_public);
+          useGate();
+          expect(await open(_public), dir);
+          now = now.add(const Duration(days: 6));
+          useGate(up: false);
+          expect(await open(_public, key: _other), dir);
+          await entitlementGate.checking(tmp.path, _public, _other);
+          now = now.add(const Duration(days: 2));
+          await expectLater(open(_public, key: _other), _refused(false));
+        });
+
+        test('a public avatar made private: the door\'s NOT_FOUND to another account drops the public mark', () async {
+          final dir = install(_public);
+          useGate();
+          expect(await open(_public), dir);
+          doorRule = (req, _) =>
+              req.headers.value('api-secret') == null ? _answer(req, 401, _missingAuth) : _answer(req, 404, _notFound);
+          expect(await open(_public, key: _other), dir, reason: 'the public mark opens it at once');
+          await entitlementGate.checking(tmp.path, _public, _other);
+          expect(entitlementGate.markFile(tmp.path, _public, null).existsSync(), isFalse);
+          useGate(up: false);
+          await expectLater(open(_public, key: _other), _refused(false));
+          useGate();
+          await expectLater(open(_public, key: _other), _refused(true));
+          expect(Directory(dir).existsSync(), isTrue);
+        });
+
+        test('door down + another account + a private install: refused', () async {
+          install(_private);
+          useGate();
+          await open(_private, key: _owner);
+          useGate(up: false);
+          await expectLater(open(_private, key: _other), _refused(false));
+          await expectLater(open(_private), _refused(false));
+        });
+
+        test('a tampered or missing mark: the door is asked again', () async {
+          final dir = install(_private);
+          useGate();
+          await open(_private, key: _owner);
+          final mark = entitlementGate.markFile(tmp.path, _private, _owner);
+          final j = jsonDecode(mark.readAsStringSync()) as Map<String, dynamic>;
+          mark.writeAsStringSync(jsonEncode({...j, 'public': true}));
+          now = now.add(const Duration(days: 2));
+          useGate(up: false);
+          await expectLater(open(_private, key: _other), _refused(false), reason: 'not a public mark any more');
+          await expectLater(open(_private, key: _owner), _refused(false), reason: 'not the owner\'s either');
+          useGate();
+          final asked = door.keys.length;
+          expect(await open(_private, key: _owner), dir);
+          expect(door.keys.length, asked + 1, reason: 'asked before the open');
+          mark.deleteSync();
+          expect(await open(_private, key: _owner), dir);
+          expect(door.keys.length, asked + 2);
+        });
+
+        test('nothing is downloaded for a credential the door refuses', () async {
+          useGate();
+          // The download URL cannot be reached at all: a door refusal is the only way to get THIS exception.
+          await expectLater(open(_private, key: _other), _refused(true));
+          expect(Directory('${tmp.path}/$_private').existsSync(), isFalse);
+          expect(tmp.listSync().where((e) => e.path.endsWith('.partial')), isEmpty);
+        });
+      });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────── downloadEssence2Bundle (the `.elevatedir`)
+  group('downloadEssence2Bundle', () {
+    late DoorGate saved;
+    setUp(() => saved = entitlementGate);
+    tearDown(() => entitlementGate = saved);
+
+    void useGate({bool up = true}) => entitlementGate = DoorGate(
+        clock: () => now,
+        allowInsecure: true,
+        door: (code, model) => up
+            ? door.url('127.0.0.1', '/v1/agent/$code/model/download').replace(queryParameters: {'model': model, 'redirect': 'false'})
+            : Uri.parse('http://127.0.0.1:$dead/v1/agent/$code/model/download?model=$model&redirect=false'));
+
+    // The entry's url is the caller's and is not bound to the agent: an https URL nothing answers, so a
+    // download would fail with a plain BithumanAvatarException, never a BithumanEntitlementException.
+    Essence2CatalogEntry entry(String id) => Essence2CatalogEntry(
+        agentId: id, url: 'https://127.0.0.1:$dead/elevate/$id.tar.gz', sha256: '', size: 0,
+        formatVersion: 'elevatedir-v2');
+    String install(String id) {
+      final dir = Directory('${tmp.path}/$id.elevatedir')..createSync();
+      File('${dir.path}/meta.json').writeAsStringSync('{}');
+      return dir.path;
+    }
+
+    test('a kept bundle is asked about at the PLATFORM door for its agent, never at the caller\'s URL (POC-3)', () async {
+      // PR #202 review POC-3: through 8eee064 a kept bundle opened for ANY credential whose (caller-supplied)
+      // URL answered, here a loopback that answers 200 to anything.
+      final any = await _Srv.start((req) => _answer(req, 200, 'hello'));
+      addTearDown(() => any.server.close(force: true));
+      final dir = install(_private);
+      useGate();
+      final crafted = Essence2CatalogEntry(agentId: _private, url: 'https://127.0.0.1:${any.server.port}/unrelated',
+          sha256: '', size: 0, formatVersion: 'elevatedir-v2');
+      await expectLater(downloadEssence2Bundle(crafted, tmp.path), _refused(true), reason: 'no key: the door\'s 401');
+      await expectLater(downloadEssence2Bundle(crafted, tmp.path, apiSecret: _other), _refused(true));
+      expect(any.paths, isEmpty, reason: 'the caller\'s URL is never asked about a kept bundle');
+      expect(door.paths.toSet(), {'/v1/agent/$_private/model/download'});
+      expect(await downloadEssence2Bundle(crafted, tmp.path, apiSecret: _owner), dir);
+      expect(entitlementGate.markFile(tmp.path, '$_private.elevatedir', null).existsSync(), isFalse,
+          reason: 'no public mark for a private avatar');
+    });
+
+    test('the owner reopens with the door down for 24 h; another account never; a public bundle 7 days', () async {
+      final dir = install(_private);
+      useGate();
+      expect(await downloadEssence2Bundle(entry(_private), tmp.path, apiSecret: _owner), dir);
+      now = now.add(const Duration(hours: 23));
+      useGate(up: false);
+      expect(await downloadEssence2Bundle(entry(_private), tmp.path, apiSecret: _owner), dir);
+      await entitlementGate.checking(tmp.path, '$_private.elevatedir', _owner);
+      await expectLater(downloadEssence2Bundle(entry(_private), tmp.path, apiSecret: _other), _refused(false));
+      await expectLater(downloadEssence2Bundle(entry(_private), tmp.path), _refused(false));
+      now = now.add(const Duration(hours: 2));
+      await expectLater(downloadEssence2Bundle(entry(_private), tmp.path, apiSecret: _owner), _refused(false));
+
+      final pub = install(_public);
+      useGate();
+      expect(await downloadEssence2Bundle(entry(_public), tmp.path), pub, reason: 'the door serves it with no key');
+      now = now.add(const Duration(days: 6));
+      useGate(up: false);
+      expect(await downloadEssence2Bundle(entry(_public), tmp.path, apiSecret: _other), pub);
+      await entitlementGate.checking(tmp.path, '$_public.elevatedir', _other);
+      now = now.add(const Duration(days: 2));
+      await expectLater(downloadEssence2Bundle(entry(_public), tmp.path, apiSecret: _other), _refused(false));
+    });
+
+    test('nothing is downloaded for a credential the door refuses; a yes before the download', () async {
+      useGate();
+      await expectLater(downloadEssence2Bundle(entry(_private), tmp.path, apiSecret: _other), _refused(true));
+      await expectLater(downloadEssence2Bundle(entry(_private), tmp.path), _refused(true));
+      expect(Directory('${tmp.path}/$_private.elevatedir').existsSync(), isFalse);
+      // The owner: the door says yes first (its mark), then the download is tried (here it cannot connect).
+      await expectLater(downloadEssence2Bundle(entry(_private), tmp.path, apiSecret: _owner),
+          throwsA(predicate((e) => e is! BithumanEntitlementException, 'a download failure, not a refusal')));
+      expect(door.keys, [_other, null, _owner]);
+      expect(door.paths.last, '/v1/agent/$_private/model/download');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────── the door's answers, classified
+  group('DoorAnswer', () {
+    test('a no is 401, 403, or 404 NOT_FOUND from the host that was asked; nothing else', () async {
+      expect(const DoorAnswer(401).denied, isTrue);
+      expect(const DoorAnswer(403).denied, isTrue);
+      expect(DoorAnswer(404, code: doorErrorCode(_notFound)).denied, isTrue);
+      expect(DoorAnswer(404, code: doorErrorCode(_notReady)).denied, isFalse);
+      expect(const DoorAnswer(404).denied, isFalse);
+      expect(const DoorAnswer(500).denied, isFalse);
+      expect(const DoorAnswer(403, answeredByAskedHost: false).denied, isFalse);
+      expect(DoorAnswer.unreachable(const SocketException('down')).denied, isFalse);
+      expect(const DoorAnswer(302).granted, isTrue);
+      expect(const DoorAnswer(200).granted, isTrue);
+    });
+
+    test('a NOT_FOUND to any credential drops the public mark; a 401 to a key (revoked) keeps it', () async {
+      final g = DoorGate(clock: () => now);
+      await g.noteGranted(tmp.path, 'e', null);
+      await g.note(tmp.path, 'e', _other, const DoorAnswer(401, code: 'MISSING_AUTH'));
+      expect(await g.mayOpenWithoutDoor(tmp.path, 'e', _other), isTrue, reason: 'still public');
+      await g.note(tmp.path, 'e', _other, DoorAnswer(404, code: doorErrorCode(_notReady)));
+      expect(await g.mayOpenWithoutDoor(tmp.path, 'e', _other), isTrue, reason: 'NOT_READY is not a no');
+      await g.note(tmp.path, 'e', _other, DoorAnswer(404, code: doorErrorCode(_notFound)));
+      expect(await g.mayOpenWithoutDoor(tmp.path, 'e', _other), isFalse);
+      expect(await g.mayOpenWithoutDoor(tmp.path, 'e', null), isFalse);
+    });
+
+    test('ask: production\'s bodies, the credential in the api-secret header only', () async {
+      final g = DoorGate(allowInsecure: true);
+      final u = door.url('127.0.0.1', '/v1/agent/$_private/model/download').replace(queryParameters: {'redirect': 'false'});
+      expect((await g.ask(u, _owner)).granted, isTrue);
+      final no = await g.ask(u, _other);
+      expect([no.status, no.code, no.denied], [404, 'NOT_FOUND', isTrue]);
+      final anon = await g.ask(u, null);
+      expect([anon.status, anon.code, anon.denied], [401, 'MISSING_AUTH', isTrue]);
+      expect(door.keys, [_owner, _other, null]);
+      doorRule = (req, _) => _answer(req, 404, '<Error><Code>NoSuchKey</Code></Error>');
+      expect((await g.ask(u, null)).denied, isFalse, reason: 'a door\'s 404 without NOT_FOUND is not a no');
+      expect((await g.ask(Uri.parse('http://127.0.0.1:$dead/x'), _owner)).status, isNull);
+      expect((await DoorGate().ask(u, _owner)).status, isNull, reason: 'a real gate refuses a cleartext door');
+    });
+
+    test('ask: a redirect is a yes only when it leaves bitHuman\'s door hosts (the signed file URL)', () async {
+      // PR #202 review: production's apex answers 307 to www for ANY path, and www 308s a trailing slash.
+      final g = DoorGate(allowInsecure: true, doorHosts: const {'127.0.0.1'});
+      final u = door.url('127.0.0.1', '/v1/agent/$_private/model/download');
+      doorRule = (req, _) => req.response.redirect(Uri.parse('https://www.bithuman.ai${req.uri.path}'), status: 307);
+      final apex = await DoorGate(allowInsecure: true).ask(u, null);
+      expect([apex.status, apex.granted, apex.denied], [null, isFalse, isFalse], reason: 'apex -> www: no answer');
+      doorRule = (req, _) => req.response.redirect(door.url('127.0.0.1', '${req.uri.path}/'), status: 308);
+      expect((await g.ask(u, null)).granted, isFalse, reason: 'a trailing slash on the same host: no answer');
+      doorRule = (req, _) => req.response.redirect(storage.url('127.0.0.1', '/signed/x.imx'), status: 302);
+      expect((await g.ask(u, null)).granted, isFalse, reason: 'to another door host (here 127.0.0.1): no answer');
+      doorRule = (req, _) => req.response.redirect(storage.url('localhost', '/signed/x.imx'), status: 302);
+      expect((await g.ask(u, null)).granted, isTrue, reason: 'to the storage host: the door minted a signed URL');
+    });
+  });
+
+  // ───────────────────────────────────────────── PR #202 round 3 (the second security review's LOW items)
+  group('round 3', () {
+    late DoorGate saved;
+    setUp(() => saved = entitlementGate);
+    tearDown(() => entitlementGate = saved);
+
+    AgentImxDownloader dl({bool up = true, Set<String> doorHosts = const {'127.0.0.1'}}) => AgentImxDownloader(
+        allowInsecure: true,
+        clock: () => now,
+        doorHosts: doorHosts,
+        door: (code) => up
+            ? door.url('127.0.0.1', '/v1/agent/$code/model/download')
+            : Uri.parse('http://127.0.0.1:$dead/v1/agent/$code/model/download'));
+    const allowed = {'127.0.0.1', 'localhost'};
+    File kept(String id) => File('${tmp.path}/$id.imx');
+
+    // Each HIGH fix is caught on its own (review: reverting either one alone left the suite green).
+
+    test('HIGH#2 alone (agent_imx.dart, the stale path): a non-door row\'s 200 never opens the kept file when the '
+        'download then fails', () async {
+      // The owner's private file is kept from before the re-publish. A no-key row names the code with a model_url
+      // on a NON-door host that answers 200 with a body under 1 MB: the re-download fails its size check. The
+      // row's 200 is not the platform door's yes; the platform door (asked with no key: 401) decides.
+      await dl().download(_agent(_private, 'unused'), tmp.path, apiSecret: _owner);
+      await kept(_private).setLastModified(DateTime.utc(2026, 9, 30));
+      final tiny = await _Srv.start((req) async {
+        req.response.add(Uint8List(1000));
+        await req.response.close();
+      });
+      addTearDown(() => tiny.server.close(force: true));
+      final row = _agent(_private, tiny.url('localhost', '/files/$_private.imx').toString());
+      final asked = door.keys.length;
+      await expectLater(dl().download(row, tmp.path, allowedHosts: allowed), _refused(true));
+      expect(tiny.paths, ['/files/$_private.imx'], reason: 'the row\'s file was tried (and was too small)');
+      expect(door.keys.sublist(asked), [null], reason: 'then the platform door, with no credential: 401');
+      expect(await kept(_private).readAsBytes(), published, reason: 'kept, not opened, not replaced');
+      expect(dl().gate.markFile(tmp.path, AgentImxDownloader.markEntry(_private), null).existsSync(), isFalse);
+    });
+
+    test('HIGH#1 alone (agent_imx.dart _open): a keyed download whose platform door 307s to ANOTHER door host '
+        'that answers 404 marks nothing, and the next call with the door down is refused', () async {
+      final next = await _Srv.start((req) => _answer(req, 404, '{"error": "Agent not found"}'));
+      addTearDown(() => next.server.close(force: true));
+      doorRule = (req, _) => req.response.redirect(next.url('localhost', req.uri.path), status: 307);
+      const both = {'127.0.0.1', 'localhost'};   // two of bitHuman's door hosts (the apex and www, say)
+      final d = dl(doorHosts: both);
+      await expectLater(d.download(_agent(_private, 'unused'), tmp.path, apiSecret: _other),
+          throwsA(isA<BithumanAvatarException>()));
+      expect(next.paths, ['/v1/agent/$_private/model/download'], reason: 'the redirect was followed');
+      final entry = AgentImxDownloader.markEntry(_private);
+      expect(d.gate.markFile(tmp.path, entry, _other).existsSync(), isFalse,
+          reason: 'a redirect between door hosts is not the door\'s yes');
+      // The owner's file is on the device (as the owner's own download leaves it); the door is down.
+      kept(_private).writeAsBytesSync(published);
+      await expectLater(dl(up: false, doorHosts: both).download(_agent(_private, 'unused'), tmp.path, apiSecret: _other),
+          _refused(false));
+      expect(await kept(_private).readAsBytes(), published);
+    });
+
+    test('hosts compare as DNS names: a trailing dot or letter case on a door host is still a door host', () async {
+      final g = DoorGate(allowInsecure: true, doorHosts: const {'localhost'});
+      final u = door.url('127.0.0.1', '/v1/agent/$_private/model/download');
+      for (final loc in ['http://localhost.:1/x', 'http://LOCALHOST:1/x', 'http://LocalHost.:1/x']) {
+        doorRule = (req, _) async {
+          req.response.statusCode = 302;
+          req.response.headers.set(HttpHeaders.locationHeader, loc);
+          await req.response.close();
+        };
+        final a = await g.ask(u, null);
+        expect([a.status, a.granted], [null, isFalse], reason: '$loc is a door host: no answer');
+      }
+      // The rule itself, on a real (https-only) gate: only an https Location off the door hosts is a yes.
+      final real = DoorGate();
+      final asked = Uri.parse('https://api.bithuman.ai/v1/agent/$_private/model/download?redirect=false');
+      expect(real.redirectIsAnswer(asked, Uri.parse('https://storage.example.invalid/signed/x.imx?t=1')), isTrue);
+      expect(real.redirectIsAnswer(asked, Uri.parse('http://storage.example.invalid/signed/x.imx?t=1')), isFalse,
+          reason: 'a cleartext redirect is no answer');
+      expect(real.redirectIsAnswer(asked, Uri.parse('https://WWW.BITHUMAN.AI./api/agents/$_private')), isFalse);
+      expect(real.redirectIsAnswer(asked, Uri.parse('https://api.bithuman.ai./v1/agent/$_private/model/download/')), isFalse);
+      expect(real.redirectIsAnswer(asked, null), isFalse);
+      expect(normalizeHost('API.Bithuman.AI.'), 'api.bithuman.ai');
+      expect(hostIn(kBithumanDoorHosts, 'WWW.bithuman.ai.'), isTrue);
+      expect(hostIn(kBithumanDoorHosts, 'storage.bithuman.ai'), isFalse);
+    });
+
+    // The platform's own rule for who may render an avatar (P11, platform #1324): its owner, an active member
+    // of the workspace it is shared into, or anyone when it is public / featured. The container door serves
+    // the first two and bitHuman's showcase; another account's PUBLIC avatar outside the showcase is 404
+    // NOT_FOUND there and is served by the member door, the one the Android stores fetch from.
+    group('P11: another account\'s public avatar', () {
+      const pub = 'A11PUB0001'; // public, owned by _owner, not in bitHuman's showcase
+      var memberSays = 'public';
+      setUp(() {
+        memberSays = 'public';
+        doorRule = (req, _) async {
+          final key = req.headers.value('api-secret');
+          if (req.uri.queryParameters.containsKey('member')) {
+            // The member door: a public avatar's catalog to any credential and to none.
+            if (memberSays == 'public' || key == _owner) {
+              return _answer(req, 200, jsonEncode({'success': true, 'data': {'url': 'https://example.invalid/m'}}));
+            }
+            if (memberSays == 'down') return _answer(req, 503, '');
+            return key == null ? _answer(req, 401, _missingAuth) : _answer(req, 404, _notFound);
+          }
+          if (key == _owner) {
+            return _answer(req, 200, jsonEncode({'success': true, 'data': {'url': 'https://example.invalid/x'}}));
+          }
+          return key == null ? _answer(req, 401, _missingAuth) : _answer(req, 404, _notFound);
+        };
+      });
+
+      Uri containerDoor(String code, String model) =>
+          door.url('127.0.0.1', '/v1/agent/$code/model/download').replace(queryParameters: {'model': model, 'redirect': 'false'});
+      Uri memberDoor(String code, String family) => door.url('127.0.0.1', '/v1/agent/$code/model/download')
+          .replace(queryParameters: {'model': family, 'member': kDoorMemberCatalog[family]!, 'redirect': 'false'});
+      void useGate({bool member = true}) => entitlementGate = DoorGate(
+          clock: () => now, allowInsecure: true, door: containerDoor, publicDoor: member ? memberDoor : null);
+
+      String install(String code) {
+        for (final m in const [
+          'manifest.json',
+          'student_v4_forward_frame_cpuAndNE.mlpackage/Manifest.json',
+          'dec_p2_v3_all.mlpackage/Manifest.json',
+        ]) {
+          File('${tmp.path}/$code/$m')
+            ..createSync(recursive: true)
+            ..writeAsStringSync('x');
+        }
+        return '${tmp.path}/$code';
+      }
+
+      test('a kept Expression 2 install opens after the member door\'s yes; its no or no answer does not', () async {
+        final dir = install(pub);
+        useGate();
+        expect(await downloadExpression2Avatar(pub, 'https://example.invalid/x.avatar', tmp.path, apiSecret: _other), dir);
+        expect(door.keys, [_other, _other], reason: 'the container door, then the member door, with the same key');
+        expect(door.paths, ['/v1/agent/$pub/model/download', '/v1/agent/$pub/model/download']);
+        final mark = entitlementGate.markFile(tmp.path, pub, _other);
+        expect(mark.existsSync(), isTrue, reason: 'the yes is this account\'s mark (24 h)');
+        // Made private: the member door's NOT_FOUND keeps the container's no; the mark is dropped.
+        memberSays = 'private';
+        now = now.add(const Duration(hours: 25));
+        await expectLater(downloadExpression2Avatar(pub, 'https://example.invalid/x.avatar', tmp.path, apiSecret: _other),
+            _refused(true));
+        expect(mark.existsSync(), isFalse);
+        // The member door does not answer: could not confirm (not a refusal).
+        memberSays = 'down';
+        await expectLater(downloadExpression2Avatar(pub, 'https://example.invalid/x.avatar', tmp.path, apiSecret: _other),
+            _refused(false));
+        // With no key: the container's 401, then the member door with no key: a PUBLIC mark (7 days, anyone).
+        memberSays = 'public';
+        expect(await downloadExpression2Agent(pub, 'https://example.invalid/x.tar.gz', tmp.path), dir);
+        expect(entitlementGate.markFile(tmp.path, pub, null).existsSync(), isTrue);
+      });
+
+      // PR #202 round-3 review LOW: the owner makes the avatar private, the container door says "not yours",
+      // and the member door then does not answer (a 5xx, the shared no-key rate limit, a timeout). The
+      // container's no stands: the marks are dropped as they would be on the container's no alone (fail
+      // closed), and the refusal still says "could not confirm" (the avatar may be public again next time).
+      test('the container\'s no stands when the member door does not answer: every mark is dropped', () async {
+        final dir = install(pub);
+        useGate();
+        const x = 'https://example.invalid/x.avatar', t = 'https://example.invalid/x.tar.gz';
+        final own = entitlementGate.markFile(tmp.path, pub, _other);
+        final public = entitlementGate.markFile(tmp.path, pub, null);
+        // While it is public: B's own mark (24 h), and a PUBLIC mark from a request with no key (7 days).
+        expect(await downloadExpression2Avatar(pub, x, tmp.path, apiSecret: _other), dir);
+        expect(await downloadExpression2Agent(pub, t, tmp.path), dir);
+        expect(own.existsSync() && public.existsSync(), isTrue);
+
+        // Made private, and the member door is down. B's open within 24 h is at once, and the door is asked in
+        // the background: container 404 NOT_FOUND, member 503.
+        memberSays = 'down';
+        now = now.add(const Duration(hours: 1));
+        expect(await downloadExpression2Avatar(pub, x, tmp.path, apiSecret: _other), dir);
+        await entitlementGate.checking(tmp.path, pub, _other);
+        expect(own.existsSync(), isFalse, reason: 'B\'s mark follows the container\'s NOT_FOUND');
+        expect(public.existsSync(), isFalse, reason: 'and so does the public mark (a 404 to a key: not public now)');
+        expect(await entitlementGate.mayOpenWithoutDoor(tmp.path, pub, _other), isFalse);
+        expect(await entitlementGate.mayOpenWithoutDoor(tmp.path, pub, null), isFalse);
+        await expectLater(downloadExpression2Avatar(pub, x, tmp.path, apiSecret: _other), _refused(false),
+            reason: 'asked again: still not confirmed, worded as could-not-confirm (not a refusal)');
+
+        // With no key: the public mark earned again, then the container's 401 and the member door's 503 drop it.
+        memberSays = 'public';
+        expect(await downloadExpression2Agent(pub, t, tmp.path), dir);
+        expect(public.existsSync(), isTrue);
+        memberSays = 'down';
+        now = now.add(const Duration(days: 2));
+        expect(await downloadExpression2Agent(pub, t, tmp.path), dir, reason: 'a fresh public mark opens at once');
+        await entitlementGate.checking(tmp.path, pub, null);
+        expect(public.existsSync(), isFalse, reason: 'the container\'s 401 to no key stands');
+        expect(await entitlementGate.mayOpenWithoutDoor(tmp.path, pub, null), isFalse);
+
+        // The gate's own answer: the container's no, carrying the member door's no-answer for the wording.
+        final a = await entitlementGate.askEntitled(containerDoor(pub, 'expression-2'), _other,
+            publicDoor: memberDoor(pub, 'expression-2'));
+        expect(a.denied, isTrue);
+        expect(a.status, 404);
+        expect(a.memberUnanswered?.status, 503);
+        expect(entitlementGate.refusal('t', a, kept: true).refused, isFalse);
+      });
+
+      test('the owner\'s yes never asks the member door; a gate on another door has none (documented)', () async {
+        install(pub);
+        useGate();
+        await downloadExpression2Avatar(pub, 'https://example.invalid/x.avatar', tmp.path, apiSecret: _owner);
+        expect(door.paths.length, 1);
+        useGate(member: false);
+        await expectLater(downloadExpression2Avatar(pub, 'https://example.invalid/x.avatar', tmp.path, apiSecret: _other),
+            _refused(true));
+      });
+
+      test('a kept Essence 2 bundle asks the member door for its agent (manifest.json)', () async {
+        final dir = Directory('${tmp.path}/$pub.elevatedir')..createSync();
+        File('${dir.path}/meta.json').writeAsStringSync('{}');
+        useGate();
+        final e = Essence2CatalogEntry(agentId: pub, url: 'https://127.0.0.1:$dead/x.tar.gz', sha256: '', size: 0,
+            formatVersion: 'elevatedir-v2');
+        expect(await downloadEssence2Bundle(e, tmp.path, apiSecret: _other), dir.path);
+        expect(door.keys, [_other, _other]);
+      });
+
+      test('bitHuman\'s gate asks the platform\'s container door, then the member door the stores fetch from', () {
+        expect(bithumanEntitlementDoor('A11PUB0001', 'essence-2').toString(),
+            'https://api.bithuman.ai/v1/agent/A11PUB0001/model/download?model=essence-2&redirect=false');
+        expect(bithumanPublicDoor('A11PUB0001', 'expression-2').toString(),
+            'https://api.bithuman.ai/v1/agent/A11PUB0001/model/download?model=expression-2&member=web_manifest.json&redirect=false');
+        expect(bithumanPublicDoor('A11PUB0001', 'essence-2').toString(),
+            'https://api.bithuman.ai/v1/agent/A11PUB0001/model/download?model=essence-2&member=manifest.json&redirect=false');
+        expect(bithumanPublicDoor('A11PUB0001', ''), isNull, reason: 'an .imx: the container rule only');
+        expect(DoorGate().publicDoor('A11PUB0001', 'expression-2'), bithumanPublicDoor('A11PUB0001', 'expression-2'));
+        expect(DoorGate(door: containerDoor).publicDoor('A11PUB0001', 'expression-2'), isNull,
+            reason: 'a gate on another door never reaches bitHuman\'s member door by accident');
+      });
+    });
+  });
+}

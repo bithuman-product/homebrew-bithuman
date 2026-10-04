@@ -87,7 +87,10 @@ void main() {
     final a = _agent('A52DHS2219', door.url('127.0.0.1', '/api/agents/A52DHS2219/model/download').toString());
     final p = await dl().download(a, tmp.path, allowedHosts: trustedLoopback);
     expect(await File(p).length(), published.length);
-    expect(door.keys, [null]);
+    // 2.6.36: then the PLATFORM door for the code, with the same (absent) credential: ITS answer is the mark,
+    // never the row's model_url's (PR #202 review: bitHuman's hosts redirect any code).
+    expect(door.keys, [null, null]);
+    expect(door.hits.map((r) => r.uri.path), ['/api/agents/A52DHS2219/model/download', '/v1/agent/A52DHS2219/model/download']);
   });
 
   test('a redirect from a host that is not a door, to a host not allowed, is refused; nothing is written', () async {
@@ -111,9 +114,12 @@ void main() {
         throwsA(isA<BithumanAvatarException>()));
   });
 
-  test('a kept file opens at once; the published check runs afterwards, in the background', () async {
+  test('a kept file opens at once (for a credential the door said yes to); the published check runs afterwards, in the background', () async {
     final kept = File('${tmp.path}/A52DHS2219.imx')..writeAsBytesSync(published);
     final d = dl();
+    // 2.6.36: the door said yes to this (anonymous) call before; without that the door is asked first
+    // (test/entitlement_gate_test.dart).
+    await d.gate.noteGranted(tmp.path, AgentImxDownloader.markEntry('A52DHS2219'), null);
     final p = await d.download(_agent('A52DHS2219', door.url('127.0.0.1', '/x').toString()), tmp.path,
         allowedHosts: trustedLoopback);
     expect(p, kept.path);

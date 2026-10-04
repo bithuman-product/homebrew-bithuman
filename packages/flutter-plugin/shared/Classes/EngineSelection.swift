@@ -5,6 +5,12 @@
 // word: the app asked for one character and showed another. Now `load` fails with the code Android
 // answers for an engine it cannot run (`unsupported`) and a message that says what to do.
 //
+// The same holds for an engine this build carries on an OS it does not run on (2.6.36): Essence 2
+// renders on iOS 26 / macOS 26 and later. While the staged libessence2 was built for 26 (essence2-v1.15.3)
+// the pod declared that floor and no older OS ran the app; essence2-v1.15.4, rebuilt at the package floor
+// (Swift package 2.20.3, bithuman-models #1826) and staged since 2.6.36, lets the app run on iOS 16 again,
+// and there `load(engine: 'essence2')` fails here, by name, instead of reaching the engine.
+//
 // Foundation and EngineId only, so test/swift/engine_selection_test.swift runs it with swiftc alone
 // (scripts/test_swift_unit.sh). EngineRegistry.select(_:) applies it to the registered engines.
 //
@@ -19,15 +25,27 @@ enum EngineSelection: Equatable {
   case unknown(String)
   /// A registered engine (canonical slug) that this build does not carry.
   case notInBuild(String)
+  /// A registered engine this build carries (canonical slug) that needs a newer OS than this device runs:
+  /// the requirement ("iOS 26") and the running OS ("iOS 17.5").
+  case needsNewerOS(String, need: String, running: String)
 
   /// The FlutterError code, the same as Android's for an engine it cannot run.
   static let errorCode = "unsupported"
 
   /// Resolve [slug] against [ids] (canonical or alias); [inBuild] says whether a canonical slug's engine
-  /// is linked into this build.
-  static func resolve(_ slug: String, among ids: [EngineId], inBuild: (String) -> Bool) -> EngineSelection {
+  /// is linked into this build; [unmetOS] names the OS a canonical slug's engine needs when this device
+  /// runs an older one (nil: it runs here) and the OS this device runs.
+  static func resolve(_ slug: String, among ids: [EngineId], inBuild: (String) -> Bool,
+                      unmetOS: (String) -> (need: String, running: String)? = { _ in nil }) -> EngineSelection {
     guard let id = ids.first(where: { $0.matches(slug) }) else { return .unknown(slug) }
-    return inBuild(id.canonical) ? .engine(id.canonical) : .notInBuild(id.canonical)
+    guard inBuild(id.canonical) else { return .notInBuild(id.canonical) }
+    if let os = unmetOS(id.canonical) { return .needsNewerOS(id.canonical, need: os.need, running: os.running) }
+    return .engine(id.canonical)
+  }
+
+  /// The engine names in messages.
+  static func displayName(_ canonical: String) -> String {
+    canonical == "essence2" ? "Essence 2" : canonical == "expression2" ? "Expression 2" : canonical
   }
 
   /// The canonical slug to load, or nil when the load must fail.
@@ -44,9 +62,11 @@ enum EngineSelection: Equatable {
     case .unknown(let s):
       return "unknown engine '\(s)': pass engine: 'expression2' or 'essence2' (also accepted: 'expression-2', 'essence-2')"
     case .notInBuild(let c):
-      let name = c == "essence2" ? "Essence 2" : c == "expression2" ? "Expression 2" : c
-      return "this build does not include the \(name) engine: run the plugin's scripts/bootstrap.sh "
+      return "this build does not include the \(Self.displayName(c)) engine: run the plugin's scripts/bootstrap.sh "
         + "(it stages the published engines), then build the app again"
+    case .needsNewerOS(let c, let need, let running):
+      return "\(Self.displayName(c)) needs \(need) or later; this device runs \(running). "
+        + "Load an Expression 2 avatar (engine: 'expression2') on this device"
     }
   }
 }

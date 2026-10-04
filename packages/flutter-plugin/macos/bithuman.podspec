@@ -128,7 +128,7 @@ Pod::Spec.new do |s|
   # but in no file pattern, so no app ever shipped it.
   s.resource_bundles = {'bithuman_privacy' => ['Resources/PrivacyInfo.xcprivacy']}
   s.dependency 'FlutterMacOS'
-  s.platform         = :osx, '13.0'
+  # s.platform is set below, from the staged bytes (2.6.36): see "THE DECLARED FLOOR".
   s.swift_version    = '5.9'
   s.static_framework = true
 
@@ -166,7 +166,8 @@ Pod::Spec.new do |s|
   x2_frameworks = %w[Expression2 BithumanEngineProtocol UnifiedModelHeader].map { |m| "Frameworks/#{m}.xcframework" }
   missing_x2 = x2_frameworks.reject { |f| File.directory?(File.join(__dir__, f)) }
   raise "run scripts/bootstrap.sh first: #{missing_x2.inspect} not staged" unless missing_x2.empty?
-  s.vendored_frameworks = module_map_xcframeworks + x2_frameworks
+  mac_frameworks = module_map_xcframeworks + x2_frameworks
+  s.vendored_frameworks = mac_frameworks
   # Each staged engine's native core = a plain static lib (NEVER a 2nd module-map
   # xcframework). Auto-picked from Engines/*/Vendor/*.a (design §2.2's Dir.glob).
   # EngineCore (from essence2-v1.15.0 / Expression2 v2.19.0): on macOS the Expression 2 framework
@@ -177,6 +178,56 @@ Pod::Spec.new do |s|
   enginecore_lib = 'Vendor/libengine_core.a'
   raise "run scripts/bootstrap.sh first: #{enginecore_lib} not staged (Expression 2 needs it on macOS)" unless File.file?(File.join(__dir__, enginecore_lib))
   s.vendored_libraries  = (essence2_lib ? engine_libs.map { |p| p.sub(__dir__ + '/', '') } : []) + [enginecore_lib]
+
+  # ★THE DECLARED FLOOR IS THE STAGED BYTES' FLOOR (2.6.36, security) — see the iOS podspec. Until 2.6.35
+  # this pod declared macOS 13.0 while libessence2.a (essence2-v1.15.3; v1.15.4 is rebuilt at 13.0) and
+  # libconverse.xcframework's macos-arm64 slice are built for macOS 26.0 (every v1.15.3 libessence2 object,
+  # and 33 libconverse objects, say minos 26.0); an app at 13.0 linking them takes strong imports that exist only from macOS
+  # 15.4 and cannot launch below it. The floor is now read from the binaries this pod vendors (the
+  # highest LC_BUILD_VERSION minos of their macOS objects, never below 13.0): macOS 26.0 with today's
+  # staged files, Essence 2 or not, until libconverse's macOS slice is rebuilt at 13.0 too. Bytes that
+  # cannot be read count as macOS 26.0. The Homebrew dylibs (llama.cpp, onnxruntime) are not vendored
+  # here and are not read.
+  # A binary that names no minimum for macOS (no LC_BUILD_VERSION for platform 1 and no legacy
+  # LC_VERSION_MIN_MACOSX) counts as unreadable too (PR #202 review): through the first 2.6.36 commits
+  # it left the floor at the base.
+  staged_minos = lambda do |paths, platform_id|
+    found = Gem::Version.new('0')
+    paths.each do |path|
+      out = `otool -l '#{path}' 2>/dev/null`
+      return nil unless $?.success?
+      named = false
+      out.scan(/cmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform (\d+)\s+minos (\d+(?:\.\d+)*)/) do |pl, v|
+        next unless pl.to_i == platform_id
+        named = true
+        found = [found, Gem::Version.new(v)].max
+      end
+      out.scan(/cmd LC_VERSION_MIN_MACOSX\s+cmdsize \d+\s+version (\d+(?:\.\d+)*)/) do |(v)|
+        named = true
+        found = [found, Gem::Version.new(v)].max
+      end
+      return nil unless named
+    end
+    found
+  end
+  framework_binary = lambda do |p|
+    File.file?(p) && (p.end_with?('.a') || File.basename(p) == File.basename(File.dirname(p), '.framework'))
+  end
+  mac_binaries = engine_libs + [File.join(__dir__, enginecore_lib)] + mac_frameworks.flat_map do |xcf|
+    Dir.glob(File.join(__dir__, xcf, 'macos-*', '{*.a,*.framework/*}')).select { |p| framework_binary.call(p) }
+  end
+  mac_base = Gem::Version.new('13.0')
+  mac_staged = staged_minos.call(mac_binaries, 1)          # 1 = PLATFORM_MACOS
+  mac_floor = mac_staged.nil? ? Gem::Version.new('26.0') : [mac_base, mac_staged].max
+  s.platform         = :osx, mac_floor.to_s
+  # Above the base, the floor also goes into the APP target's preprocessor definitions for
+  # Classes/BHDeploymentFloor.h, which fails an app below it by name (see the iOS podspec).
+  floor_macro = lambda { |v| s0, s1 = v.segments; (s0.to_i * 10000 + (s1 || 0).to_i * 100).to_s }
+  mac_floor_defines = mac_floor > mac_base ? " BITHUMAN_MACOS_FLOOR=#{floor_macro.call(mac_floor)}" : ''
+  if mac_floor > mac_base && defined?(Pod::UI)
+    Pod::UI.warn "bithuman: the engines scripts/bootstrap.sh staged are built for macOS #{mac_floor}, so this pod " \
+                 "needs macOS #{mac_floor} (set `platform :osx, '#{mac_floor}'` in macos/Podfile and the Runner target)."
+  end
 
   # CoreAudio/AudioUnit are for libconverse: it bundles miniaudio (Supertonic
   # resampler), whose single-object impl pulls device-IO code that links these.
@@ -270,7 +321,7 @@ Pod::Spec.new do |s|
   pod_xcconfig['EXCLUDED_ARCHS[sdk=macosx*]'] = 'x86_64'
   s.pod_target_xcconfig = pod_xcconfig
 
-  s.user_target_xcconfig = {
+  user_xcconfig = {
     # See EXCLUDED_ARCHS on the pod target above: the app links arm64-only bytes.
     'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64',
     # libconverse.a comes from the vendored xcframework (CocoaPods links it
@@ -280,4 +331,7 @@ Pod::Spec.new do |s|
     # Embed @rpath entries so the Homebrew dylibs resolve at run-time.
     'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) /opt/homebrew/lib /opt/homebrew/opt/onnxruntime/lib' + (legacy_llama ? ' /opt/homebrew/opt/llama.cpp/lib' : ''),
   }
+  # The staged engines' floor, for Classes/BHDeploymentFloor.h (see "THE DECLARED FLOOR").
+  user_xcconfig['GCC_PREPROCESSOR_DEFINITIONS'] = "$(inherited)#{mac_floor_defines}" unless mac_floor_defines.empty?
+  s.user_target_xcconfig = user_xcconfig
 end

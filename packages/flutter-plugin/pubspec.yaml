@@ -1,6 +1,6 @@
 name: bithuman
 description: "bitHuman avatars on the device for Flutter (Android, iOS, macOS): Expression 2 and Essence 2, with a voice conversation through the bitHuman realtime relay."
-version: 2.6.35
+version: 2.6.36
 homepage: https://www.bithuman.ai
 repository: https://github.com/bithuman-product/homebrew-bithuman
 issue_tracker: https://github.com/bithuman-product/homebrew-bithuman/issues
@@ -25,6 +25,10 @@ dependencies:
   # needs a higher macOS min than the podspec declares, and pod install fails.
   http: ^1.2.0
   flutter_webrtc: 1.4.0
+  # SHA-256 / HMAC for the avatar caches' entitlement marks (2.6.36): a salted hash of the credential
+  # names the mark and an HMAC seals it, so the key is never written to disk. Already in every app's
+  # graph through web_socket_channel (crypto ^3.0.0), so this adds no package.
+  crypto: ^3.0.0
   # The Layer-0 engine contract (EngineDescriptor + kEngineRegistry) is now
   # inlined at lib/src/engine_protocol.dart and re-exported by
   # lib/engine_registry.dart — no separate pub.dev package, so the plugin is

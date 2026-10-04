@@ -77,6 +77,17 @@ internal class LoadEvents(messenger: BinaryMessenger, private val main: Handler)
         return any
     }
 
+    /**
+     * Cancel every running load, whatever its code (sign-out, `BithumanAvatar.clearCredentials`, 2.6.36).
+     * True when one was still cancellable. Each ends with `load_cancelled`, as [cancel]'s do.
+     */
+    fun cancelAll(): Boolean {
+        var any = false
+        for (load in running) if (load.cancel()) any = true
+        if (any) Log.i(LOAD_TAG, "every running load: cancel requested (the app cleared the credentials)")
+        return any
+    }
+
     /** The store's progress callback for [load], forwarded (throttled). Loader thread. */
     fun fetchProgress(load: LoadHandle, done: Long, total: Long) {
         load.fetchTick(done, total)?.let { post(load, it) }

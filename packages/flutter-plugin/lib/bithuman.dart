@@ -13,10 +13,12 @@ import 'dart:typed_data' show Int16List, Uint8List;
 import 'package:flutter/services.dart';
 
 import 'src/agent_imx.dart';
+import 'src/door_gate.dart';
 import 'src/voice_host.dart';
 
 export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout, BithumanModelRejected;
 export 'src/agent_imx.dart' show kBithumanModelHosts;
+export 'src/door_gate.dart' show BithumanEntitlementException;
 
 const _channel = MethodChannel('ai.bithuman.avatar');
 
@@ -121,7 +123,16 @@ class BithumanAvatar implements VoiceHost {
   /// file; for Expression 2 the folder you also pass to [setExpression2AgentDir] before this call.
   ///
   /// [apiSecret]: your bitHuman API secret. The engines bill the session they serve and refuse to
-  /// render without it. A shipped app gets it from your backend, never as a literal in the app.
+  /// render without it. A shipped app gets it from your backend, never as a literal in the app. It is
+  /// THIS load's credential (2.6.36): a load without one never runs as the account of an earlier load
+  /// (Android refuses it; iOS and macOS clear the engines' credential first). Call [clearCredentials]
+  /// at sign-out.
+  ///
+  /// ★A path one of this package's installers returned (2.6.36, security) opens only for a credential
+  /// the door said yes to, as the installer itself would open it: a fresh entitlement for [apiSecret] on
+  /// this device, or the door's yes asked now. Otherwise this throws [BithumanEntitlementException]
+  /// before anything loads. On Android (a code) the same rule is the plugin's: the door is asked when
+  /// this credential's last yes is older than 24 h, and a door that cannot be asked then fails the load.
   ///
   /// [motionDir] and [chunk] are Apple engine tuning; leave them unset.
   ///
@@ -150,12 +161,27 @@ class BithumanAvatar implements VoiceHost {
     // The agent dir set just before (setExpression2AgentDir) is in place first.
     final pendingDir = _agentDirPending;
     if (pendingDir != null) await pendingDir;
+    // ★Defence in depth (2.6.36, security): a kept install handed straight to load (a saved path) opens
+    // only as its installer would open it, for THIS call's credential (DoorGate.openPath), whatever the
+    // spelling (symlinks resolved, `.` / `..` folded). An app's own files, outside this package's cache
+    // directories, are not gated.
+    final gate = entitlementGate;
+    await gate.openPath(imxPath, apiSecret);
+    // Expression 2 on iOS / macOS renders the agent dir set out of band (setExpression2AgentDir). The dir
+    // gated here is sent WITH the load ('' = none: the bundled default) and the native side renders exactly
+    // that one, so a native dir this Dart never gated (a Dart hot restart, another FlutterEngine, a sign-out)
+    // is never used.
+    final agentDir = _expression2Engines.contains(engine) ? (_agentDir ?? '') : null;
+    if (agentDir != null && agentDir.isNotEmpty && agentDir != imxPath) {
+      await gate.openPath(agentDir, apiSecret);
+    }
     final int? id;
     try {
       id = await _channel.invokeMethod<int>('load', {
         'path': imxPath,
         if (apiSecret != null && apiSecret.isNotEmpty) 'apiSecret': apiSecret,
         'engine': engine,
+        'agentDir': ?agentDir,
         'motionDir': ?motionDir,
         'chunk': chunk,
         'skipAhead': ?skipAhead,
@@ -168,6 +194,12 @@ class BithumanAvatar implements VoiceHost {
         final d = e.details is Map ? e.details as Map : const {};
         throw BithumanModelRejected.fromMap({...d, 'message': e.message ?? d['message']}) ??
             BithumanModelRejected(engine: engine, message: e.message ?? 'the engine refused the model file');
+      }
+      // Android's entitlement window (2.6.36): the door refused this credential, or could not be asked
+      // when its last yes was older than 24 h. The same exception as the Dart installers'.
+      if (e.code == 'entitlement_refused' || e.code == 'entitlement_unconfirmed') {
+        throw BithumanEntitlementException(e.message ?? e.code,
+            refused: e.code == 'entitlement_refused', status: e.details is int ? e.details as int : null);
       }
       rethrow;
     }
@@ -676,12 +708,32 @@ class BithumanAvatar implements VoiceHost {
   /// expanded there, once), so [load] waits for the last call made here before it
   /// loads: a caller that does not await this still gets the identity it named.
   static Future<void> setExpression2AgentDir(String? dir) {
+    _agentDir = dir;
     final f = _channel.invokeMethod<void>('setExpression2AgentDir', {'dir': dir ?? ''});
     _agentDirPending = f.catchError((Object _) {}); // load() waits; the caller sees the error
     return f;
   }
 
   static Future<void>? _agentDirPending;
+
+  /// The dir the last [setExpression2AgentDir] named: [load] gates it like its own path and sends it with
+  /// the load (2.6.36).
+  static String? _agentDir;
+  static const Set<String> _expression2Engines = {'expression2', 'expression-2', 'embody'};
+
+  /// Sign-out (2.6.36, security): the native engines forget the API secret a [load] set for this process
+  /// (Android: `Expression2Credential` and `Essence2Credential`; iOS / macOS: the Expression 2 and
+  /// Essence 2 engines' credential), and the Expression 2 agent dir [setExpression2AgentDir] named (the next
+  /// Expression 2 load renders the bundled default unless a dir is set again). On Android a load still
+  /// running ends with `load_cancelled`, and none started before this call ever runs, or bills, as the
+  /// account that signed out. Every [load] passes its own [apiSecret] and a load without one never runs as
+  /// an earlier account, so this is belt and braces: call it when an account signs out, before another
+  /// signs in. The kept avatars stay on disk; each opens again only for a credential the door says yes to.
+  static Future<void> clearCredentials() {
+    _agentDir = null;
+    _agentDirPending = null;
+    return _channel.invokeMethod<void>('clearCredentials');
+  }
 
   /// Current microphone authorization: `authorized` | `notDetermined` | `denied`.
   /// Drives the main-screen status chip (yellow when not yet `authorized`).
@@ -872,20 +924,34 @@ class BithumanAgent {
 /// Cache-aware (re-returns an already-installed dir), https-only + optional host
 /// allow-list (the bundle feeds CoreML), streams to a `.partial` then extracts
 /// with the system `tar`. `onProgress(received,total)` ticks during download.
+///
+/// ★A kept install opens only for a credential bitHuman's door has said yes to
+/// (2.6.36, security): pass [apiSecret], the account's key, exactly as for
+/// [downloadExpression2Avatar], which states the rule. A refusal, or a door that
+/// cannot be asked when this credential holds no recent entitlement, throws
+/// [BithumanEntitlementException].
 Future<String> downloadExpression2Agent(
   String code,
   String bundleUrl,
   String cacheDir, {
   Set<String>? allowedHosts,
   void Function(int received, int? total)? onProgress,
+  String? apiSecret,
 }) async {
   final safe = code.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
   final destDir = Directory('$cacheDir/$safe');
   final marker = File('${destDir.path}/student_v4_forward_frame_cpuAndNE.mlpackage/Manifest.json');
   final decoder = File('${destDir.path}/$_kExpression2Decoder');
+  final gate = entitlementGate;
+  final door = gate.door(code, 'expression-2');
+  final pub = gate.publicDoor(code, 'expression-2');
   // Installed = the engine can start it. A bundle without the per-identity
   // decoder is one the engine refuses, so it is re-fetched rather than re-used.
-  if (await marker.exists() && await decoder.exists()) return destDir.path;
+  // ★A kept install opens only for a credential the door has said yes to (2.6.36).
+  if (await marker.exists() && await decoder.exists()) {
+    await gate.openKept(cacheDir, safe, door, apiSecret, what: 'expression-2:$code', publicDoor: pub);
+    return destDir.path;
+  }
 
   final uri = Uri.parse(bundleUrl);
   if (uri.scheme != 'https') {
@@ -894,6 +960,8 @@ Future<String> downloadExpression2Agent(
   if (allowedHosts != null && allowedHosts.isNotEmpty && !allowedHosts.contains(uri.host)) {
     throw BithumanAvatarException('bundle_url host not allowed: ${uri.host}');
   }
+  // The door says yes to this credential before a byte is downloaded (2.6.36).
+  await gate.admit(cacheDir, safe, door, apiSecret, what: 'expression-2:$code', publicDoor: pub);
   final tmpDir = Directory(cacheDir);
   if (!await tmpDir.exists()) await tmpDir.create(recursive: true);
   final tgz = File('$cacheDir/$safe.tar.gz.partial');
@@ -971,6 +1039,29 @@ const String _kExpression2Decoder = 'dec_p2_v3_all.mlpackage/Manifest.json';
 /// mismatch throws instead of loading a broken identity. https-only + optional
 /// host allow-list; cache-aware (keyed on manifest.json + the decoder, so an
 /// earlier install the engine refuses is fetched again).
+///
+/// ★A KEPT INSTALL OPENS ONLY FOR A CREDENTIAL BITHUMAN'S DOOR HAS SAID YES TO
+/// (2.6.36, security). [cacheDir] belongs to your app, not to an account: until
+/// 2.6.35 an install kept for account A was returned to account B signed in on the
+/// same device, private or not. Pass [apiSecret], the signed-in account's key (no
+/// key: only public avatars). The door
+/// (`GET https://api.bithuman.ai/v1/agent/<code>/model/download?model=expression-2`,
+/// owner-scoped) is asked with exactly that credential, as the platform decides who
+/// may render an avatar: its owner, a member of the workspace it is shared into, or
+/// anyone for a public avatar (another account's public avatar outside bitHuman's
+/// showcase is confirmed at the member door, `&member=web_manifest.json`, which the
+/// Android store fetches from):
+///  * before a download: its yes is required, so another account's private avatar
+///    is never downloaded or installed;
+///  * on a kept install: with this credential's entitlement on this device (the door
+///    said yes to it within the last 24 h, or within 7 days for a public avatar) the
+///    directory is returned at once and the door is asked in the background (a
+///    refusal there makes the NEXT call fail); without one the door is asked first.
+/// A refusal (401/403, or 404 NOT_FOUND) throws [BithumanEntitlementException] with
+/// `refused: true`; a door that cannot be asked when the entitlement is missing or
+/// older than that throws it with `refused: false` (fail closed). The kept files
+/// are never deleted by a refusal. The key is sent to the door only, never to
+/// [avatarUrl], and never written to disk (the entitlement is a salted hash).
 Future<String> downloadExpression2Avatar(
   String code,
   String avatarUrl,
@@ -978,15 +1069,20 @@ Future<String> downloadExpression2Avatar(
   int engineAbi = 1,
   Set<String>? allowedHosts,
   void Function(int received, int? total)? onProgress,
+  String? apiSecret,
 }) async {
   final safe = code.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
   final destDir = Directory('$cacheDir/$safe');
   final marker = File('${destDir.path}/manifest.json');
   final student = File('${destDir.path}/student_v4_forward_frame_cpuAndNE.mlpackage/Manifest.json');
   final decoder = File('${destDir.path}/$_kExpression2Decoder');
+  final gate = entitlementGate;
+  final door = gate.door(code, 'expression-2');
+  final pub = gate.publicDoor(code, 'expression-2');
   // Installed = the engine can start it. An earlier install without the
   // per-identity decoder is re-fetched, not re-used: the engine refuses it.
   if (await marker.exists() && await student.exists() && await decoder.exists()) {
+    await gate.openKept(cacheDir, safe, door, apiSecret, what: 'expression-2:$code', publicDoor: pub);
     return destDir.path;
   }
 
@@ -997,6 +1093,7 @@ Future<String> downloadExpression2Avatar(
   if (allowedHosts != null && allowedHosts.isNotEmpty && !allowedHosts.contains(uri.host)) {
     throw BithumanAvatarException('avatar_url host not allowed: ${uri.host}');
   }
+  await gate.admit(cacheDir, safe, door, apiSecret, what: 'expression-2:$code', publicDoor: pub);
   final tmpDir = Directory(cacheDir);
   if (!await tmpDir.exists()) await tmpDir.create(recursive: true);
   final zip = File('$cacheDir/$safe.avatar.partial');
@@ -1128,14 +1225,27 @@ Future<List<BithumanAgent>> fetchPublicAgents({int limit = 60, String? category}
 /// (or be a bitHuman door). Anything else fails the download, because the bytes feed the native
 /// parser.
 ///
-/// Cached by id. A kept file is returned AT ONCE, with no network before it; whether it is still
-/// the published one (its length) is asked in the background afterwards, and a different file is
-/// downloaded then for the NEXT call. The one exception: a kept Essence 2 file older than
+/// Cached by id. A kept file is returned AT ONCE, with no network before it, ★to a credential bitHuman's
+/// door has said yes to for it (2.6.36, security): [cacheDir] belongs to your app, not to an account, and
+/// until 2.6.35 a file kept for account A was returned to account B on the same device, private or not.
+/// Now each call's credential ([apiSecret], or none) needs an entitlement on this device: the door said
+/// yes to exactly that credential within the last 24 h (7 days for a public file, one the door serves
+/// with no credential). Without one the door is asked first; a refusal, or a door that cannot be asked,
+/// throws [BithumanEntitlementException] and the kept file is not returned (nor deleted). The door asked
+/// about a kept file is always the platform door for [BithumanAgent.id]
+/// (`GET https://api.bithuman.ai/v1/agent/<id>/model/download`, owner-scoped), never the row's
+/// `modelUrl`; only that door's answer marks a file (a download without a key comes from the row's
+/// `modelUrl`, and the platform door is then asked once, with no credential, for its mark: a redirect from
+/// any URL on bitHuman's hosts is not a yes about this character). The key is never written to disk (the
+/// entitlement is a salted hash of it). Whether the kept
+/// file is still the published one (its length) is asked in the background afterwards with the same
+/// credential (a refusal there makes the NEXT call fail), and a different file is downloaded then for the
+/// NEXT call. The one exception: a kept Essence 2 file older than
 /// 2026-10-02T00:00Z (before every Essence 2 character was re-published with the mouth-corner fix,
 /// which the engine requires) is downloaded again once before it is returned — the old file stays
-/// until the new one is complete, and is returned if that download fails. Creates [cacheDir] if it
-/// does not exist (some platforms — especially the macOS sandbox — return a tmp path that has not
-/// been made yet).
+/// until the new one is complete, and is returned if that download fails only while this credential's
+/// entitlement is fresh or the platform door says yes to it. Creates [cacheDir] if it does not exist (some platforms — especially the
+/// macOS sandbox — return a tmp path that has not been made yet).
 Future<String> downloadAgentImx(
   BithumanAgent agent,
   String cacheDir, {
@@ -1253,11 +1363,23 @@ Future<List<Essence2CatalogEntry>> fetchEssence2Catalog(
 /// staging dir that is atomically renamed into place. macOS delivery path
 /// (`Process.run('tar')`), same as the expression-2 `.tar.gz` flow.
 /// `onProgress(received,total)` ticks during download.
+///
+/// ★A kept bundle opens only for a credential bitHuman's door has said yes to (2.6.36, security), the
+/// rule [downloadExpression2Avatar] states. Pass [apiSecret], the signed-in account's key (no key: only
+/// public avatars). The door asked is the platform's, for [Essence2CatalogEntry.agentId]
+/// (`GET https://api.bithuman.ai/v1/agent/<id>/model/download?model=essence-2`, owner-scoped), never
+/// the entry's `url`, which the caller supplies and which is not bound to the agent: its yes is required
+/// before a download, and a kept bundle opens at once only with this credential's fresh entitlement (24 h
+/// after the door's last yes; 7 days for a public avatar, one the door served with no credential), the
+/// door asked again in the background. A refusal throws [BithumanEntitlementException] with
+/// `refused: true`; a door that cannot be asked when the entitlement is missing or older than that throws
+/// it with `refused: false`. The installed files are never deleted by either.
 Future<String> downloadEssence2Bundle(
   Essence2CatalogEntry entry,
   String cacheDir, {
   Set<String>? allowedHosts,
   void Function(int received, int? total)? onProgress,
+  String? apiSecret,
 }) async {
   // The agent id comes from a public / MITM-able catalog, so never use it raw
   // in a filesystem path — a crafted '../' would escape cacheDir. Real ids are
@@ -1265,7 +1387,6 @@ Future<String> downloadEssence2Bundle(
   final safe = entry.agentId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
   final destDir = Directory('$cacheDir/$safe.elevatedir');
   final marker = File('${destDir.path}/meta.json');
-  if (await marker.exists()) return destDir.path; // already installed
 
   final uri = Uri.parse(entry.url);
   if (uri.scheme != 'https') {
@@ -1276,6 +1397,19 @@ Future<String> downloadEssence2Bundle(
       !allowedHosts.contains(uri.host)) {
     throw BithumanAvatarException('elevate bundle host not allowed: ${uri.host}');
   }
+  // ★The platform door for THIS agent decides (2.6.36, security), asked with this call's credential: a
+  // kept bundle opens for a fresh entitlement (or the door's yes now); a download needs its yes first.
+  final gate = entitlementGate;
+  final door = gate.door(entry.agentId, 'essence-2');
+  final pub = gate.publicDoor(entry.agentId, 'essence-2');
+  final what = 'essence-2:${entry.agentId}';
+  if (await marker.exists()) {
+    await gate.openKept(cacheDir, '$safe.elevatedir', door, apiSecret, what: what, publicDoor: pub);
+    return destDir.path;
+  }
+  // The door says yes to this credential before a byte is downloaded; its yes is the mark (public only
+  // when it was asked with no credential).
+  await gate.admit(cacheDir, '$safe.elevatedir', door, apiSecret, what: what, publicDoor: pub);
   final tmpDir = Directory(cacheDir);
   if (!await tmpDir.exists()) await tmpDir.create(recursive: true);
   final tgz = File('$cacheDir/$safe.elevatedir.tar.gz.partial');
