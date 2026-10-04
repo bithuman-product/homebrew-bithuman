@@ -313,6 +313,58 @@ cloud OpenAI-Realtime mode needs neither — it's pure Swift.
 
 - **Mac**: Apple Silicon M3 or newer. Older Intel Macs and M1/M2 will run but are not benched.
 
+## Licences of on-device models
+
+The hybrid brain (speech to text and the voice on the device, the reply from the cloud) and LOCAL
+mode run third-party models on your user's device. Their licences apply to your app.
+
+**Your app's licence page lists them with no code.** The plugin registers every text with
+Flutter's `LicenseRegistry` when the app starts (it is the plugin's `dartPluginClass`), so
+`showLicensePage`, `AboutDialog` and `AboutListTile` show them. The texts are the upstream files
+byte for byte, in [`licenses/`](licenses/) (where each comes from, at which revision, on which
+date: [`licenses/SOURCES.md`](licenses/SOURCES.md)); `BithumanLicenses` in
+`lib/src/third_party_licenses.dart` lists them.
+
+| Model | Licence | What your app must do |
+|---|---|---|
+| Supertonic 3 (the voice, by Supertone) | BigScience Open RAIL-M | **Put the use restrictions of its Attachment A in your app's terms** (below). The modification notice is already on the licence page. |
+| NVIDIA Parakeet TDT-CTC 110M (speech to text) | CC BY 4.0 | Nothing more: the attribution, the licence and the change note (sherpa-onnx's int8 export) are on the licence page. |
+| Silero VAD (voice activity) | MIT | Nothing more. |
+| Llama 3.2 1B (LOCAL mode only) | Llama 3.2 Community License | Show "Built with Llama" (`LocalBrainNotices.builtWithLlama`). |
+
+The code that runs them (sherpa-onnx, ONNX Runtime, llama.cpp and what they link) is on the licence
+page too; [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) says which build carries what.
+
+### Your terms must include Attachment A (Open RAIL-M paragraph 4(a))
+
+If your app ships the on-device voice, the agreement that governs its use (your terms of use or
+EULA) must include the use restrictions in Attachment A of the Supertonic 3 licence as an
+enforceable provision, and you must tell your users that the voice is subject to them. Include
+them by reference with a link, or in full. `BithumanLicenses.supertonicAttachmentA()` returns
+the text verbatim, for a terms or licences screen in the app:
+
+```dart
+import 'package:bithuman/realtime_transport.dart';
+
+final restrictions = await BithumanLicenses.supertonicAttachmentA();
+```
+
+Never change the licence text itself. How your terms introduce it is for your counsel.
+
+The voice your app runs is a modified version of Supertonic 3 (half-precision storage on iOS and
+macOS, sherpa-onnx's int8 build on Android). Paragraph 4(c) asks for a notice of that; it is
+[`licenses/supertonic-3/MODIFICATIONS.txt`](licenses/supertonic-3/MODIFICATIONS.txt), and the
+licence page shows it with the licence.
+
+### If you host the model files yourself
+
+The plugin does not download the brain's models: your app does (the voice and the LLM from the
+list in `LocalBrainModels`; the speech-to-text files are paths it hands the plugin), so the plugin
+writes no model manifest of its own that could carry these notices. If you copy the
+files to your own server or ship them inside your app, keep `licenses/supertonic-3/LICENSE` and
+`MODIFICATIONS.txt` with the Supertonic files (paragraphs 4(b) and 4(d)), and
+`licenses/parakeet-tdt_ctc-110m/ATTRIBUTION.txt` and `LICENSE` with the Parakeet files.
+
 ## License
 
 Apache-2.0. Copyright bitHuman.

@@ -1,0 +1,26 @@
+ATTRIBUTION - Parakeet TDT-CTC 110M
+
+This attribution is given under Section 3(a) of the Creative Commons Attribution 4.0 International
+Public License (the LICENSE file beside this one, also at
+https://creativecommons.org/licenses/by/4.0/legalcode). It is a notice, not a licence: the LICENSE
+governs.
+
+The Licensed Material: "parakeet-tdt_ctc-110m", a speech-to-text model by NVIDIA (the NVIDIA NeMo
+team), https://huggingface.co/nvidia/parakeet-tdt_ctc-110m, licensed under CC BY 4.0
+(https://creativecommons.org/licenses/by/4.0/).
+
+The Licensed Material is provided as-is: see Section 5 of the LICENSE (Disclaimer of Warranties and
+Limitation of Liability).
+
+Changes. The on-device speech-to-text of the bitHuman Flutter plugin does not run the original model.
+It runs a modified version made by the sherpa-onnx project (https://github.com/k2-fsa/sherpa-onnx),
+published 2026-05-03 in that project's "asr-models" release as
+sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8, made by its script
+scripts/nemo/fast-conformer-hybrid-transducer-ctc/run-transducer-non-streaming.sh:
+
+  * the NeMo checkpoint was exported to ONNX as three graphs (encoder, decoder, joiner) plus a token
+    list (tokens.txt); only the model's TDT transducer branch was exported, not its CTC branch;
+  * the weights of the three graphs were quantized to 8-bit integers with ONNX Runtime's dynamic
+    quantization (encoder.int8.onnx, decoder.int8.onnx, joiner.int8.onnx).
+
+bitHuman makes no further change to these files.

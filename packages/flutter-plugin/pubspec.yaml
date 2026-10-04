@@ -57,20 +57,45 @@ flutter:
   # bitHuman avatar plugin — Android, iOS and macOS. pluginClass registers the
   # native plugin for the method channels; Android resolves the engines from
   # maven.bithuman.ai, iOS and macOS link the ones scripts/bootstrap.sh stages.
+  # dartPluginClass: Flutter's plugin registrant calls BithumanLicenses.registerWith() at app start,
+  # which adds the on-device brain's third-party licences (the assets below) to LicenseRegistry, so
+  # every app's licence page lists them (lib/src/third_party_licenses.dart).
   plugin:
     platforms:
       ios:
         pluginClass: BithumanPlugin
+        dartPluginClass: BithumanLicenses
       macos:
         pluginClass: BithumanPlugin
+        dartPluginClass: BithumanLicenses
       android:
         package: ai.bithuman.flutter
         pluginClass: BithumanPlugin
+        dartPluginClass: BithumanLicenses
 
-  # To add assets to your plugin package, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  # The third-party licence texts, verbatim (licenses/SOURCES.md says where each comes from). One
+  # line per directory: a directory entry takes the files directly in it, not its subdirectories,
+  # so licenses/SOURCES.md is not bundled. test/third_party_licenses_test.dart checks this list
+  # against BithumanLicenses.all.
+  assets:
+    - licenses/supertonic-3/
+    - licenses/parakeet-tdt_ctc-110m/
+    - licenses/silero-vad/
+    - licenses/llama-3.2/
+    - licenses/supertonic/
+    - licenses/sherpa-onnx/
+    - licenses/kaldi-native-fbank/
+    - licenses/kissfft/
+    - licenses/kaldi-decoder/
+    - licenses/kaldifst/
+    - licenses/openfst/
+    - licenses/simple-sentencepiece/
+    - licenses/eigen/
+    - licenses/hclust-cpp/
+    - licenses/nlohmann-json/
+    - licenses/onnxruntime/
+    - licenses/llama.cpp/
+    - licenses/miniaudio/
   #
   # For details regarding assets in packages, see
   # https://flutter.dev/to/asset-from-package

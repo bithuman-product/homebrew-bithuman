@@ -8,6 +8,16 @@ code below. The **models** are downloaded by your app (see
 `LocalBrainModels` in `lib/src/local_brain.dart`); their licenses apply to your
 app and its users.
 
+**The full texts.** Every licence below is in [`licenses/`](licenses/), copied byte for byte from
+upstream ([`licenses/SOURCES.md`](licenses/SOURCES.md) gives each file's source URL, revision,
+retrieval date and SHA-256). The plugin registers them with Flutter's `LicenseRegistry` when the
+app starts (`BithumanLicenses`, `lib/src/third_party_licenses.dart`), so the app's licence page
+(`showLicensePage`) lists them with no code. Two files there are notices bitHuman wrote, not
+licences: [`licenses/supertonic-3/MODIFICATIONS.txt`](licenses/supertonic-3/MODIFICATIONS.txt)
+(Open RAIL-M paragraph 4(c)) and
+[`licenses/parakeet-tdt_ctc-110m/ATTRIBUTION.txt`](licenses/parakeet-tdt_ctc-110m/ATTRIBUTION.txt)
+(CC BY 4.0 Section 3(a)).
+
 ## Code in libconverse.xcframework
 
 | Component | Version | License |
@@ -47,20 +57,39 @@ No GPL code is linked. The voice needs no phonemizer (no espeak-ng).
   graphs (weights stored as float16 and converted back to float32 when loaded).
   These are modified files: each graph records the modification in its ONNX
   metadata (`bithuman.modification`), as §4(c) requires.
+* The Android brain runs sherpa-onnx's int8 build of Supertonic 3
+  (`sherpa-onnx-supertonic-3-tts-int8-2026-05-11`), also a modified version.
+* Both modifications are described, with who made them and when, in
+  [`licenses/supertonic-3/MODIFICATIONS.txt`](licenses/supertonic-3/MODIFICATIONS.txt), the
+  notice paragraph 4(c) asks for; the licence page shows it with the licence.
+  `BithumanLicenses.supertonicAttachmentA()` returns Attachment A verbatim for your terms (see the
+  README, "Licences of on-device models").
 
 ## The hybrid brain's speech-to-text on iOS (optional: `scripts/build-sherpa-ios.sh`)
 
 | Component | Version | License |
 |---|---|---|
 | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) C API (static, no TTS, no CoreML EP) | v1.13.8 | Apache-2.0 — Copyright (c) Xiaomi Corporation and the k2-fsa authors |
-| [kaldi-native-fbank](https://github.com/csukuangfj/kaldi-native-fbank), kaldi-decoder, OpenFst subset, sentencepiece, kissfft (linked by sherpa-onnx) | as pinned by sherpa-onnx v1.13.8 | Apache-2.0 / BSD-3-Clause |
+| [kaldi-native-fbank](https://github.com/csukuangfj/kaldi-native-fbank) | v1.22.3 | Apache-2.0 |
+| [KISS FFT](https://github.com/mborgerding/kissfft) (linked by kaldi-native-fbank) | `febd4cae` | BSD-3-Clause — Copyright (c) 2003-2010 Mark Borgerding |
+| [kaldi-decoder](https://github.com/k2-fsa/kaldi-decoder), [kaldifst](https://github.com/k2-fsa/kaldifst) | v0.3.0, v1.8.0 | Apache-2.0 |
+| [OpenFst](https://github.com/csukuangfj/openfst) (subset) | v1.8.5-2026-07-09 | Apache-2.0 |
+| [simple-sentencepiece](https://github.com/pkufool/simple-sentencepiece) | v0.7 | Apache-2.0 |
+| [Eigen](https://gitlab.com/libeigen/eigen) (header-only, unmodified) | 5.0.1 | MPL-2.0 |
+| [hclust-cpp](https://github.com/csukuangfj/hclust-cpp) (fastcluster) | 2026-02-25 | BSD-2-Clause |
+| [nlohmann/json](https://github.com/nlohmann/json) | v3.12.0 | MIT |
+
+Versions are the ones sherpa-onnx v1.13.8 pins. The Android brain builds the same sherpa-onnx
+(with TTS, without espeak-ng) and links ONNX Runtime 1.28.2 statically.
 
 Models the app downloads for it:
 
 * **NVIDIA Parakeet TDT-CTC 110M** (`nvidia/parakeet-tdt_ctc-110m`, int8 ONNX export by sherpa-onnx:
   `sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8`) — **CC BY 4.0**: commercial use
   allowed with attribution ("Parakeet TDT-CTC 110M © NVIDIA Corporation, CC BY 4.0"), e.g. in the
-  app's About / licences page.
+  app's About / licences page. The attribution, the change note (sherpa-onnx's ONNX export and int8
+  quantization) and the licence are on the licence page already
+  ([`licenses/parakeet-tdt_ctc-110m/`](licenses/parakeet-tdt_ctc-110m/)).
 * **Silero VAD** (`silero_vad.onnx`) — MIT, Copyright (c) 2020-present Silero Team.
 * (Alternative) **Moonshine** English models — MIT. Moonshine's NON-English models are under the
   Moonshine Community License, which is **non-commercial**: do not ship those.

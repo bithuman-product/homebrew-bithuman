@@ -20,6 +20,9 @@ import 'src/voice_host.dart';
 export 'src/voice_host.dart' show VoiceHost, BithumanAudioInterruption, BithumanPlayout, BithumanModelRejected;
 export 'src/agent_imx.dart' show kBithumanModelHosts;
 export 'src/door_gate.dart' show BithumanEntitlementException;
+// The plugin's dartPluginClass (pubspec.yaml): Flutter's registrant imports this library and calls
+// BithumanLicenses.registerWith() at app start.
+export 'src/third_party_licenses.dart';
 
 const _channel = MethodChannel('ai.bithuman.avatar');
 

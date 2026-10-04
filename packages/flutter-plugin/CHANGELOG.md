@@ -62,6 +62,15 @@ older brain (the split-sentence merge is then off).
   turn reaches the avatar's mouth in a median 2.1 s with Apple's model against 1.2 s with Llama.
   Choose it for the download size, not for speed.
 * FoundationModels is weak-linked: the plugin still loads on older systems.
+* **The on-device brain's licences are on every app's licence page.** The plugin ships the
+  licence texts of the models and code the brain runs, byte for byte from upstream, under
+  `licenses/` (`licenses/SOURCES.md` gives each source, revision, date and SHA-256), and registers
+  them with Flutter's `LicenseRegistry` at app start (`BithumanLicenses` is the plugin's
+  `dartPluginClass` on Android, iOS and macOS; `LocalConverseTransport.start` registers too). With
+  them: the Supertonic 3 modification notice (fp16 storage on Apple, sherpa-onnx int8 on Android;
+  Open RAIL-M paragraph 4(c)) and the Parakeet CC BY 4.0 attribution with its change note.
+  `BithumanLicenses.supertonicAttachmentA()` returns the use restrictions an app's terms must
+  include (paragraph 4(a)); the README's "Licences of on-device models" says what an app must do.
 
 ## 2.6.36 — 2026-10-04 — Security: a kept avatar opens only for a credential bitHuman's door said yes to; iOS / macOS: an app linking Essence 2 starts on every OS the pod declares (essence2-v1.15.4); Android `pushAudio` plays your speech; the public model ids on Android; an unknown engine fails by name on iOS / macOS
 

@@ -35,11 +35,15 @@ import 'src/transport_protocol.dart';
 import 'src/dev_levers.dart';
 import 'src/local_brain.dart';
 import 'src/host_reply.dart';
+import 'src/third_party_licenses.dart';
 
 export 'src/transport_protocol.dart';
 // The on-device brain's shipped defaults (persona prompts, measured model set,
 // required license notices) — see lib/src/local_brain.dart.
 export 'src/local_brain.dart';
+// The licences of the code and models the on-device brain uses, registered with
+// Flutter's LicenseRegistry (see lib/src/third_party_licenses.dart).
+export 'src/third_party_licenses.dart';
 // The hybrid brain's reply stage (one surface on iOS and Android) and bitHuman's relay as a source.
 export 'src/host_reply.dart';
 export 'src/relay_text_brain.dart';
@@ -485,6 +489,9 @@ class LocalConverseTransport implements RealtimeTransport {
 
   @override
   Future<void> start({bool mic = true}) async {
+    // The brain's third-party licences on the app's licence page (registered at app start by the
+    // plugin registrant already; this is a no-op then).
+    BithumanLicenses.register();
     _status.add(TransportStatus.connecting);
     try {
       // localAudioStart registers the native EventChannel synchronously and
