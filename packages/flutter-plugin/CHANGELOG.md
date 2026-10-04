@@ -1,4 +1,4 @@
-## Unreleased (2.6.36) — Security: a kept avatar opens only for a credential bitHuman's door said yes to; iOS / macOS: an app linking Essence 2 starts on every OS the pod declares (essence2-v1.15.4); Android `pushAudio` plays your speech; the public model ids on Android; an unknown engine fails by name on iOS / macOS
+## 2.6.36 — 2026-10-04 — Security: a kept avatar opens only for a credential bitHuman's door said yes to; iOS / macOS: an app linking Essence 2 starts on every OS the pod declares (essence2-v1.15.4); Android `pushAudio` plays your speech; the public model ids on Android; an unknown engine fails by name on iOS / macOS
 
 iOS / macOS engines: Essence 2 **`essence2-v1.15.4`** (was `essence2-v1.15.3`), Expression 2 **`v2.20.3`** (was
 `v2.20.1`), the bytes Swift package 2.20.3 serves; macOS `enginecore-v1.0.2` (unchanged). Android: **`essence2-android`
