@@ -432,6 +432,13 @@ class BithumanCli < Formula
   # Terms for the installed software: https://www.bithuman.ai/terms
   license :cannot_represent
 
+  # The tap moved in 2026-10. This archived copy is frozen at the last formula published here.
+  # Re-tap once: brew uninstall bithuman-cli && brew untap bithuman-product/bithuman &&
+  #   brew tap bithuman/bithuman https://gitlab.com/bithuman/sdk/homebrew-bithuman && brew install bithuman-cli
+  # or use the installer: curl -fsSL https://install.bithuman.ai | sh
+  deprecate! date:    "2026-10-30",
+             because: "the tap moved to https://gitlab.com/bithuman/sdk/homebrew-bithuman (README: how to re-tap)"
+
   depends_on arch: :arm64
   depends_on macos: :sonoma
 
