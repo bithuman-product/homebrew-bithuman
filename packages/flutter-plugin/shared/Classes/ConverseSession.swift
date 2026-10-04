@@ -37,15 +37,24 @@ final class ConverseSession: @unchecked Sendable {
     private var turnGen: UInt64 = 0
     private let outputLock = NSLock()
     // Pacing clock: wall-clock time when the audio forwarded so far finishes
-    // playing. We only forward when < paceAheadSecs ahead of real time, so the
-    // PLAYER never buffers more than that — a barge then flushes a tiny buffer
-    // (the engine's ring holds the rest, which the discard drops). Without this
-    // the loop bursts the whole reply into the player and a barge can't stop it.
+    // playing. We forward while < feedLeadSecs ahead of real time.
+    //
+    // ★FEED LEAD 3 s (was 0.1 s). The avatar renders speech in chunks and needs
+    // audio IN FRONT of it to start moving: with a 0.1 s lead it received the
+    // reply at playback speed and the mouth started ~3.4 s after the first TTS
+    // audio (measured 2026-09-28, iPhone 15 + M4, Wise Pup / Expression 2);
+    // handing the PCM over as fast as it is synthesized (≤3 s ahead) starts the
+    // mouth in ~0.85 s — the same onset as a cloud reply, which also arrives as a
+    // burst. Lip-sync is unaffected: the speaker and the avatar still take the
+    // SAME bytes in playSpeakerPCM24k, released on the avatar's audio clock. A
+    // barge still cuts instantly: io.barge() flushes the player, the paced
+    // speaker FIFO and the avatar's audio queue (exactly as for a cloud burst),
+    // and the gen fence below drops anything already pulled.
     private var bufferedUntil = Date.distantPast
-    private static let paceAheadSecs: TimeInterval = 0.1   // keep the player buffer tiny so a barge cuts fast
+    private static let feedLeadSecs: TimeInterval = 3.0
     // Deferred turn-end. BC_EVENT_BOT_TURN_END fires at GENERATION-end, but the
-    // pull-loop keeps draining the engine's already-synthesized PCM ring and
-    // pacing it to the speaker for up to ~bufferedUntil AFTER that. Firing
+    // pull-loop may still be draining the engine's already-synthesized PCM ring
+    // (the feed lead caps how far ahead of playback it forwards). Firing
     // onTurnEnd (→ embody flushTail) at generation-end would advance the runtime's
     // ci MID-DELIVERY while more lipsync audio is still being forwarded → A/V
     // desync → freeze. So we LATCH the end here (stamped with the turn it ended in)
@@ -56,6 +65,19 @@ final class ConverseSession: @unchecked Sendable {
     private var turnEndPending = false
     private var turnEndPendingGen: UInt64 = 0
 
+    /// The hybrid brain's reply stage (a HostReplyLlm), when the app supplies the reply.
+    private let hostReply: AnyObject?
+    /// Timing probe: a turn was pushed and its first audio has not been pulled yet.
+    private var firstPullPending = false
+    /// The brain's audio of the live turn ran dry this many times (a gap the listener hears).
+    private var underruns = 0
+    /// Timing probe: samples of the turn's audio pulled before its first audible sample
+    /// (-1 = found / not looking). Pull thread only.
+    private var onsetScanned = -1
+
+    /// Timing probes for the hybrid brain's harness (first audio of a turn, where its first word
+    /// starts, heard gaps): {"ev":..., "hostMs":...}. Pull thread.
+    var onMetric: (([String: Any]) -> Void)?
     var onState: ((bc_state) -> Void)?
     var onUserFinal: ((String) -> Void)?
     var onBotChunk: ((String) -> Void)?
@@ -66,8 +88,17 @@ final class ConverseSession: @unchecked Sendable {
     /// if `turn != session.currentTurnGen` (a barge cancelled that reply).
     var onTTSChunk: ((_ data: Data, _ turn: UInt64) -> Void)?
 
+    /// `appleLlm`: the reply comes from Apple's on-device model (Foundation
+    /// Models) through the brain's host-LLM ABI instead of llama.cpp; `gguf` is
+    /// then unused. The caller checks `AppleLlmStatus.current() == "available"`.
+    /// `refusalReply`: spoken when that model's guardrail refuses a turn.
+    /// `hostReply` (the hybrid brain, `replyMode: 'host'`): the APP supplies the reply
+    /// text through the same host-LLM ABI; `gguf` and `appleLlm` are then unused.
+    /// It is an `AnyObject` so this file still compiles against a brain without the ABI.
     init?(gguf: String, supertonicAssets: String?, voice: String = "M1",
-          systemPrompt: String = "") {
+          systemPrompt: String = "", appleLlm: Bool = false, refusalReply: String = "",
+          hostReply: AnyObject? = nil) {
+        self.hostReply = hostReply
         if let a = supertonicAssets, !a.isEmpty { setenv("BITHUMAN_SUPERTONIC_ASSETS", a, 1) }
 
         var cfg = bc_config_t()
@@ -90,7 +121,35 @@ final class ConverseSession: @unchecked Sendable {
                     cfg.llm_file = g; cfg.stt_model = w; cfg.tts_voice = v
                     cfg.system_prompt = systemPrompt.isEmpty ? nil : sp
                     var hh: OpaquePointer?
-                    let s = bc_session_create(&cfg, &hh)
+                    var s: bc_status = BC_ERR_INVALID_ARG
+                    if let hostReply {
+                        #if CONVERSE_HOST_LLM
+                        if let host = hostReply as? HostReplyLlm {
+                            s = refusalReply.withCString { rr in
+                                var h = host.hostLlm(refusalReply: refusalReply.isEmpty ? nil : rr, errorReply: nil)
+                                return bc_session_create_with_llm(&cfg, &h, &hh)
+                            }
+                        }
+                        #else
+                        NSLog("[Converse] host reply requested but the staged libconverse has no host-LLM ABI (< 2.5.0)")
+                        #endif
+                    } else if appleLlm {
+                        #if CONVERSE_HOST_LLM
+                        if #available(macOS 26.0, iOS 26.0, *) {
+                            // The brain copies refusal_reply at create time.
+                            s = refusalReply.withCString { rr in
+                                var host = AppleFoundationLlm().hostLlm(refusalReply: refusalReply.isEmpty ? nil : rr)
+                                return bc_session_create_with_llm(&cfg, &host, &hh)
+                            }
+                        } else {
+                            NSLog("[Converse] Apple LLM requested below iOS / macOS 26")
+                        }
+                        #else
+                        NSLog("[Converse] Apple LLM requested but the staged libconverse has no host-LLM ABI (< 2.5.0)")
+                        #endif
+                    } else {
+                        s = bc_session_create(&cfg, &hh)
+                    }
                     h = hh
                     return s
                 }
@@ -141,10 +200,10 @@ final class ConverseSession: @unchecked Sendable {
                 let ahead = self.bufferedUntil.timeIntervalSinceNow
                 let turn = self.turnGen
                 self.outputLock.unlock()
-                // Pace ONLY when forwarding: don't run more than paceAheadSecs
+                // Pace ONLY when forwarding: don't run more than feedLeadSecs
                 // ahead of real-time playback. While discarding we drain the ring
                 // as fast as possible (no pacing).
-                if !discard && ahead > Self.paceAheadSecs {
+                if !discard && ahead > Self.feedLeadSecs {
                     usleep(20_000)  // 20 ms — let playback catch up
                     continue
                 }
@@ -158,8 +217,41 @@ final class ConverseSession: @unchecked Sendable {
                     // Advance the pacing clock by this chunk's duration.
                     let secs = Double(got) / 24000.0
                     self.outputLock.lock()
-                    self.bufferedUntil = Swift.max(self.bufferedUntil, Date()).addingTimeInterval(secs)
+                    let now = Date()
+                    // Timing probe (one line per turn + one per gap): the first audio the brain
+                    // produced for this turn, and every time the voice already handed over ran
+                    // out before the next piece was synthesized (`ahead` < 0: a heard gap).
+                    let first = self.firstPullPending
+                    let dryMs = Int((now.timeIntervalSince(self.bufferedUntil)) * 1000)
+                    if first { self.firstPullPending = false; self.underruns = 0 }
+                    else if dryMs > 40 { self.underruns += 1 }
+                    let n = self.underruns
+                    self.bufferedUntil = Swift.max(self.bufferedUntil, now).addingTimeInterval(secs)
                     self.outputLock.unlock()
+                    if first { self.onsetScanned = 0 }
+                    if self.onsetScanned >= 0 {
+                        // Where the first word starts inside the reply's audio (|x| > -40 dBFS):
+                        // what the synthesis' leading silence (and its trim) costs the listener.
+                        var at = -1
+                        for i in 0..<got where abs(buf[i]) > 0.01 { at = i; break }
+                        if at >= 0 || self.onsetScanned + got >= 24000 {
+                            let onsetMs = at >= 0 ? (self.onsetScanned + at) * 1000 / 24000 : -1
+                            NSLog("[bhtts] onset turn=%llu ms=%d", turn, onsetMs)
+                            self.onMetric?(["ev": "onset", "turn": Int(turn), "ms": onsetMs])
+                            self.onsetScanned = -1
+                        } else {
+                            self.onsetScanned += got
+                        }
+                    }
+                    if first {
+                        NSLog("[bhtts] first_audio turn=%llu hostMs=%lld", turn, Int64(now.timeIntervalSince1970 * 1000))
+                        self.onMetric?(["ev": "first_audio", "turn": Int(turn), "samples": got,
+                                        "hostMs": Int64(now.timeIntervalSince1970 * 1000)])
+                    } else if dryMs > 40 {
+                        NSLog("[bhtts] gap turn=%llu ms=%d n=%d hostMs=%lld", turn, dryMs, n, Int64(now.timeIntervalSince1970 * 1000))
+                        self.onMetric?(["ev": "gap", "turn": Int(turn), "ms": dryMs, "n": n,
+                                        "hostMs": Int64(now.timeIntervalSince1970 * 1000)])
+                    }
                     var i16 = [Int16](repeating: 0, count: got)
                     for i in 0..<got { i16[i] = Int16(max(-32768, min(32767, Int((buf[i] * 32767).rounded())))) }
                     let data = i16.withUnsafeBytes { Data($0) }  // little-endian on arm64
@@ -178,18 +270,23 @@ final class ConverseSession: @unchecked Sendable {
                     // here clears cleanly on the empty boundary that follows pushText.
                     self.outputLock.lock()
                     if self.discardOutput && self.armResume { self.discardOutput = false; self.armResume = false }
-                    // Deferred turn-end. The ring is empty (all synthesized audio
-                    // pulled) AND the paced delivery has fully drained to the speaker
-                    // (bufferedUntil reached). Now — and only now — is it safe to
-                    // flush the avatar's tail: no more lipsync audio will arrive for
-                    // this turn, so flushTail can't advance ci mid-delivery. Gen-gate:
-                    // fire only if the latch still matches the LIVE turn (a barge
-                    // bumped turnGen → drop the flush, exactly like cloud's _audioGen
-                    // check around notifyTurnEnd). Fire OUTSIDE the lock so onTurnEnd
-                    // (which hops to the embody runtime) never runs under outputLock.
-                    let drained = self.bufferedUntil.timeIntervalSinceNow <= 0
+                    // Deferred turn-end. Generation has ended (the latch) AND the
+                    // ring is empty, so every sample of this reply has now been
+                    // HANDED OVER to the speaker + avatar (onTTSChunk runs
+                    // synchronously above). That is the moment to flush the avatar's
+                    // tail: no more lipsync audio will arrive for this turn, so
+                    // flushTail can't advance ci mid-delivery. It must NOT wait for
+                    // playback to finish (the old `bufferedUntil` drain): with the
+                    // 3 s feed lead the avatar would sit on an unflushed partial
+                    // chunk for seconds and stall at the end of every reply
+                    // (measured: speech coverage 0.84 without this, 0.98 with it).
+                    // Gen-gate: fire only if the latch still matches the LIVE turn
+                    // (a barge bumped turnGen → drop the flush, exactly like cloud's
+                    // _audioGen check around notifyTurnEnd). Fire OUTSIDE the lock so
+                    // onTurnEnd (which hops to the embody runtime) never runs under
+                    // outputLock.
                     let fireEnd = self.turnEndPending && !self.discardOutput
-                        && self.turnEndPendingGen == self.turnGen && drained
+                        && self.turnEndPendingGen == self.turnGen
                     if fireEnd { self.turnEndPending = false }
                     self.outputLock.unlock()
                     if fireEnd { self.onTurnEnd?() }
@@ -204,7 +301,10 @@ final class ConverseSession: @unchecked Sendable {
     /// lock-free read for the audio/forward path.
     var currentTurnGen: UInt64 { outputLock.lock(); defer { outputLock.unlock() }; return turnGen }
 
-    func pushText(_ t: String) {
+    /// Commit a user turn. `continuation` = these words are the rest of the
+    /// PREVIOUS user turn (the recognizer split one utterance in two); the brain
+    /// retracts the reply to the first part and answers both as one message.
+    func pushText(_ t: String, continuation: Bool = false) {
         // If the PREVIOUS turn's deferred end is still latched (its paced delivery
         // hadn't fully drained when this new turn was committed — rare, only on a
         // very fast back-to-back), fire it NOW, before the new turn's audio starts
@@ -215,11 +315,35 @@ final class ConverseSession: @unchecked Sendable {
         // lock (onTurnEnd hops to the embody runtime).
         outputLock.lock()
         if discardOutput { armResume = true }
+        firstPullPending = true
         let firePrev = turnEndPending && turnEndPendingGen == turnGen && !discardOutput
         if firePrev { turnEndPending = false }
         outputLock.unlock()
         if firePrev { onTurnEnd?() }
+        #if CONVERSE_PUSH_EX
+        let flags: UInt32 = continuation ? UInt32(BC_PUSH_CONTINUATION) : 0
+        _ = t.withCString { bc_session_push_text_ex(handle, $0, flags) }
+        #else
+        _ = continuation  // libconverse < 2.4: no merge — the part is a turn of its own
         _ = t.withCString { bc_session_push_text(handle, $0) }
+        #endif
+    }
+
+    /// Speak [t] as the CHARACTER's own line, verbatim — no model call, no user turn (the hybrid
+    /// brain's greeting, written by the app's server). False when the staged libconverse has no
+    /// BC_PUSH_SPEAK (the caller then says nothing rather than make it a paid user turn).
+    func pushSpeak(_ t: String) -> Bool {
+        #if CONVERSE_PUSH_SPEAK
+        outputLock.lock()
+        if discardOutput { armResume = true }
+        firstPullPending = true
+        outputLock.unlock()
+        let rc = t.withCString { bc_session_push_text_ex(handle, $0, UInt32(BC_PUSH_SPEAK)) }
+        return rc == BC_OK
+        #else
+        _ = t
+        return false
+        #endif
     }
 
     /// Barge: cancel the in-flight reply immediately and flush everything it
@@ -251,6 +375,11 @@ final class ConverseSession: @unchecked Sendable {
         turnEndPending = false
         outputLock.unlock()
         bc_session_interrupt(handle)
+        #if CONVERSE_HOST_LLM
+        // The brain is blocked in the host's stream while it waits for text: end that wait now
+        // (the app gets reply_cancel and drops its HTTP stream).
+        (hostReply as? HostReplyLlm)?.cancel()
+        #endif
     }
 
     func stop() {

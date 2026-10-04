@@ -1018,6 +1018,15 @@ class BithumanRealtimeSession {
     }
   }
 
+  /// Measurement (debug / profile builds only): send [pcm24kPcm16le] (24 kHz mono PCM16) up as if
+  /// the microphone had captured it — the same path, gates and barge as the mic. For a harness
+  /// that speaks prerecorded audio into a session started with `enableMic: false`. A no-op in
+  /// release builds.
+  void debugSendInputAudio(Uint8List pcm24kPcm16le) {
+    if (!DevLevers.enabled) return;
+    _sendMicBytes(pcm24kPcm16le);
+  }
+
   /// Mark the end of the user's turn explicitly (when server VAD is off).
   void commitInputAudio() {
     _send({'type': 'input_audio_buffer.commit'});

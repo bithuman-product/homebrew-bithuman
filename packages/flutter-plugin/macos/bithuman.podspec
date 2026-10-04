@@ -16,8 +16,10 @@
 # `Frameworks/libessence2.a` is present; absent it, the essence2 path compiles
 # out and the build stays embody-only, byte-identical, and shippable.
 #
-# libconverse needs llama.cpp from Homebrew at link + runtime via @rpath:
-#   brew install llama.cpp
+# libconverse (>= 2.4.0) links llama.cpp STATICALLY (pinned b8110, merged into
+# libconverse.a like iOS) — nothing from Homebrew for the LLM. Supertonic's ONNX
+# Runtime still comes from Homebrew at link + runtime via @rpath:
+#   brew install onnxruntime
 #
 # libconverse.xcframework lands in the plugin tree via scripts/bootstrap.sh
 # (an embody Release vendor bundle, or a sibling bithuman-sdk checkout for
@@ -248,17 +250,23 @@ Pod::Spec.new do |s|
     '-framework AVFoundation -framework CoreGraphics -framework QuartzCore ' \
     '-framework Security -lcurl'
 
-  # Homebrew dylibs libconverse needs at link + runtime via @rpath:
-  #   - llama.cpp: the local LLM brain (ggml/llama).
-  #   - onnxruntime: Supertonic TTS (the converse voice).
-  # The example app's xcconfig also wires runtime DYLD paths so they load at
-  # launch.
+  # Homebrew dylibs the macOS app needs at link + runtime via @rpath:
+  #   - onnxruntime: Supertonic TTS (the converse voice) + the a2x w2v frontend.
+  # llama.cpp is NOT here any more: libconverse >= 2.4.0 carries a pinned static
+  # llama.cpp (b8110). Linking Homebrew's libllama.dylib let `brew upgrade
+  # llama.cpp` swap the ABI under the prebuilt brain (b9770 vs b8110 → SIGSEGV in
+  # the llama_context constructor on load).
   brew_libs =
     '-L/opt/homebrew/lib ' \
     '-L/opt/homebrew/opt/onnxruntime/lib ' \
-    '-L/opt/homebrew/opt/llama.cpp/lib ' \
-    '-lonnxruntime ' \
-    '-lllama'
+    '-lonnxruntime'
+  # An OLDER staged brain (< 2.4.0, the expression2-vendor-v1 bytes) still
+  # resolves llama.cpp from Homebrew at the app link. Recognised by its header
+  # (2.4.0 added bc_session_push_text_ex together with the static llama.cpp).
+  converse_hdr = Dir.glob(File.join(__dir__, 'Frameworks/libconverse.xcframework/*/Headers/bithuman/libconverse.h')).first
+  converse_static_llama = !converse_hdr.nil? && File.read(converse_hdr).include?('bc_session_push_text_ex')
+  legacy_llama = converse_fw && !converse_static_llama
+  brew_libs += ' -L/opt/homebrew/opt/llama.cpp/lib -lllama' if legacy_llama
 
   pod_xcconfig = {
     'DEFINES_MODULE'              => 'YES',
@@ -282,7 +290,22 @@ Pod::Spec.new do |s|
   # Set from the staged bytes, never from intent: the local-brain code compiles
   # in ONLY when the framework it calls is actually present.
   conds << 'CONVERSE_AVAILABLE'  if converse_fw
+  # libconverse >= 2.4.0 adds bc_session_push_text_ex (continuation merge of a
+  # split utterance). Detected from the staged header so this pod still builds
+  # against an older vendored brain (the split part is then its own turn).
+  if converse_fw
+    hdr = Dir.glob(File.join(__dir__, 'Frameworks/libconverse.xcframework/*/Headers/bithuman/libconverse.h')).first
+    conds << 'CONVERSE_PUSH_EX' if hdr && File.read(hdr).include?('bc_session_push_text_ex')
+    # libconverse >= 2.5.0 adds bc_session_create_with_llm: the brain can run
+    # Apple's on-device model (Foundation Models) instead of llama.cpp.
+    conds << 'CONVERSE_HOST_LLM' if hdr && File.read(hdr).include?('bc_session_create_with_llm')
+    # BC_PUSH_SPEAK (the hybrid brain's greeting: the character's own line, spoken verbatim).
+    conds << 'CONVERSE_PUSH_SPEAK' if hdr && File.read(hdr).include?('BC_PUSH_SPEAK')
+  end
   pod_xcconfig['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = conds.join(' ')
+  # Apple's on-device model (AppleFoundationLlm.swift) is iOS / macOS 26+: weak so
+  # the plugin still loads on the older systems this pod supports.
+  s.weak_frameworks = ['FoundationModels']
   pod_xcconfig['GCC_PREPROCESSOR_DEFINITIONS'] = '$(inherited) BH_ENGINE_AUTH_HOOKS=1' if auth_hooks
   # APPLE SILICON ONLY — declared from the vendored bytes. Every native binary this
   # pod links on macOS is a single arm64 slice: libconverse.xcframework carries
@@ -308,7 +331,7 @@ Pod::Spec.new do |s|
     # frameworks here.
     'OTHER_LDFLAGS' => "$(inherited) #{brew_libs} #{common_frameworks}",
     # Embed @rpath entries so the Homebrew dylibs resolve at run-time.
-    'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) /opt/homebrew/lib /opt/homebrew/opt/onnxruntime/lib /opt/homebrew/opt/llama.cpp/lib',
+    'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) /opt/homebrew/lib /opt/homebrew/opt/onnxruntime/lib' + (legacy_llama ? ' /opt/homebrew/opt/llama.cpp/lib' : ''),
   }
   # The staged engines' floor, for Classes/BHDeploymentFloor.h (see "THE DECLARED FLOOR").
   user_xcconfig['GCC_PREPROCESSOR_DEFINITIONS'] = "$(inherited)#{mac_floor_defines}" unless mac_floor_defines.empty?

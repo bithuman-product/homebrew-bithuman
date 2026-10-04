@@ -175,13 +175,38 @@ class RecordingVoiceHost implements VoiceHost {
 
   @override
   Future<void> localAudioStart({
-    required String ggufPath,
+    String? ggufPath,
     String? supertonicAssets,
     String? voice,
     int vadThreshold = 0,
     String systemPrompt = '',
+    String llm = 'auto',
+    String refusalReply = '',
+    String replyMode = 'local',
+    String? sttDir,
+    int minSilenceMs = 0,
+    bool bargeOnSpeech = false,
+    bool injectAudio = false,
+    double injectNoiseDb = -65,
+    int maxSentences = 0,
   }) async {
     calls.add('localAudioStart:$ggufPath');
+  }
+
+  @override
+  Future<void> localReplyText(int id, String text, {bool done = false, int result = 0}) async =>
+      calls.add('localReplyText:$id:${done ? 'done:$result' : text}');
+
+  @override
+  Future<bool> localSpeakText(String text) async {
+    calls.add('localSpeakText:$text');
+    return true;
+  }
+
+  @override
+  Future<bool> localInjectWav(String path, {String? tag, double? speechStart, double? speechEnd}) async {
+    calls.add('localInjectWav');
+    return false;
   }
 
   @override

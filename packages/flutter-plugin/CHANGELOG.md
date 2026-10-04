@@ -1,3 +1,68 @@
+## Unreleased — the on-device brain, fast enough for a free tier
+
+Needs libconverse **2.4.0**. Until a vendor bundle carries it, stage a local build with
+`BITHUMAN_CONVERSE_XCFRAMEWORK=<path> scripts/bootstrap.sh`. The pod still builds against the
+older brain (the split-sentence merge is then off).
+
+* **Faster replies (LOCAL mode).** The brain hands its speech to the avatar as fast as it is
+  synthesized (up to 3 s ahead, like a cloud reply) and flushes the avatar as soon as the whole
+  reply has been handed over, instead of pacing it at playback speed. The avatar's mouth starts
+  about 2.5 s sooner; lip-sync still follows the audio clock and a barge still cuts instantly.
+* **Faster end of turn.** Apple SpeechAnalyzer runs with `.fastResults`: the user's turn is
+  committed 0.4–0.9 s after they stop talking instead of about 2 s.
+* **Split sentences are one turn.** "Hi Wise Pup! … How are you?" used to become two turns and
+  the second was dropped. A part the user started saying before the reply was audible is now
+  merged into the same turn. Finals with no letters or digits are ignored.
+* **macOS no longer links Homebrew llama.cpp.** libconverse 2.4.0 carries a pinned static
+  llama.cpp; `brew upgrade llama.cpp` could crash the app on load (ABI mismatch). ONNX Runtime
+  still comes from Homebrew on macOS.
+* **Persona and model set.** `LocalBrainPersona.wisePup`, `LocalBrainModels` (Llama 3.2 1B
+  Instruct and a half-size Supertonic voice) and `LocalBrainNotices` (the attributions the model
+  licenses require). See `THIRD_PARTY_NOTICES.md`.
+* The brain strips emoji, markdown and `*actions*` from captions and speech, and answers a turn
+  about suicide or self-harm with a fixed crisis message (988 / local crisis line).
+
+### The hybrid brain: on-device speech, a cheap cloud text model (iOS; needs libconverse 2.5.0)
+
+* **`replyMode: 'host'`** (`LocalConverseTransport(replySource: ...)`, the same Dart API as the Android hybrid brain): speech-to-text, the clause chunker,
+  the Supertonic voice, barge-in and the avatar feed stay on the device; the REPLY TEXT comes from
+  the app — typically a cheap text model behind the app's own server (no key on the phone, no
+  speech-to-speech minute). The brain asks with a `reply_request` event, the app streams the answer
+  back with `localReplyText(id, text, done:)`, and a barge-in sends `reply_cancel` (the app drops its
+  stream; measured: the cancel leaves within 5 ms of the barge).
+* **Parakeet speech-to-text on iOS** (`sttDir:`, the same argument as Android's): a Silero VAD + NVIDIA Parakeet TDT 110M (int8,
+  137 MB download, CC BY 4.0) through sherpa-onnx, staged by `scripts/build-sherpa-ios.sh` against
+  the pod's own onnxruntime (+2.1 MB app binary). iPhone 18 Pro, prerecorded accented / child
+  speech under an avatar: the turn is committed 0.62 s (p50) after the user stops, against 1.1–1.3 s
+  for Apple's SpeechAnalyzer (with outliers past 6 s), and speech onset is detected in ~0.3 s
+  against 0.6–2.6 s. Without `sttDir` the app keeps Apple's SpeechAnalyzer (nothing to download).
+* **`bargeOnSpeech:`** — the on-device VAD barge: the user starting to talk over the character
+  stops the voice and the avatar and cancels the reply (0.28–0.48 s from speech onset with Parakeet).
+* **`injectAudio:` + `localInjectWav(path)`** (testing): the microphone is never opened; prerecorded
+  16 kHz files are spoken into the speech-to-text in real time under a noise floor, and the
+  session reports `metric` events (speech end, final, first audio, heard, barge, fps, memory) so a
+  harness measures the whole pipeline on the device without a speaker-to-mic loop.
+
+### Apple's on-device model as the brain's LLM (needs libconverse 2.5.0)
+
+* **No LLM download on Apple Intelligence devices.** On iOS / macOS 26 with Apple Intelligence
+  turned on, LOCAL mode can run Apple's on-device model (the Foundation Models framework) instead
+  of Llama 3.2 1B, so the app downloads only the voice: 200.6 MB instead of 1008 MB.
+  `BithumanAvatar.appleIntelligenceStatus()` says whether that works here and why not
+  (`deviceNotEligible`, `appleIntelligenceNotEnabled` — the user can turn it on in Settings —,
+  `modelNotReady`, …); `LocalBrainModels.assetsFor(apple:)` is the download for that answer.
+* `localAudioStart` / `LocalConverseTransport` take `llm:` (`auto` = Apple's model where it is
+  available, else the GGUF; `apple`; `llama`). `ggufPath` is optional when Apple's model runs.
+* When Apple's model refuses a turn (its own guardrail), the avatar says an in-character line
+  (`LocalBrainPersona.wisePupRefusal`) and the refused turn leaves the history, so it cannot make
+  the model refuse the turns after it. The 988 crisis reply is still decided before any model
+  sees the turn. The first reply is prewarmed at load.
+* **It is slower, not faster.** On an M4 Mac, Apple's model takes about 0.4 s to its first words
+  with nothing else running and about 0.7 s while the avatar renders (Llama: 0.05 s). A typed
+  turn reaches the avatar's mouth in a median 2.1 s with Apple's model against 1.2 s with Llama.
+  Choose it for the download size, not for speed.
+* FoundationModels is weak-linked: the plugin still loads on older systems.
+
 ## 2.6.36 — 2026-10-04 — Security: a kept avatar opens only for a credential bitHuman's door said yes to; iOS / macOS: an app linking Essence 2 starts on every OS the pod declares (essence2-v1.15.4); Android `pushAudio` plays your speech; the public model ids on Android; an unknown engine fails by name on iOS / macOS
 
 iOS / macOS engines: Essence 2 **`essence2-v1.15.4`** (was `essence2-v1.15.3`), Expression 2 **`v2.20.3`** (was

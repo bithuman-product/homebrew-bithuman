@@ -33,8 +33,16 @@ import 'package:bithuman/bithuman_realtime.dart';
 import 'openai_webrtc_session.dart';
 import 'src/transport_protocol.dart';
 import 'src/dev_levers.dart';
+import 'src/local_brain.dart';
+import 'src/host_reply.dart';
 
 export 'src/transport_protocol.dart';
+// The on-device brain's shipped defaults (persona prompts, measured model set,
+// required license notices) — see lib/src/local_brain.dart.
+export 'src/local_brain.dart';
+// The hybrid brain's reply stage (one surface on iOS and Android) and bitHuman's relay as a source.
+export 'src/host_reply.dart';
+export 'src/relay_text_brain.dart';
 // Re-exported WITHOUT a matching import on purpose: `VoiceHost` already reaches
 // this library through bithuman_realtime.dart (the voice library exports the
 // voice protocol), so importing it here is what the analyzer calls an
@@ -367,20 +375,64 @@ class WebRTCTransport implements RealtimeTransport {
   }
 }
 
-/// LOCAL mode (macOS): the on-device converse brain via the plugin, no cloud.
-/// Status + captions come from the plugin's converse EventChannel; the avatar
-/// + VP-IO audio are driven natively, so this transport is thin.
+/// LOCAL mode (macOS, iOS, Android): the on-device converse brain via the
+/// plugin. Status + captions come from the plugin's converse EventChannel; the
+/// avatar + audio are driven natively, so this transport is thin.
+///
+/// THE HYBRID BRAIN: pass a [replySource] (e.g. `RelayTextBrain`, or
+/// `HostReplySource.fromMessages(...)`) and the brain listens and speaks on the
+/// device while the WORDS come from the source — one Dart surface on iOS and
+/// Android. The transport bridges the native events to the source: a
+/// `reply_request` becomes [HostReplySource.reply], a `reply_cancel` (barge-in,
+/// with the characters the person heard) becomes [HostReplySource.cancelled],
+/// the greeting is the source's [HostReplySource.greeting] spoken verbatim
+/// (never a user turn), and [stop] closes the source.
 class LocalConverseTransport implements RealtimeTransport {
   LocalConverseTransport({
     required this.avatar,
-    required this.ggufPath,
+    this.ggufPath,
     this.supertonicAssets,
     this.voice,
     this.vadThreshold = 0,
     this.systemPrompt = '',
+    this.llm = LocalBrainLlm.auto,
+    this.refusalReply = '',
+    this.replySource,
+    this.sttDir,
+    this.minSilenceMs = 0,
+    this.bargeOnSpeech = false,
+    this.greet = true,
+    this.injectAudio = false,
+    this.maxSentences = 0,
   });
   final VoiceHost avatar;
-  final String ggufPath;
+  /// THE HYBRID BRAIN: when set, the on-device brain asks this for its replies
+  /// (speech-to-text and the voice stay on the device); [ggufPath] / [llm] are
+  /// then unused. Closed by [stop].
+  final HostReplySource? replySource;
+  /// A sherpa-onnx speech-to-text model directory (iOS builds that staged it,
+  /// and Android); null = the platform recognizer (Apple's SpeechAnalyzer).
+  final String? sttDir;
+  /// Caps a spoken reply at this many sentences (0 = the platform default:
+  /// Android 3, Apple the whole reply).
+  final int maxSentences;
+  final int minSilenceMs;
+  /// Barge when the speech-to-text hears the user start talking over the character.
+  final bool bargeOnSpeech;
+  /// Speak a greeting when the brain is ready. With a [replySource] it is the
+  /// source's own line ([HostReplySource.greeting], spoken verbatim; none when it
+  /// has none); without, the on-device model greets in character.
+  final bool greet;
+  /// Testing: no microphone; feed files with [VoiceHost.localInjectWav].
+  final bool injectAudio;
+  /// The Llama GGUF. Null is fine when Apple's on-device model runs the brain
+  /// (see [llm] and [AppleIntelligenceStatus]).
+  final String? ggufPath;
+  /// Which LLM the brain runs; [LocalBrainLlm.auto] = Apple's model where it is
+  /// available, else the GGUF.
+  final LocalBrainLlm llm;
+  /// Spoken when Apple's model refuses a turn ('' = the brain's default line).
+  final String refusalReply;
   final String? supertonicAssets;
   final String? voice;
   final int vadThreshold;
@@ -391,7 +443,10 @@ class LocalConverseTransport implements RealtimeTransport {
   final _mic = StreamController<double>.broadcast();
   final _botLvl = StreamController<double>.broadcast();
   final _interrupt = StreamController<void>.broadcast();
+  final _raw = StreamController<Map<dynamic, dynamic>>.broadcast();
   StreamSubscription<Map<dynamic, dynamic>>? _evSub;
+  // The hybrid brain's reply in flight: request id → its stream.
+  final Map<int, StreamSubscription<String>> _replies = {};
   bool _muted = false;
   bool _greeted = false;   // welcome-on-connect fires once per session
 
@@ -405,6 +460,9 @@ class LocalConverseTransport implements RealtimeTransport {
 
   @override
   Stream<TransportStatus> get statusStream => _status.stream;
+  /// Every native brain event as it arrives (captions, states, the hybrid
+  /// brain's requests and the timing `metric` events) — diagnostics / harness.
+  Stream<Map<dynamic, dynamic>> get rawEvents => _raw.stream;
   @override
   Stream<String> get botTranscriptStream => _bot.stream;
   @override
@@ -440,6 +498,14 @@ class LocalConverseTransport implements RealtimeTransport {
         voice: voice,
         vadThreshold: vadThreshold,
         systemPrompt: systemPrompt,
+        llm: llm.name,
+        refusalReply: refusalReply,
+        replyMode: replySource != null ? 'host' : 'local',
+        sttDir: sttDir,
+        minSilenceMs: minSilenceMs,
+        bargeOnSpeech: bargeOnSpeech,
+        injectAudio: injectAudio,
+        maxSentences: maxSentences,
       );
       _evSub = avatar.converseEvents.listen(_onEvent);
       // The native mic only exists after localAudioStart, so a mute requested
@@ -453,16 +519,32 @@ class LocalConverseTransport implements RealtimeTransport {
   }
 
   void _onEvent(Map<dynamic, dynamic> ev) {
+    if (_raw.hasListener) _raw.add(ev);
     switch (ev['kind']) {
+      // The hybrid brain wants a reply: stream it back piece by piece.
+      case 'reply_request':
+        _startReply(ev);
+      case 'reply_cancel':
+        final id = ev['id'] as int? ?? -1;
+        // Tell the source first (what was heard), then drop the stream.
+        replySource?.cancelled(id, heardChars: (ev['heardChars'] as num?)?.toInt());
+        unawaited(_replies.remove(id)?.cancel());
       // Native load progress (the GGUF + Supertonic load off-thread).
       case 'loading':
         _status.add(TransportStatus.connecting);
       case 'ready':
         _status.add(TransportStatus.listening);
-        if (!_greeted) {
+        if (greet && !_greeted) {
           _greeted = true;
-          _status.add(TransportStatus.thinking);   // rim on until the greeting plays
-          avatar.localPushText(_greetingPrompt);
+          final source = replySource;
+          if (source == null) {
+            _status.add(TransportStatus.thinking);   // rim on until the greeting plays
+            avatar.localPushText(_greetingPrompt);
+          } else {
+            // The hybrid brain: the server's own opening line, spoken verbatim — never a
+            // (paid) user turn carrying a meta-prompt.
+            unawaited(_speakGreeting(source));
+          }
         }
       case 'error':
         _status.add(TransportStatus.error);
@@ -496,11 +578,76 @@ class LocalConverseTransport implements RealtimeTransport {
     }
   }
 
+  Future<void> _speakGreeting(HostReplySource source) async {
+    String? line;
+    try {
+      line = await source.greeting();
+    } catch (_) {
+      line = null;
+    }
+    if (line == null || line.trim().isEmpty || _evSub == null) return;
+    _status.add(TransportStatus.thinking);
+    if (!await avatar.localSpeakText(line)) _status.add(TransportStatus.listening);
+  }
+
+  void _startReply(Map<dynamic, dynamic> ev) {
+    final id = ev['id'] as int? ?? -1;
+    final provider = replySource;
+    if (provider == null || id < 0) {
+      unawaited(avatar.localReplyText(id, '', done: true, result: 3));
+      return;
+    }
+    final msgs = <Map<String, String>>[
+      for (final m in (ev['messages'] as List? ?? const []))
+        {'role': '${(m as Map)['role'] ?? ''}', 'content': '${m['content'] ?? ''}'},
+    ];
+    // The user's turn: the native `text` (the whole utterance on a continuation), else
+    // the last user message of the brain's prompt.
+    var text = ev['text'] as String?;
+    if (text == null) {
+      for (final m in msgs.reversed) {
+        if (m['role'] == 'user') {
+          text = m['content'];
+          break;
+        }
+      }
+    }
+    final request = HostReplyRequest(
+      id: id,
+      text: text ?? '',
+      continuation: ev['continuation'] == true,
+      messages: msgs,
+      maxTokens: (ev['maxTokens'] as num?)?.toInt() ?? 0,
+    );
+    var ended = false;
+    void end(int result) {
+      if (ended) return;
+      ended = true;
+      _replies.remove(id);
+      unawaited(avatar.localReplyText(id, '', done: true, result: result));
+    }
+    _replies[id] = provider.reply(request).listen(
+      (piece) {
+        if (!ended && piece.isNotEmpty) unawaited(avatar.localReplyText(id, piece));
+      },
+      onError: (Object _) => end(3),
+      onDone: () => end(0),
+      cancelOnError: true,
+    );
+  }
+
   @override
   Future<void> stop() async {
+    for (final r in _replies.values) {
+      unawaited(r.cancel());
+    }
+    _replies.clear();
     await avatar.localAudioStop();
     await _evSub?.cancel();
     _evSub = null;
+    try {
+      await replySource?.close();
+    } catch (_) {}
     _status.add(TransportStatus.closed);
   }
 
@@ -512,6 +659,7 @@ class LocalConverseTransport implements RealtimeTransport {
     await _mic.close();
     await _botLvl.close();
     await _interrupt.close();
+    await _raw.close();
   }
 
   @override
@@ -581,6 +729,7 @@ RealtimeTransport pickTransport({
   bool localMode = false,
   String? ggufPath,
   String? supertonicAssets,
+  bool appleLlm = false,     // the brain runs Apple's on-device model: no GGUF needed
   String? transportOverride, // test injection; defaults to the dart-define
   String? operatingSystem,   // test injection; defaults to Platform's
 }) {
@@ -588,6 +737,7 @@ RealtimeTransport pickTransport({
   final d = pickTransportDescriptor(
     localMode: localMode,
     ggufPath: ggufPath,
+    appleLlm: appleLlm,
     transportOverride: transportOverride,
     operatingSystem: os,
   );
@@ -605,7 +755,8 @@ RealtimeTransport pickTransport({
     case 'local':
       return LocalConverseTransport(
         avatar: avatar,
-        ggufPath: ggufPath!,
+        ggufPath: ggufPath,
+        llm: appleLlm ? LocalBrainLlm.apple : LocalBrainLlm.auto,
         supertonicAssets: supertonicAssets,
         voice: voice,
         vadThreshold: vadThreshold,
@@ -673,10 +824,10 @@ TransportDescriptor pickTransportDescriptor({
   required String? ggufPath,
   required String? transportOverride,
   required String operatingSystem,
+  bool appleLlm = false,
 }) {
   if (localMode &&
-      ggufPath != null &&
-      ggufPath.isNotEmpty &&
+      (appleLlm || (ggufPath != null && ggufPath.isNotEmpty)) &&
       kLocalConverseTransport.runsOn(operatingSystem)) {
     return kLocalConverseTransport;
   }

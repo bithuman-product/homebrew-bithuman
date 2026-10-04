@@ -123,13 +123,87 @@ abstract class VoiceHost {
   /// Run the on-device converse brain (ASR → LLM → TTS) instead of a cloud
   /// provider. Registers the event channel synchronously and returns promptly;
   /// the model load runs off-thread and reports through [converseEvents].
+  ///
+  /// [llm] picks the brain's LLM: `auto` (Apple's on-device model where it is
+  /// available, else the GGUF at [ggufPath]), `apple`, or `llama`. [ggufPath]
+  /// may be null only when Apple's model will be used. [refusalReply] is spoken
+  /// when Apple's model refuses a turn ('' = the brain's default line).
+  ///
+  /// THE HYBRID BRAIN ([replyMode] `host`, iOS and Android): speech-to-text and
+  /// the voice stay on the device and the REPLY TEXT comes from the app —
+  /// typically a cheap cloud text model behind bitHuman's relay or the app's own
+  /// server (no key on the device, no speech-to-speech minute). [ggufPath] and
+  /// [llm] are then unused. Most apps never touch this level: pass a
+  /// [HostReplySource] (e.g. `RelayTextBrain`) as
+  /// `LocalConverseTransport(replySource:)`. The contract, the same on both
+  /// platforms:
+  ///
+  ///  * native → `{"kind":"reply_request","id":int,"messages":[{role,content}],
+  ///    "maxTokens":int,"text":String,"continuation":bool}` — the brain needs a
+  ///    reply. `messages` is the brain's own prompt (system, bounded history, the
+  ///    turn) for a source that keeps no memory; `text` is the user's turn as
+  ///    heard; `continuation` true = the user went on after a pause and `text` is
+  ///    the WHOLE utterance, replacing the previous request's turn (the brain
+  ///    cancelled that reply first). A native side without `text` /
+  ///    `continuation` means the last user message / false.
+  ///  * Dart → [localReplyText] pieces, then `done`.
+  ///  * native → `{"kind":"reply_cancel","id":int,"heardChars":int?}` — the
+  ///    person cut in (or a new turn / stop superseded the reply). Sent while the
+  ///    reply streams AND after it finished streaming but was still being spoken
+  ///    (the text arrives long before the voice ends): `heardChars` = how much of
+  ///    the reply's text was actually SPOKEN, in Unicode code points (absent =
+  ///    unknown). The app drops its stream and tells its server what was heard.
+  ///  * Dart → [localSpeakText]: the character's own line spoken verbatim, no
+  ///    reply_request (the server's greeting).
+  ///
+  /// [sttDir]: a sherpa-onnx speech-to-text model directory (with
+  /// `silero_vad.onnx`) to listen with instead of the platform recognizer
+  /// (Apple's SpeechAnalyzer; iOS builds that staged sherpa-onnx, and Android);
+  /// [minSilenceMs] is the pause that ends the user's turn there.
+  /// [bargeOnSpeech]: barge when the speech-to-text hears the user start talking
+  /// while the character speaks (the on-device VAD barge). [injectAudio]
+  /// (testing; ignored in release builds): the microphone is never opened;
+  /// [localInjectWav] speaks prerecorded files into the speech-to-text instead,
+  /// in real time, under a noise floor of [injectNoiseDb] dBFS. [maxSentences]
+  /// caps a spoken reply (0 = the platform default: Android 3, Apple the whole
+  /// reply).
   Future<void> localAudioStart({
-    required String ggufPath,
+    String? ggufPath,
     String? supertonicAssets,
     String? voice,
     int vadThreshold,
     String systemPrompt,
+    String llm,
+    String refusalReply,
+    String replyMode,
+    String? sttDir,
+    int minSilenceMs,
+    bool bargeOnSpeech,
+    bool injectAudio,
+    double injectNoiseDb,
+    int maxSentences,
   });
+
+  /// The hybrid brain ([localAudioStart] `replyMode: 'host'`): a piece of the
+  /// reply to `reply_request` [id]. [done] ends it; [result] 0 = ok, 1 = refused,
+  /// 2 = context full, 3 = error (the brain then says its fallback line if
+  /// nothing was spoken yet). Pieces for a cancelled or older request are dropped.
+  Future<void> localReplyText(int id, String text, {bool done = false, int result = 0});
+
+  /// The hybrid brain: speak [text] as the CHARACTER's own line, verbatim — no
+  /// `reply_request`, no user turn; captioned, voiced, interruptible like any
+  /// reply and kept in the brain's history as its turn. For an opening line the
+  /// server already wrote (`RelayTextBrain`'s greeting). Returns false where the
+  /// native brain cannot (an older libconverse or platform): the caller then
+  /// skips the line rather than turning it into a paid user turn.
+  Future<bool> localSpeakText(String text);
+
+  /// Testing ([localAudioStart] `injectAudio: true`; false in release builds):
+  /// speak a 16 kHz mono WAV at [path] into the speech-to-text as if from the
+  /// microphone, in real time. [speechStart] / [speechEnd] (seconds into the
+  /// file) are reported as `inject_speech_start` / `inject_speech_end` metric
+  /// events when the stream passes them. True when the file was queued.
+  Future<bool> localInjectWav(String path, {String? tag, double? speechStart, double? speechEnd});
 
   /// Tear down the local brain and its audio unit.
   Future<void> localAudioStop();

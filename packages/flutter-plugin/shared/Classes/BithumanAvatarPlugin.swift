@@ -320,6 +320,12 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
     case "engineVersion":
       result("expression-2 (pure-Swift/CoreML)")
 
+    case "appleIntelligenceStatus":
+      // Whether the on-device brain can run Apple's model (Foundation Models)
+      // here instead of downloading Llama — see AppleLlmStatus for the values.
+      // Asked BEFORE the app downloads the brain's models.
+      result(AppleLlmStatus.current())
+
     case "isLocalModeSupported":
       // LOCAL mode (on-device converse brain) binds Apple's SpeechAnalyzer,
       // which is `@available(macOS 26.0, iOS 26.0)`. Probe the running OS so
@@ -635,6 +641,16 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
             "textureId": textureId, "micGen": playoutGen, "played": played, "fed": fed,
           ])
         }
+        // Measurement (debugArmFirstHeard): when the first sample of the next reply will be HEARD
+        // (avatar start-up hold and output latency included) — the same probe the on-device brain's
+        // `heard` metric uses, so the two paths are timed alike.
+        io.onFirstHeard = { [weak self] at, lat in
+          DispatchQueue.main.async {
+            self?.channel?.invokeMethod("firstHeard", arguments: [
+              "textureId": textureId, "micGen": playoutGen, "heardAtMs": at, "outputLatencyMs": lat,
+            ])
+          }
+        }
       }
       let enableMic = args["enableMic"] as? Bool ?? true
       let vadThreshold = args["vadThreshold"] as? Int
@@ -793,10 +809,9 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // ★NO TEXTURE REQUIRED — same cut as `audioStart` above. The on-device
       // brain drives the same RealtimeAudioIO; the avatar is optional there too.
       guard let args = call.arguments as? [String: Any],
-            let textureId = args["textureId"] as? Int64,
-            let gguf = args["ggufPath"] as? String else {
+            let textureId = args["textureId"] as? Int64 else {
         result(FlutterError(code: "BAD_ARGS",
-                            message: "localAudioStart requires textureId + ggufPath", details: nil))
+                            message: "localAudioStart requires textureId", details: nil))
         return
       }
       guard #available(macOS 26.0, iOS 26.0, *) else {
@@ -804,6 +819,37 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
                             message: "local mode requires macOS 26 / iOS 26 (SpeechAnalyzer)", details: nil))
         return
       }
+      // The brain's LLM: "apple" = Apple's on-device model (no download),
+      // "llama" = the downloaded GGUF at ggufPath, "auto" (default) = Apple's
+      // model when AppleLlmStatus says "available", else the GGUF.
+      let gguf = (args["ggufPath"] as? String) ?? ""
+      // replyMode "host" = the HYBRID brain: on-device speech-to-text + voice, the reply text from
+      // the app (localReplyText) — typically a cheap cloud text model behind the app's server.
+      let hostMode = (args["replyMode"] as? String) == "host"
+      #if !CONVERSE_HOST_LLM
+      if hostMode {
+        result(FlutterError(code: "HOST_REPLY_UNAVAILABLE",
+                            message: "replyMode 'host' needs libconverse >= 2.5.0 (bc_session_create_with_llm)",
+                            details: nil))
+        return
+      }
+      #endif
+      let llmChoice = hostMode ? "host" : ((args["llm"] as? String) ?? "auto")
+      let appleStatus = AppleLlmStatus.current()
+      let appleLlm = llmChoice == "apple" || (llmChoice == "auto" && appleStatus == "available")
+      if appleLlm && appleStatus != "available" {
+        result(FlutterError(code: "APPLE_LLM_UNAVAILABLE",
+                            message: "Apple's on-device model is not available here (\(appleStatus))",
+                            details: appleStatus))
+        return
+      }
+      if !hostMode && !appleLlm && gguf.isEmpty {
+        result(FlutterError(code: "BAD_ARGS",
+                            message: "localAudioStart needs ggufPath: Apple's on-device model is not available here (\(appleStatus))",
+                            details: appleStatus))
+        return
+      }
+      let refusalReply = (args["refusalReply"] as? String) ?? ""
       if audioIOs[textureId] == nil {
         let io = RealtimeAudioIO()
         io.lipsyncSink = textures[textureId]   // nil = headless local voice session
@@ -835,13 +881,45 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       // Personality prompt for the on-device LLM. Persisted in the app's
       // config.json and forwarded straight into the converse cfg.system_prompt.
       let systemPrompt = args["systemPrompt"] as? String ?? ""
+      var options = HybridOptions()
+      #if CONVERSE_HOST_LLM
+      if hostMode {
+        // The brain blocks in HostReplyLlm.stream while the app streams the reply back:
+        // reply_request → Dart (its HTTP stream) → localReplyText; reply_cancel on barge-in.
+        options.hostReply = HostReplyLlm(
+          request: { [weak handler] id, msgs, maxTokens, continuation in
+            // `text`: the user's turn (the whole utterance on a continuation) — what a server that
+            // holds the memory (the relay's text brain) needs; `messages` is for one that does not.
+            let text = msgs.last(where: { $0["role"] == "user" })?["content"] ?? ""
+            handler?.emit(["kind": "reply_request", "id": id, "messages": msgs, "maxTokens": maxTokens,
+                           "text": text, "continuation": continuation,
+                           "hostMs": Int64(Date().timeIntervalSince1970 * 1000)])
+          },
+          cancelRequest: { [weak handler] id, heard in
+            var ev: [String: Any] = ["kind": "reply_cancel", "id": id,
+                                     "hostMs": Int64(Date().timeIntervalSince1970 * 1000)]
+            if let heard { ev["heardChars"] = heard }
+            handler?.emit(ev)
+          })
+      }
+      #endif
+      options.sttDir = args["sttDir"] as? String
+      if let ms = args["minSilenceMs"] as? Int, ms > 0 { options.minSilence = Float(ms) / 1000 }
+      options.bargeOnSpeech = (args["bargeOnSpeech"] as? Bool) ?? false
+      // Testing API (an explicit app argument, not an environment lever): prerecorded speech
+      // replaces the microphone, which is then never opened (localInjectWav).
+      options.injected = (args["injectAudio"] as? Bool) ?? false
+      if let nd = args["injectNoiseDb"] as? Double { options.noiseDb = nd < -120 ? nil : nd }
+      let injected = options.injected
       // Return to Dart immediately, then load the GGUF + Supertonic ONNX models
       // OFF the main thread (multi-second) so the UI never freezes. Progress is
       // surfaced to the UI as loading/ready/error events on the channel above.
       result(nil)
       DispatchQueue.global(qos: .userInitiated).async { [weak self] in
         let ctrl = LocalConverseController(io: io, gguf: gguf, supertonicAssets: supertonicAssets,
-                                           voice: voice, systemPrompt: systemPrompt)
+                                           voice: voice, systemPrompt: systemPrompt,
+                                           appleLlm: appleLlm, refusalReply: refusalReply,
+                                           options: options)
         DispatchQueue.main.async {
           guard let self = self, self.audioIOs[textureId] != nil else { return }  // disposed mid-load
           guard let ctrl = ctrl else {
@@ -852,8 +930,10 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
           ctrl.onEvent = { [weak handler] ev in handler?.emit(ev) }
           self.converseControllers[textureId] = ctrl
           do {
-            try io.start(vadThreshold: vad)
-            handler.emit(["kind": "ready"])
+            // Injected (harness) sessions run the audio unit WITHOUT the microphone.
+            try io.start(vadThreshold: injected ? 0 : vad, mic: !injected)
+            handler.emit(["kind": "ready", "llm": hostMode ? "host" : appleLlm ? "apple" : "llama",
+                          "brainLoadMs": ctrl.brainLoadMs])
           } catch {
             handler.emit(["kind": "error", "message": error.localizedDescription])
           }
@@ -894,6 +974,73 @@ public class BithumanPlugin: NSObject, FlutterPlugin {
       }
       #endif
       result(nil)
+
+    case "debugArmFirstHeard":
+      // Measurement: report (firstHeard) when the next audio handed to the player will be heard.
+      if let args = call.arguments as? [String: Any], let textureId = args["textureId"] as? Int64 {
+        audioIOs[textureId]?.armFirstHeard()
+      }
+      result(nil)
+
+    case "localSpeakText":
+      // The hybrid brain: the character's own line, spoken verbatim (the server's greeting).
+      guard let args = call.arguments as? [String: Any], let text = args["text"] as? String else {
+        result(FlutterError(code: "BAD_ARGS", message: "localSpeakText requires text", details: nil)); return
+      }
+      #if CONVERSE_AVAILABLE
+      if #available(macOS 26.0, iOS 26.0, *) {
+        var ok = false
+        for (_, ctrl) in converseControllers {
+          ok = ((ctrl as? LocalConverseController)?.speak(text) ?? false) || ok
+        }
+        result(ok)
+        return
+      }
+      #endif
+      result(false)
+
+    case "localReplyText":
+      // The hybrid brain: a piece of the app's reply to request `id` (see HostReplyLlm).
+      guard let args = call.arguments as? [String: Any], let id = args["id"] as? Int else {
+        result(FlutterError(code: "BAD_ARGS", message: "localReplyText requires id", details: nil)); return
+      }
+      #if CONVERSE_AVAILABLE
+      if #available(macOS 26.0, iOS 26.0, *) {
+        let text = (args["text"] as? String) ?? ""
+        let done = (args["done"] as? Bool) ?? false
+        let res = Int32((args["result"] as? Int) ?? 0)
+        for (_, ctrl) in converseControllers {
+          (ctrl as? LocalConverseController)?.replyText(id: id, text: text, done: done, result: res)
+        }
+      }
+      #endif
+      result(nil)
+
+    case "localInjectWav":
+      // DEV / harness: speak a 16 kHz WAV into the session's speech-to-text instead of the mic
+      // (the session must have been started with injectAudio: true).
+      guard let args = call.arguments as? [String: Any], let path = args["path"] as? String else {
+        result(FlutterError(code: "BAD_ARGS", message: "localInjectWav requires path", details: nil)); return
+      }
+      #if CONVERSE_AVAILABLE
+      if #available(macOS 26.0, iOS 26.0, *) {
+        do {
+          let samples = try AudioInjector.load16k(path)
+          let tag = (args["tag"] as? String) ?? (path as NSString).lastPathComponent
+          let a = (args["speechStart"] as? Double) ?? 0
+          let b = (args["speechEnd"] as? Double) ?? Double(samples.count) / 16000
+          var ok = false
+          for (_, ctrl) in converseControllers {
+            ok = (ctrl as? LocalConverseController)?.inject(samples: samples, tag: tag, speechStart: a, speechEnd: b) ?? false || ok
+          }
+          result(ok)
+        } catch {
+          result(FlutterError(code: "INJECT_FAILED", message: error.localizedDescription, details: nil))
+        }
+        return
+      }
+      #endif
+      result(false)
 
     case "localSetMuted":
       // LOCAL mode: mute/unmute the local mic. Sets RealtimeAudioIO.micMuted,
@@ -1481,6 +1628,8 @@ final class AvatarTexture: NSObject, FlutterTexture, LipsyncSink {
   private var firstFrameSignaled = false // renderQueue-only
 
   private var publishedFrameCount = 0               // texture-publish counter
+  /// Frames published to the texture so far (idle + speech): the hybrid harness' fps probe.
+  var publishedFramesTotal: Int { publishedFrameCount }
   /// Verbose dev instrumentation gate (frame-counter logs). Off by default;
   /// enable with environment variable BH_AVATAR_DEBUG=1.
   private static let avatarDebugLogging = DevLevers.avatarDebug

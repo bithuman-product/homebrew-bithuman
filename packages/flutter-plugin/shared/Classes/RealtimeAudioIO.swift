@@ -401,9 +401,22 @@ final class RealtimeAudioIO: NSObject, FlutterStreamHandler {
     playoutLock.lock()
     let start = max(playoutHeardEnd, now + playoutLatency)
     playoutHeardEnd = start + seconds
+    let fire = firstHeardArmed
+    firstHeardArmed = false
     playoutLock.unlock()
+    if fire, let cb = onFirstHeard {
+      // Host clock → wall clock (ms since 1970), so it lines up with the brain's own stamps.
+      cb(Int64((Date().timeIntervalSince1970 + (start - now)) * 1000), Int(playoutLatency * 1000))
+    }
     return start
   }
+
+  /// Timing probe of the hybrid brain's harness (LOCAL mode): once armed (a new turn was
+  /// committed), the first audio handed to the player reports when its first sample will be
+  /// HEARD — after any first-frame hold / voice clock of the avatar, output latency included.
+  var onFirstHeard: ((_ heardAtMs: Int64, _ outputLatencyMs: Int) -> Void)?
+  private var firstHeardArmed = false
+  func armFirstHeard() { playoutLock.lock(); firstHeardArmed = true; playoutLock.unlock() }
 
   /// A new audio unit (audioStart): the counts restart at zero. Main thread.
   func resetPlayout() {
