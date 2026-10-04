@@ -70,6 +70,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     private lateinit var messenger: BinaryMessenger
     private lateinit var textureRegistry: TextureRegistry
     private lateinit var context: Context
+    /** The owner's 24 h offline window over the SDK stores' entitlement marks (2.6.36; EntitlementWindow.kt). */
+    private val entitlement by lazy { EntitlementWindow(java.io.File(context.filesDir, "bithuman/door-auth")) }
     private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
     private val main = Handler(Looper.getMainLooper())
@@ -340,6 +342,14 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
             // members by code through the download door (see load). `isModelContainer`
             // answers null, which the Dart side reads as "cannot tell".
             "isModelContainer" -> result.success(null)
+
+            // Sign-out (2.6.36, security): the process-wide credentials the engines and the stores' doors
+            // fall back to are cleared, so nothing after this runs as the account that signed out.
+            "clearCredentials" -> {
+                ai.bithuman.expression2.Expression2Credential.set(null)
+                Essence2Credential.set(null)
+                result.success(null)
+            }
             "unpackModelContainer" -> result.error("unsupported",
                 "Android loads an identity by code (BithumanAvatar.load); a container file is not expanded on this platform", null)
 
@@ -424,10 +434,14 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 // engine's native code and sentence — a terminal error the app can name, where
                 // `load_failed` read as a network failure worth retrying.
                 val rejected = (e as? ModelRejectedException)?.rejection
+                // ★The entitlement window (2.6.36): its own codes, which the Dart side maps to
+                // BithumanEntitlementException (refused, or could not be confirmed).
+                val entitlementRefused = e as? EntitlementWindow.Refused
                 main.post {
                     textures.loadFailed(texture)
                     runCatching {
                         if (rejected != null && !cancelled) result.error(ModelRejection.CODE, rejected.message, rejected.details())
+                        else if (entitlementRefused != null && !cancelled) result.error(entitlementRefused.channelCode, entitlementRefused.message, entitlementRefused.status)
                         else result.error(if (cancelled) "load_cancelled" else "load_failed", e.message ?: e.toString(), null)
                     }
                 }
@@ -439,9 +453,20 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
 
     /** Fetch by code into the SDK's store and open the engine — expression-2. Off the platform thread. */
     private fun loadExpression2(code: String, secret: String?, t0: Long, handle: LoadHandle): AvatarEngine {
-        val store = if (secret.isNullOrBlank()) Expression2ModelStore(context)
-            else Expression2ModelStore(context, java.io.File(context.filesDir, "expression2"),
-                3L * 1024 * 1024 * 1024, Expression2ModelStore.MeteredDoorResolver(secret))
+        // ★2.6.36 (security): THIS load's credential, never an earlier one. Through 2.6.35 a load with no
+        // secret built `Expression2ModelStore(context)`, whose door resolver falls back to the process-wide
+        // Expression2Credential, which only a load WITH a secret ever set and nothing cleared: after
+        // account A loaded, a credential-less load in the same process (a Dart hot restart included)
+        // asked the door as A and got A's private avatar, metered to A. The engine refuses a session
+        // without a credential anyway (0.4.9+), so a load without one is refused here, by name, as the
+        // essence-2 path does, and the process-wide value is this load's before the store is built.
+        if (secret.isNullOrBlank()) throw IllegalArgumentException(
+            "expression-2 on Android needs the app's credential (apiSecret): the door is asked as that account and every session is metered")
+        ai.bithuman.expression2.Expression2Credential.set(secret)
+        // The owner's offline window (EntitlementWindow): 24 h after the door's last yes to this credential.
+        entitlement.admit(code, "expression-2", secret)
+        val store = Expression2ModelStore(context, java.io.File(context.filesDir, "expression2"),
+            3L * 1024 * 1024 * 1024, Expression2ModelStore.MeteredDoorResolver(secret))
         val model = store.fetch(code, false, handle.storeCancel) { member, done, total ->
             if (total > 0 && done == total) Log.i(TAG, "fetched $member")
             loadEvents.fetchProgress(handle, done, total)
@@ -450,9 +475,7 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         handle.throwIfCancelled()
         loadEvents.stage(handle, LoadHandle.STAGE_PREPARE)
         // From expression2-android 0.4.9 the engine meters the session it serves and refuses
-        // to create one without an API secret. 0.4.10's one setter arms the meter (and any
-        // store resolver built without a credential), exactly as the essence-2 path does.
-        if (!secret.isNullOrBlank()) ai.bithuman.expression2.Expression2Credential.set(secret)
+        // to create one without an API secret: 0.4.10's one setter (above, before the store) arms it.
         val avatar = try { Expression2Avatar.create(context, model) } catch (e: Exception) {
             throw ModelRejection.expression2(e)?.let { ModelRejectedException(it, e) } ?: e
         }
@@ -476,6 +499,8 @@ class BithumanPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         if (secret.isNullOrBlank()) throw IllegalArgumentException(
             "essence-2 on Android needs the app's credential: members are served through the metered door and every frame is metered")
         Essence2Credential.set(secret)   // 0.5.15: the one setter for the door and the meter
+        // The owner's offline window (EntitlementWindow): 24 h after the door's last yes to this credential.
+        entitlement.admit(code, "essence-2", secret)
         val store = Essence2ModelStore(context, java.io.File(context.filesDir, "essence2"),
             3L * 1024 * 1024 * 1024, Essence2ModelStore.MeteredDoorResolver(secret))
         // ★THE CACHED COPY OPENS FIRST; THE DOOR IS ASKED AFTER (2.6.28). Since essence2-android

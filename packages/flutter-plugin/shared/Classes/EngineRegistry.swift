@@ -110,6 +110,15 @@ enum EngineRegistry {
   }
 
   #if os(macOS) || os(iOS)
+  /// Sign-out (2.6.36, security; `BithumanAvatar.clearCredentials`): both engines forget the API secret a
+  /// load set for this process, so nothing after this runs (or bills) as the account that signed out.
+  static func clearCredentials() {
+    Expression2Credential.set(nil)
+    #if ESSENCE2_AVAILABLE
+    _ = be_essence2_set_api_secret(nil)
+    #endif
+  }
+
   /// Create the engine for a slug. The ONLY place a concrete engine type is
   /// named. Returns `any BithumanEngine`; the caller drives it purely through the
   /// protocol + `capabilities.driveModel`. essence2 is gated on
@@ -131,8 +140,13 @@ enum EngineRegistry {
       // be set BEFORE be_essence2_create (which arms the meter first, before any
       // work). Without it the engine's own fallback is the process environment
       // (BITHUMAN_API_SECRET), which an installed app never has.
+      // ★THIS load's credential, never an earlier one (2.6.36, security): a load without one CLEARS the
+      // process-wide secret (NULL clears it), so it is refused by name instead of running, and billing,
+      // as the account of an earlier load (a sign-out and sign-in, a Dart hot restart).
       if let s = ref.apiSecret, !s.isEmpty {
         _ = s.withCString { be_essence2_set_api_secret($0) }
+      } else {
+        _ = be_essence2_set_api_secret(nil)
       }
       return Essence2Engine()
     }
@@ -146,7 +160,9 @@ enum EngineRegistry {
     // a credential — an installed app has no BITHUMAN_API_SECRET in its environment,
     // so without this line every Expression2 app built on the plugin renders NOTHING.
     // Set BEFORE init, exactly as the essence2 branch above sets its secret.
-    if let s = ref.apiSecret, !s.isEmpty { Expression2Credential.set(s) }
+    // ★THIS load's credential (2.6.36, security): `set(nil)` clears it, so a load without one never runs
+    // as the account of an earlier load (the engine refuses it by name instead).
+    Expression2Credential.set(ref.apiSecret)
     return Expression2PluginEngine()
   }
   #endif
