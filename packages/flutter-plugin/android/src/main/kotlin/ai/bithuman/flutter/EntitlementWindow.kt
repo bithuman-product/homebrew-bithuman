@@ -43,8 +43,8 @@ import javax.crypto.spec.SecretKeySpec
  * owns, one shared into a workspace it is an active member of, or a public / featured one (P11, platform
  * #1324). The container door above serves the first two and bitHuman's showcase; another account's PUBLIC
  * avatar outside the showcase gets 404 NOT_FOUND there, while the member door the stores fetch from
- * (`&member=web_manifest.json` for Expression 2, `&member=android_store.v1.json&plane=android` for
- * Essence 2) serves it to any credential. So a 404 NOT_FOUND from the container door is asked again, once,
+ * (`&member=web_manifest.json` for Expression 2, `&member=android_store.v1.json`, the Android catalog, for
+ * Essence 2; [storeDoor] has the exact URLs) serves it to any credential. So a 404 NOT_FOUND from the container door is asked again, once,
  * at the store's member door ([publicDoor]): its yes is a yes (what the store itself would fetch); anything
  * else leaves the container's no, so the record is dropped (fail closed). When the member door did not
  * answer (a 5xx, a 429, a timeout) the load still fails as `entitlement_unconfirmed`, not
@@ -254,8 +254,8 @@ internal class EntitlementWindow(
 
         /**
          * The member door [model]'s store fetches its catalog from (expression2-android
-         * `MeteredDoorResolver`: `member=web_manifest.json`; essence2-android: `member=android_store.v1.json`
-         * on `plane=android`), asked for a JSON grant. Null for a model with no store.
+         * `MeteredDoorResolver`: `member=web_manifest.json`; essence2-android: `member=android_store.v1.json`,
+         * the Android catalog), asked for a JSON grant. Null for a model with no store.
          */
         fun storeDoor(code: String, model: String): URL? {
             val member = when (model) {

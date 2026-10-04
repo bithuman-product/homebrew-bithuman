@@ -31,7 +31,7 @@ class LoadCredentialsTest {
 
     private class Refusal : Exception("the window refused")
 
-    /** One load, as the plugin runs it; [created] is the credential the fake engine was armed with. */
+    /** One load, as the plugin runs it; [created] is the credential the fake engine was built with. */
     private fun load(
         secret: String?,
         gen: Long = credentials.begin(),
@@ -44,7 +44,7 @@ class LoadCredentialsTest {
         fetch = { s -> synchronized(steps) { steps += "fetch:$s" }; duringFetch(); "model-of-$s" },
         setCredential = { s -> synchronized(steps) { steps += "set:$s" }; beforeSetWrites(); global = s },
         // The engine arms its meter with the process-wide credential as create begins.
-        create = { m -> synchronized(steps) { steps += "create:$m" }; val armed = "engine armed with $global"; duringCreate(); armed },
+        create = { m -> synchronized(steps) { steps += "create:$m" }; val built = "engine built with $global"; duringCreate(); built },
         close = { a -> synchronized(closed) { closed += a } },
         blankMessage = "needs the app's credential")
 
@@ -78,7 +78,7 @@ class LoadCredentialsTest {
     fun theWindowThenTheFetchWithTheLoadsOwnCredentialThenSetAndCreate() {
         val engine = load("sk_a")
         assertEquals(listOf("admit:sk_a", "fetch:sk_a", "set:sk_a", "create:model-of-sk_a"), steps)
-        assertEquals("engine armed with sk_a", engine)
+        assertEquals("engine built with sk_a", engine)
         assertEquals("sk_a", global)
     }
 
@@ -109,7 +109,7 @@ class LoadCredentialsTest {
         cleared {
             load("sk_a", gen = genA, duringFetch = {
                 clear()
-                assertEquals("engine armed with sk_b", load("sk_b"))
+                assertEquals("engine built with sk_b", load("sk_b"))
             })
         }
         assertEquals("B's credential is not overwritten by A's load", "sk_b", global)
@@ -121,7 +121,7 @@ class LoadCredentialsTest {
     @Test
     fun signOutWhileTheEngineIsBeingCreatedClosesIt() {
         cleared { load("sk_a", duringCreate = { clear() }) }
-        assertEquals(listOf("engine armed with sk_a"), closed)
+        assertEquals(listOf("engine built with sk_a"), closed)
         assertNull("sign-out cleared the credential", global)
     }
 
@@ -136,7 +136,7 @@ class LoadCredentialsTest {
         assertTrue("nothing was created with it", "create:model-of-sk_a" !in steps)
         assertEquals(emptyList<String>(), closed)
         // A load begun after the sign-out sets its own and runs.
-        assertEquals("engine armed with sk_b", load("sk_b"))
+        assertEquals("engine built with sk_b", load("sk_b"))
         assertEquals("sk_b", global)
 
         // The same race across threads: load A is held inside its set (past the check) while sign-out runs on
@@ -165,32 +165,32 @@ class LoadCredentialsTest {
         load("sk_a")
         clear()
         assertNull(global)
-        assertEquals("engine armed with sk_b", load("sk_b"))
+        assertEquals("engine built with sk_b", load("sk_b"))
     }
 
     @Test
     fun setAndCreateAreOneStepUnderTheLock() {
         // Load A is inside create (its credential set) when load B reaches its own set: B waits for A's create
-        // to return, so A's engine is armed with A's credential, never B's.
+        // to return, so A's engine is built with A's credential, never B's.
         val aInCreate = CountDownLatch(1)
         val releaseA = CountDownLatch(1)
-        var armedA: String? = null
+        var builtA: String? = null
         val a = Thread {
-            armedA = load("sk_a", duringCreate = {
+            builtA = load("sk_a", duringCreate = {
                 aInCreate.countDown()
                 releaseA.await(5, TimeUnit.SECONDS)
             })
         }.apply { start() }
         assertTrue(aInCreate.await(5, TimeUnit.SECONDS))
-        var armedB: String? = null
-        val b = Thread { armedB = load("sk_b") }.apply { start() }
+        var builtB: String? = null
+        val b = Thread { builtB = load("sk_b") }.apply { start() }
         b.join(300)
         assertTrue("B waits while A creates", b.isAlive)
         assertEquals("sk_a", global)
         releaseA.countDown()
         a.join(5000); b.join(5000)
-        assertEquals("engine armed with sk_a", armedA)
-        assertEquals("engine armed with sk_b", armedB)
+        assertEquals("engine built with sk_a", builtA)
+        assertEquals("engine built with sk_b", builtB)
         // Sign-out never waits for the lock (it would block the platform thread behind an engine create).
         val inCreate = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -203,6 +203,6 @@ class LoadCredentialsTest {
         assertTrue("clear returned while a create held the lock", (System.nanoTime() - t) < 1_000_000_000L)
         release.countDown()
         c.join(5000)
-        assertTrue("the engine created across the sign-out was closed", closed.contains("engine armed with sk_c"))
+        assertTrue("the engine created across the sign-out was closed", closed.contains("engine built with sk_c"))
     }
 }

@@ -62,7 +62,7 @@ you update: some calls that worked before now fail by name.
     public. bitHuman's container door (`GET https://api.bithuman.ai/v1/agent/<code>/model/download`) serves the
     first two and bitHuman's public showcase; another account's public avatar outside the showcase is 404
     `NOT_FOUND` there but is served by the member door the native stores fetch from (`&member=web_manifest.json`
-    for Expression 2, `&member=manifest.json` for Essence 2; Android's store: `&member=android_store.v1.json&plane=android`).
+    for Expression 2, `&member=manifest.json` for Essence 2; Android's store: `&member=android_store.v1.json`, its Android catalog).
     So after the container door's "not yours" (404 `NOT_FOUND` to a key, 401 to no key), the gate asks that member
     door once with the same credential: its yes is a yes; anything else keeps the container's no, so the kept copy's
     marks are dropped (fail closed), and when the member door did not answer (a 5xx, a 429, a timeout) the
