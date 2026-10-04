@@ -1,11 +1,11 @@
 <!--
 SPDX-License-Identifier: Apache-2.0
-title: bitHuman Apple SDK (Swift Package Manager) and the bithuman CLI
+title: bitHuman CLI: Homebrew tap and installers
 maintainer: bitHuman Inc.
 homepage: https://www.bithuman.ai
-project_type: swift-package, cli
-platform: iOS, iPadOS and macOS on Apple silicon (Swift package); macOS (Apple silicon) and Linux x86_64 / arm64 (CLI)
-keywords: avatar, talking-avatar, lip-sync, digital-human, swift, swiftpm, ios, macos, cli, mcp
+project_type: homebrew-tap, cli-installer
+platform: macOS (Apple silicon), Linux x86_64 / arm64, Windows x86_64 (CLI)
+keywords: avatar, talking-avatar, lip-sync, digital-human, cli, homebrew, installer, mcp
 -->
 
 <p align="center">
@@ -14,10 +14,10 @@ keywords: avatar, talking-avatar, lip-sync, digital-human, swift, swiftpm, ios, 
   </a>
 </p>
 
-<h1 align="center">bitHuman: Apple SDK and CLI</h1>
+<h1 align="center">bitHuman CLI: installers and Homebrew tap</h1>
 
 <p align="center">
-  <strong>The Swift package for iPhone, iPad and Mac apps, and the Homebrew tap for the <code>bithuman</code> CLI.</strong><br>
+  <strong>Install the <code>bithuman</code> CLI with one command: the installer script, or the Homebrew tap.</strong><br>
   Made by <a href="https://www.bithuman.ai">bitHuman</a>.
 </p>
 
@@ -28,43 +28,53 @@ keywords: avatar, talking-avatar, lip-sync, digital-human, swift, swiftpm, ios, 
 
 ---
 
-## Apple SDK (Swift Package Manager)
-
-Real-time, lip-synced avatars rendered on iPhone, iPad and Mac: Essence 2 (a photoreal person) and
-Expression 2 (any character). Pass in 16 kHz speech from any voice stack; draw the frames.
-
-```swift
-.package(url: "https://github.com/bithuman-product/homebrew-bithuman.git", from: "2.20.4")
-```
-
-The Swift package lives in this repository, which is also our Homebrew tap, so Xcode and
-SwiftPM show its identity as `homebrew-bithuman`. That name is expected; in `Package.swift`
-dependencies write `.product(name: "Expression2", package: "homebrew-bithuman")` (or
-`Essence2Kit`).
-
-Resolving the package downloads all of its binary frameworks, about 125 MB today (the
-legacy `bitHumanKit` is 56 MB of that), even for an app that imports only `Expression2`.
-The first resolve on a slow network takes a while; later builds use SwiftPM's cache.
-
-The current version of every package is on [docs.bithuman.ai/versions.json](https://docs.bithuman.ai/versions.json).
-
-| Product | Import | What it is | Deployment target |
-|---|---|---|---|
-| `Expression2` | `import Expression2` | the Expression 2 engine with a Swift API | iOS 16 · macOS 13 |
-| `Essence2Kit` | `import Essence2Kit` | the Essence 2 engine with a Swift API; it includes `Essence2` | iOS 26 · macOS 26 |
-| `Essence2` | `import Essence2` | the Essence 2 engine as a C library, for C, C++ and plugins | iOS 26 · macOS 26 |
-
-`bitHumanKit` 2.4.0 is legacy and frozen; new apps use `Expression2` or `Essence2Kit`.
-
-Requires the Creator plan or higher from 12 October 2026. Each session needs an [API secret](https://docs.bithuman.ai/start/api-secret) and bills active session time ([pricing](https://docs.bithuman.ai/pricing)).
-
-Docs: [iOS & iPadOS](https://docs.bithuman.ai/platforms/ios) · [macOS](https://docs.bithuman.ai/platforms/macos) · [Swift reference](https://docs.bithuman.ai/platforms/swift/reference) · Examples: [bithuman-examples/swift](https://github.com/bithuman-product/bithuman-examples/tree/main/swift)
-
-## Homebrew CLI
+## Install the CLI
 
 `bithuman` runs a live, talking avatar in your browser with one command.
 
-### What it does
+**macOS (Apple silicon) and Linux (x86_64, arm64)**: the installer script. This is the
+recommended install.
+
+```sh
+curl -fsSL https://install.bithuman.ai | sh
+```
+
+**Windows (x86_64)**, from PowerShell:
+
+```powershell
+irm https://install.bithuman.ai/windows | iex
+```
+
+**Homebrew (macOS, Apple silicon)**: tap this repository by its URL, then install:
+
+```sh
+brew tap bithuman/bithuman https://gitlab.com/bithuman/sdk/homebrew-bithuman
+brew install bithuman-cli              # `brew install bithuman` works as a deprecated alias
+bithuman doctor                        # host + auth + cache sanity check
+```
+
+> **Always tap with the URL, and never shorten the install to
+> `brew install bithuman/bithuman/bithuman-cli` on a machine that has not tapped it.** Without the
+> URL, Homebrew looks for a tap named `bithuman/bithuman` on GitHub, and `github.com/bithuman` is
+> not a bitHuman account. The only bitHuman tap is the one above. Homebrew 6+ may also ask you to
+> trust a new third-party tap (`brew trust bithuman/bithuman`).
+
+**No package manager**: every release publishes per-target tarballs at
+`https://downloads.bithuman.ai/homebrew-bithuman/<tag>/bithuman-<target>.tar.gz`, each with a
+`.sha256` beside it. [`latest.json`](https://downloads.bithuman.ai/homebrew-bithuman/latest.json)
+names the newest CLI release and
+[`releases.json`](https://downloads.bithuman.ai/homebrew-bithuman/releases.json) lists them all.
+
+> The Homebrew package is named `bithuman-cli`; the binary it installs is
+> `bithuman`, so you type `bithuman run`. The `-cli` suffix is a package name
+> only.
+>
+> **This CLI is not distributed on PyPI**, and `bithuman-cli` is not a pip
+> coordinate for it — that name does not resolve there. (`pip install bithuman`
+> is the Python SDK *library*, a different artifact; it puts no `bithuman`
+> command on your PATH.)
+
+## What it does
 
 `bithuman run <avatar>` stands up the whole stack — an embedded LiveKit server,
 the render engine, and a conversation brain — and opens your browser to a live,
@@ -79,33 +89,7 @@ bithuman run nova                 # a showcase avatar, downloaded on first use
 bithuman run ./my-avatar.imx      # your own model, rendered on this machine
 ```
 
-### Install
-
-**macOS (Apple Silicon)** — via this tap:
-
-```sh
-brew tap bithuman-product/bithuman
-brew trust bithuman-product/bithuman   # Homebrew 6+ gates third-party taps; skip on older brew
-brew install bithuman-cli              # `brew install bithuman` works as a deprecated alias
-bithuman doctor                        # host + auth + cache sanity check
-```
-
-**Linux (x86_64, arm64)** — the formula is macOS-only; use the installer or the tarball:
-
-```sh
-curl -fsSL https://install.bithuman.ai | sh
-```
-
-> The Homebrew package is named `bithuman-cli`; the binary it installs is
-> `bithuman`, so you type `bithuman run`. The `-cli` suffix is a package name
-> only.
->
-> **This CLI is not distributed on PyPI**, and `bithuman-cli` is not a pip
-> coordinate for it — that name does not resolve there. (`pip install bithuman`
-> is the Python SDK *library*, a different artifact; it puts no `bithuman`
-> command on your PATH.)
-
-### The commands
+## The commands
 
 The surface is deliberately small — one name per task. `bithuman --help` lists
 them, and `bithuman <command> --help` carries a copy-pasteable `EXAMPLES:` block.
@@ -129,11 +113,26 @@ cleanly. `bithuman __schema` prints the entire command / flag / exit-code tree
 plus the MCP tool catalogue as one JSON document — that is the authoritative
 description of the surface, generated from the binary itself.
 
-### For agents and LLMs
+## For agents and LLMs
 
 This repo publishes [`llms.txt`](llms.txt), a structured manifest aimed at AI
 coding assistants discovering and invoking bithuman. Agents should start there,
 then call `bithuman __schema` for the machine-readable surface.
+
+## The SDKs live in their own projects
+
+This repository is the CLI's tap and installers only. Each SDK has its own home:
+
+| Platform | Install | Docs |
+|---|---|---|
+| Swift (iOS, iPadOS, macOS) | `.package(url: "https://gitlab.com/bithuman/sdk/bithuman-swift", from: "3.0.0")` | https://docs.bithuman.ai/platforms/ios |
+| Flutter | `bithuman: ^3.0.0` from [pub.dev](https://pub.dev/packages/bithuman) | https://docs.bithuman.ai/platforms/flutter |
+| Android | `ai.bithuman:bithuman-android` from https://maven.bithuman.ai | https://docs.bithuman.ai/platforms/android |
+| Python | `pip install bithuman` | https://docs.bithuman.ai/platforms/python |
+
+Source code: [Swift](https://gitlab.com/bithuman/sdk/bithuman-swift) · [Flutter](https://gitlab.com/bithuman/sdk/bithuman-flutter) · every public bitHuman project is listed at https://gitlab.com/bithuman.
+The current version of every package is on [docs.bithuman.ai/versions.json](https://docs.bithuman.ai/versions.json).
+Apps already on Swift 2.x or Flutter 2.6.x keep building unchanged: see "Moving from GitHub" below.
 
 ## Docs
 
@@ -143,12 +142,42 @@ Full CLI and SDK documentation: **[docs.bithuman.ai](https://docs.bithuman.ai)**
 - [Your API secret](https://docs.bithuman.ai/start/api-secret)
 - [Pricing and credits](https://docs.bithuman.ai/pricing)
 
+## Moving from GitHub
+
+This repository moved from `github.com/bithuman-product/homebrew-bithuman` to
+**https://gitlab.com/bithuman/sdk/homebrew-bithuman** in October 2026, and new releases are published to **https://downloads.bithuman.ai**.
+The GitHub copy stays readable: every version released before the move keeps installing from it,
+but new CLI and Swift versions are not published there. It becomes a read-only archive when Flutter
+2.6.x maintenance ends (below); archiving changes nothing for the apps and taps that use it.
+
+- **The installers** (`curl -fsSL https://install.bithuman.ai | sh`,
+  `irm https://install.bithuman.ai/windows | iex`) need nothing: the same commands now fetch from
+  https://downloads.bithuman.ai.
+- **Homebrew:** re-tap once to follow new releases (an existing `bithuman-product/bithuman` tap keeps
+  working, frozen at the last formula published before the move):
+  ```sh
+  brew uninstall bithuman-cli
+  brew untap bithuman-product/bithuman
+  brew tap bithuman/bithuman https://gitlab.com/bithuman/sdk/homebrew-bithuman
+  brew install bithuman-cli
+  ```
+- **Swift 2.x** apps keep `https://github.com/bithuman-product/homebrew-bithuman.git` (every released
+  2.x tag stays there). 2.x gets critical fixes only, tagged in
+  https://gitlab.com/bithuman/sdk/bithuman-swift, which carries every 2.x tag: the URL changes once, to
+  that project, when the app adopts Swift 3.0 or needs a 2.x fix. Do not point SwiftPM at this GitLab
+  repository.
+- **Flutter 2.6.x** apps keep their git dependency on the GitHub repository (`path:
+  packages/flutter-plugin`, `ref: flutter-plugin-v2.6.<n>`). 2.6.x gets critical fixes only: each one
+  is tagged `flutter-plugin-v2.6.<n>` both there and in https://gitlab.com/bithuman/sdk/bithuman-flutter,
+  so an app bumps only `ref:`. 3.x is `bithuman: ^3.0.0` from pub.dev.
+
 ## What this repo is
 
-`bithuman-product/homebrew-bithuman` hosts the Swift package (`Package.swift` and the
-binary frameworks attached to its releases) and the **CLI release artefacts**: the
-Homebrew formula, the install script, and the notarised per-target binaries attached
-to each `cli-v*` release.
+`bithuman/sdk/homebrew-bithuman` is the Homebrew tap for the `bithuman` CLI (`Formula/`,
+`Aliases/`), the installer scripts behind https://install.bithuman.ai (`install.sh`,
+`install.ps1`) and their tests, and the release tooling that publishes CLI releases to
+https://downloads.bithuman.ai/homebrew-bithuman. (`Package.swift` and `Sources/` remain here only so
+already-released 2.x builds keep resolving; they move to the Swift project.)
 
 The published CLI binary is a proprietary artifact: it statically links the
 bitHuman engine and vendors model weights, so the formula declares
@@ -158,4 +187,4 @@ bitHuman engine and vendors model weights, so the formula declares
 
 ## About bitHuman
 
-Built and maintained by [bitHuman](https://www.bithuman.ai): [www.bithuman.ai](https://www.bithuman.ai) · [github.com/bithuman-product](https://github.com/bithuman-product)
+Built and maintained by [bitHuman](https://www.bithuman.ai): [www.bithuman.ai](https://www.bithuman.ai) · [gitlab.com/bithuman](https://gitlab.com/bithuman)

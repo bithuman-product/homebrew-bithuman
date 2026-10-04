@@ -1,12 +1,12 @@
 # Contributing
 
-This repo is the **Homebrew tap** for `bithuman-cli` (briefly `bithuman`, originally `bithuman-cli`). It hosts the formula, the installers and the release tooling — that's it; the release artifacts themselves are published to https://downloads.bithuman.ai/homebrew-bithuman (until October 2026 they were attached to this repository's GitHub Releases, which stay readable). The formula is bumped automatically when we cut a new release; the CLI itself is distributed as a Developer ID signed, Apple-notarized binary published with those releases (see `scripts/sign-macos.sh` and `scripts/notarize-macos.sh`; releases up to `cli-v2.4.2` predate that and are ad-hoc signed).
+This repo is the **Homebrew tap** for `bithuman-cli` (briefly `bithuman`, originally `bithuman-cli`). It hosts the formula, the installers and the release metadata — that's it; the release artifacts themselves are published to https://downloads.bithuman.ai/homebrew-bithuman (the repository moved from GitHub to GitLab in October 2026). The formula is bumped automatically when we cut a new release; the CLI itself is distributed as a Developer ID signed, Apple-notarized binary published with those releases (see `scripts/sign-macos.sh` and `scripts/notarize-macos.sh`; releases up to `cli-v2.4.2` predate that and are ad-hoc signed).
 
 A short orientation:
 
 ## What this repo contains
 
-- `Formula/bithuman-cli.rb` — the Homebrew formula. **Bumped automatically on release.** Please don't open PRs that hand-edit version, URL, or sha256.
+- `Formula/bithuman-cli.rb` — the Homebrew formula. **Bumped automatically on release.** Please don't open merge requests that hand-edit version, URL, or sha256.
 - `Aliases/bithuman` — symlink to `Formula/bithuman-cli.rb` so `brew install bithuman` still resolves for users with the old name in scripts.
 - `appcast.xml` — Sparkle-style update feed for the GUI Halo app (separate product, but published from this tap).
 - `llms.txt` — structured manifest for AI coding assistants installing the CLI.
@@ -27,25 +27,25 @@ This tap is watched by the release / packaging team, not the CLI engineers. If `
 - `llms.txt` or this repo's `README.md` is wrong or unclear.
 - You hit a real Homebrew tap convention issue (e.g. our formula doesn't lint with `brew audit`).
 
-Use [Bug report](.github/ISSUE_TEMPLATE/bug_report.md) and include `brew config` output and the exact command that failed.
+Use the [Bug report](.gitlab/issue_templates/bug_report.md) issue template on https://gitlab.com/bithuman/sdk/homebrew-bithuman/-/issues and include `brew config` output and the exact command that failed.
 
-### PRs we welcome
+### Merge requests we welcome
 
 - README fixes and clarifications.
 - `llms.txt` improvements.
 - Tap-level documentation (an `appcast` README, a doc on how to roll a release locally, etc.).
 - Fixes to caveats / post-install messages in the formula (we'll merge those even if release automation would otherwise overwrite — just keep the diff minimal).
 
-### PRs we'll usually close
+### Merge requests we'll usually close
 
 - Hand-edited version / URL / sha256 bumps in `Formula/bithuman-cli.rb`. These come from release automation. If a release is missing, open an issue instead.
 - New formulas for unrelated tools — this tap is single-purpose.
 
-## Local sanity checks before opening a PR
+## Local sanity checks before opening a merge request
 
-GitHub Actions is off for this repo; the required checks run locally. Run `ci/run-local.sh`
-on your PR head and paste its PASS/FAIL lines and final `LOCAL CI ... sha=...` line into a PR
-comment (see `ci/README.md`). Red = no merge.
+CI runs locally (GitLab shared runners are off for this group). Run `ci/run-local.sh` on your
+merge request's exact head, rebased on a fresh `main`, and paste its PASS/FAIL lines and final
+`LOCAL CI ... sha=...` line into an MR comment (see `ci/README.md`). Red = no merge.
 
 ```sh
 ci/run-local.sh

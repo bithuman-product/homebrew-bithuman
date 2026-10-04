@@ -11,7 +11,7 @@
 > { "mcpServers": { "bithuman": { "command": "bithuman", "args": ["mcp"] } } }
 > ```
 >
-> Install the CLI: `brew install bithuman/bithuman/bithuman-cli` (macOS) or the universal installer
+> Install the CLI: `brew tap bithuman/bithuman https://gitlab.com/bithuman/sdk/homebrew-bithuman && brew install bithuman-cli` (macOS) or the universal installer
 > (macOS + Linux) — see the CLI README. This `bithuman-mcp` package will receive
 > no further updates.
 

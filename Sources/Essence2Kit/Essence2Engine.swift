@@ -1273,7 +1273,7 @@ public enum Essence2Download {
 // MARK: - Runtime resources
 
 /// The engine's runtime resources — the audio frontend and its short-window pair — fetched once
-/// from the GitHub release this package pins, and checked against sha256 values pinned HERE,
+/// from the downloads.bithuman.ai release this package pins, and checked against sha256 values pinned HERE,
 /// never against a checksum served beside the file.
 public enum Essence2Resources {
     /// Must equal `essence2Tag` in Package.swift (the tap's check-apple-engine-pin.sh grades it).

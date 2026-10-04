@@ -2,9 +2,13 @@
 <!--
   Sparkle appcast feed for the bitHuman macOS .app.
 
-  Hosted at https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/appcast.xml
+  Canonical copy: https://gitlab.com/bithuman/sdk/homebrew-bithuman/-/raw/main/appcast.xml
+  (2026-10: this repository moved from GitHub to GitLab).
   Consumed by the Sparkle updater inside bitHuman.app via SUFeedURL in
-  Info.plist.
+  Info.plist. The shipped apps (0.1.0, 0.8.1) have SUFeedURL =
+  https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/appcast.xml,
+  which is the GitHub copy: it keeps serving the entries below, frozen, also once it is archived.
+  A future app build sets SUFeedURL to the GitLab URL above.
 
   Each <item> entry corresponds to one DMG release. Releases are
   produced by Apps/BithumanMac/Scripts/build-mac-app.sh in the
@@ -13,11 +17,19 @@
 
   No items below = no updates available. Sparkle treats an empty
   feed cleanly; users on the latest version see "you're up to date".
+
+  NEW entries publish their DMG to the downloads host (never a GitHub release):
+    scripts/downloads-publish.py publish v<x.y.z>-mac bitHuman-<x.y.z>.dmg
+  and point the enclosure there:
+    <enclosure url="https://downloads.bithuman.ai/homebrew-bithuman/v<x.y.z>-mac/bitHuman-<x.y.z>.dmg"
+               length="<bytes>" type="application/octet-stream" sparkle:edSignature="<sig>" />
+  The two entries below are already-released versions and keep their GitHub release URLs,
+  which the GitHub copy serves (the same bytes are on the downloads host too).
 -->
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
     <channel>
         <title>bitHuman for Mac</title>
-        <link>https://raw.githubusercontent.com/bithuman-product/homebrew-bithuman/main/appcast.xml</link>
+        <link>https://gitlab.com/bithuman/sdk/homebrew-bithuman/-/raw/main/appcast.xml</link>
         <description>On-device voice + video chat for macOS. Made by bitHuman.</description>
         <language>en</language>
         <item>

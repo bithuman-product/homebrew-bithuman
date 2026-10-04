@@ -1,9 +1,11 @@
-# Local CI (GitHub Actions is off)
+# Local CI (no hosted CI: GitHub Actions was removed, GitLab shared runners are off)
 
 **Owner directive, 2026-09-29:** "disable Actions altogether as github is charging way
 too much" · "please also remove all github actions" · "instead we should run local tests
 for validation". Actions is disabled for this repo and no status check is required on
 `main`. Validation now runs on a developer or release host with `ci/run-local.sh`.
+Since the October 2026 move to GitLab (https://gitlab.com/bithuman/sdk/homebrew-bithuman) the
+same holds there: shared runners are off group-wide and CI stays local.
 
 ## Run it
 
@@ -27,8 +29,8 @@ context or a secret is refused rather than faked.
 
 ## Evidence convention (required)
 
-Before merging, run `ci/run-local.sh` on the **exact PR head** and post a PR comment with
-the command, the sha and the PASS/FAIL lines. **Red = no merge.** A `SKIP` on a step your
+Before merging, rebase the merge request on a fresh `main`, run `ci/run-local.sh` on its
+**exact head** and post an MR comment with the command, the sha and the PASS/FAIL lines. **Red = no merge.** A `SKIP` on a step your
 change touches needs the same comment from a host where it ran.
 
 ## Releases are manual now

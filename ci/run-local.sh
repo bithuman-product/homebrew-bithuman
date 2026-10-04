@@ -27,11 +27,14 @@ STEPS=(
   "installer-ps1-offline|0|pwsh python3|install.ps1 retry helper, offline (tests/install-ps1-download-errors.ps1)|pwsh -NoProfile -File tests/install-ps1-download-errors.ps1"
   "installer-ps1-resolution|0|pwsh python3|install.ps1 end to end, offline: latest.json -> releases.json -> mirror order (tests/install-ps1-resolution.ps1)|pwsh -NoProfile -File tests/install-ps1-resolution.ps1"
   "downloads-publish-selftest|0|python3|the publish wrapper: cli-v* only for latest.json, refusals map to exit 1, no publisher is exit 2 (scripts/downloads-publish.py)|python3 scripts/downloads-publish.py --self-test"
+  "explicit-tap|0|python3|every brew tap/install line names the tap's GitLab URL; no shortened form (github.com/bithuman is not ours) + planted regressions (scripts/check-explicit-tap.py)|python3 scripts/check-explicit-tap.py . && python3 scripts/check-explicit-tap.py --selftest"
+  "install-worker|0|node|the install.bithuman.ai Worker source parses (workers/install-bithuman-ai.mjs)|node --check workers/install-bithuman-ai.mjs"
   "flutter-plugin-tests|1|flutter|flutter plugin census + flutter test (flutter-plugin-tests.yml)|$WF/flutter-plugin-tests.yml plugin"
 )
 
 # slower / scheduled / non-PR jobs that still run on this host (read-only)
 FULL_STEPS=(
+  "explicit-tap-live|0|python3|github.com/bithuman/homebrew-bithuman still answers 404: nobody holds the squattable tap name (plain HTTPS, no API, no token)|python3 scripts/check-explicit-tap.py . --live"
   "public-vocabulary-releases|0|python3|published release titles + notes carry no internal vocabulary (public-vocabulary.yml:releases; reads downloads.bithuman.ai releases.json, no credential)|$WF/public-vocabulary.yml releases"
 )
 

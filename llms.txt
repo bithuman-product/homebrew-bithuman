@@ -1,7 +1,7 @@
 # bithuman
 
 > First-party command-line tool for the bitHuman avatar platform, distributed
-> via this Homebrew tap and the universal installer. Run a live, talking avatar
+> via the universal installer (https://install.bithuman.ai) and this Homebrew tap. Run a live, talking avatar
 > in your browser, render avatars to MP4 files, manage showcase models, and
 > drive the whole platform from an AI agent. Built for both humans and AI
 > agents: every command supports `--json` with a stable, versioned schema and
@@ -15,9 +15,14 @@ or `printf %s "$KEY" | bithuman login --with-token`. Full contract:
 https://docs.bithuman.ai/platforms/cli/reference
 
 ## Install
-- macOS (Apple Silicon): `brew install bithuman/bithuman/bithuman-cli`
-  (the full name implies the tap; the installed command is `bithuman`)
-- macOS + Linux (x86_64/aarch64): `curl -fsSL https://install.bithuman.ai | sh`
+- macOS + Linux (x86_64/aarch64), the recommended install: `curl -fsSL https://install.bithuman.ai | sh`
+- Windows (x86_64), PowerShell: `irm https://install.bithuman.ai/windows | iex`
+- Homebrew (macOS, Apple Silicon), always as ONE line with the tap's URL:
+  `brew tap bithuman/bithuman https://gitlab.com/bithuman/sdk/homebrew-bithuman && brew install bithuman-cli`
+  (the installed command is `bithuman`). Never shorten it to
+  `brew install bithuman/bithuman/bithuman-cli` on a machine that has not tapped the URL:
+  without the URL Homebrew looks for the tap on GitHub, where `github.com/bithuman` is not a
+  bitHuman account.
 - No package manager: the per-target tarball from the newest `cli-v*` release,
   https://downloads.bithuman.ai/homebrew-bithuman/<tag>/<asset> (today `cli-v2.8.8`;
   https://downloads.bithuman.ai/homebrew-bithuman/latest.json names the newest) —
@@ -51,11 +56,16 @@ login`). No `pip install` needed for chat.
 - `bithuman mcp`: built-in MCP server over stdio (JSON-RPC) for MCP clients —
   cloud tools (TTS, agents, dynamics, embed, webhooks, credits) + local tools.
 
-## Swift package (Apple SDK)
-This repository is also the bitHuman Apple SDK, a Swift package for iPhone, iPad
-and Mac apps: `.package(url: "https://gitlab.com/bithuman/sdk/bithuman-swift", from: "3.0.0")`,
-with the version from https://docs.bithuman.ai/versions.json ("swift"). Products:
-`Expression2` (iOS 16 / macOS 13) and `Essence2Kit` (iOS 26 / macOS 26), or `Essence2`
-for the C interface. `bitHumanKit` is legacy. The SDK renders only: pass in 16 kHz
-mono speech, draw the frames. Sessions need an API secret (Creator plan or higher
-from 12 October 2026). Docs: https://docs.bithuman.ai/platforms/ios
+## SDKs (not in this repository)
+This repository is the CLI's tap and installers only. The SDKs have their own projects; take
+versions from https://docs.bithuman.ai/versions.json:
+- Swift (iPhone, iPad, Mac): `.package(url: "https://gitlab.com/bithuman/sdk/bithuman-swift", from: "3.0.0")`.
+  Apps on 2.x keep `https://github.com/bithuman-product/homebrew-bithuman.git` (every 2.x tag
+  stays there); 2.x critical fixes are tagged only in sdk/bithuman-swift, the URL to switch to for one.
+  Never point SwiftPM at the GitLab homebrew-bithuman repository.
+  Docs: https://docs.bithuman.ai/platforms/ios
+- Flutter: `bithuman: ^3.0.0` from pub.dev (source https://gitlab.com/bithuman/sdk/bithuman-flutter).
+  Docs: https://docs.bithuman.ai/platforms/flutter
+- Android: `ai.bithuman:bithuman-android` from https://maven.bithuman.ai.
+  Docs: https://docs.bithuman.ai/platforms/android
+Sessions need an API secret (Creator plan or higher from 12 October 2026).
