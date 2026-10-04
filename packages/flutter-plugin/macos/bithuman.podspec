@@ -178,22 +178,33 @@ Pod::Spec.new do |s|
   s.vendored_libraries  = (essence2_lib ? engine_libs.map { |p| p.sub(__dir__ + '/', '') } : []) + [enginecore_lib]
 
   # ★THE DECLARED FLOOR IS THE STAGED BYTES' FLOOR (2.6.36, security) — see the iOS podspec. Until 2.6.35
-  # this pod declared macOS 13.0 while libessence2.a (essence2-v1.15.3) and libconverse.xcframework's
-  # macos-arm64 slice are built for macOS 26.0 (every libessence2 object, and 33 libconverse objects,
-  # say minos 26.0); an app at 13.0 linking libessence2 takes strong imports that exist only from macOS
+  # this pod declared macOS 13.0 while libessence2.a (essence2-v1.15.3; v1.15.4 is rebuilt at 13.0) and
+  # libconverse.xcframework's macos-arm64 slice are built for macOS 26.0 (every v1.15.3 libessence2 object,
+  # and 33 libconverse objects, say minos 26.0); an app at 13.0 linking them takes strong imports that exist only from macOS
   # 15.4 and cannot launch below it. The floor is now read from the binaries this pod vendors (the
   # highest LC_BUILD_VERSION minos of their macOS objects, never below 13.0): macOS 26.0 with today's
   # staged files, Essence 2 or not, until libconverse's macOS slice is rebuilt at 13.0 too. Bytes that
   # cannot be read count as macOS 26.0. The Homebrew dylibs (llama.cpp, onnxruntime) are not vendored
   # here and are not read.
+  # A binary that names no minimum for macOS (no LC_BUILD_VERSION for platform 1 and no legacy
+  # LC_VERSION_MIN_MACOSX) counts as unreadable too (PR #202 review): through the first 2.6.36 commits
+  # it left the floor at the base.
   staged_minos = lambda do |paths, platform_id|
     found = Gem::Version.new('0')
     paths.each do |path|
       out = `otool -l '#{path}' 2>/dev/null`
       return nil unless $?.success?
+      named = false
       out.scan(/cmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform (\d+)\s+minos (\d+(?:\.\d+)*)/) do |pl, v|
-        found = [found, Gem::Version.new(v)].max if pl.to_i == platform_id
+        next unless pl.to_i == platform_id
+        named = true
+        found = [found, Gem::Version.new(v)].max
       end
+      out.scan(/cmd LC_VERSION_MIN_MACOSX\s+cmdsize \d+\s+version (\d+(?:\.\d+)*)/) do |(v)|
+        named = true
+        found = [found, Gem::Version.new(v)].max
+      end
+      return nil unless named
     end
     found
   end

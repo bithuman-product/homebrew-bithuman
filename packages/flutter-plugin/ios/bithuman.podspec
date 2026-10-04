@@ -194,19 +194,30 @@ Pod::Spec.new do |s|
   # this pod declared therefore could not LAUNCH on iOS 16.0 to 18.3, Essence 2 used or not (measured
   # 2026-10-03, bithuman-models #1826). Now the floor is read from the binaries this pod vendors (the
   # LC_BUILD_VERSION minos of every device-slice object, otool -l): the highest one wins, and never
-  # below 16.0. With essence2-v1.15.3 staged that is iOS 26.0, so a Podfile below it fails `pod install`
-  # by name instead of building an app that crashes at launch; bootstrapped with
-  # BITHUMAN_SKIP_ESSENCE2=1 (Expression 2 only) it is iOS 16.0. A libessence2 rebuilt at the floor
-  # (#1826, in Swift package 2.20.2) brings it back to 16.0 by itself, and Essence 2 then refuses by
-  # name below iOS 26 at `load` (EngineSelection). Bytes that cannot be read count as iOS 26.0.
+  # below 16.0. With essence2-v1.15.3 staged that was iOS 26.0, so a Podfile below it failed `pod install`
+  # by name instead of building an app that crashes at launch. essence2-v1.15.4 (#1826, Swift package
+  # 2.20.3), staged since 2.6.36, is rebuilt at the floor: the pod is back at iOS 16.0 by itself, and
+  # Essence 2 refuses by name below iOS 26 at `load` (EngineSelection) and at be_essence2_create.
+  # Bytes that cannot be read count as iOS 26.0, and so does a binary that names no minimum for iOS (no
+  # LC_BUILD_VERSION for platform 2 and no legacy LC_VERSION_MIN_IPHONEOS): through the first 2.6.36
+  # commits such a binary, or a device slice not named exactly ios-arm64, left the floor at the base
+  # (PR #202 review). Every device slice (ios-arm64*) is read; no simulator slice is.
   staged_minos = lambda do |paths, platform_id|
     found = Gem::Version.new('0')
     paths.each do |path|
       out = `otool -l '#{path}' 2>/dev/null`
       return nil unless $?.success?
+      named = false
       out.scan(/cmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform (\d+)\s+minos (\d+(?:\.\d+)*)/) do |pl, v|
-        found = [found, Gem::Version.new(v)].max if pl.to_i == platform_id
+        next unless pl.to_i == platform_id
+        named = true
+        found = [found, Gem::Version.new(v)].max
       end
+      out.scan(/cmd LC_VERSION_MIN_IPHONEOS\s+cmdsize \d+\s+version (\d+(?:\.\d+)*)/) do |(v)|
+        named = true
+        found = [found, Gem::Version.new(v)].max
+      end
+      return nil unless named
     end
     found
   end
@@ -214,7 +225,10 @@ Pod::Spec.new do |s|
     File.file?(p) && (p.end_with?('.a') || File.basename(p) == File.basename(File.dirname(p), '.framework'))
   end
   ios_binaries = engine_libs + ios_frameworks.flat_map do |xcf|
-    Dir.glob(File.join(__dir__, xcf, 'ios-arm64', '{*.a,*.framework/*}')).select { |p| framework_binary.call(p) }
+    # Every DEVICE slice (ios-arm64, ios-arm64_arm64e, ...), never a simulator's.
+    Dir.glob(File.join(__dir__, xcf, 'ios-arm64*')).reject { |d| File.basename(d).include?('simulator') }
+       .flat_map { |slice| Dir.glob(File.join(slice, '{*.a,*.framework/*}')) }
+       .select { |p| framework_binary.call(p) }
   end
   ios_base = Gem::Version.new('16.0')
   ios_staged = staged_minos.call(ios_binaries, 2)          # 2 = PLATFORM_IOS (the device slices)

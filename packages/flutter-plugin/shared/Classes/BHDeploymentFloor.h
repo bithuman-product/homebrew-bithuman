@@ -16,6 +16,11 @@
 // (iOS 16.0 / macOS 13.0); the pod's own target never defines them. An app below the floor fails its
 // build here, by name, instead of shipping a binary that crashes at launch.
 //
+// The definitions reach the app through `$(inherited)`: an app target that sets
+// GCC_PREPROCESSOR_DEFINITIONS without `$(inherited)` drops them and this check does nothing (the
+// README says so). `pod install` below the floor still fails, and the linker still warns "built for
+// newer 'iOS' version".
+//
 // Pure preprocessor: nothing here is compiled into the pod.
 
 #pragma once
@@ -25,7 +30,7 @@
 
 #if TARGET_OS_IOS && defined(BITHUMAN_IOS_FLOOR) && defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
 #if __IPHONE_OS_VERSION_MIN_REQUIRED < BITHUMAN_IOS_FLOOR
-#error "bithuman: the engines scripts/bootstrap.sh staged need a newer iOS than this app's deployment target, and an app linking them cannot start below iOS 18.4. Raise the app to the floor `pod install` printed (platform :ios in ios/Podfile and IPHONEOS_DEPLOYMENT_TARGET on the Runner target; iOS 26.0 with essence2-v1.15.3), or for iOS 16 bootstrap with BITHUMAN_SKIP_ESSENCE2=1 (Expression 2 only) and run pod install again."
+#error "bithuman: the engines scripts/bootstrap.sh staged need a newer iOS than this app's deployment target, and an app linking them cannot start below iOS 18.4. Raise the app to the floor `pod install` printed (platform :ios in ios/Podfile and IPHONEOS_DEPLOYMENT_TARGET on the Runner target), or for iOS 16 bootstrap with BITHUMAN_SKIP_ESSENCE2=1 (Expression 2 only) and run pod install again."
 #endif
 #endif
 
