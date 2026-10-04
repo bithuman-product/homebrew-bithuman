@@ -22,7 +22,7 @@ dependencies:
     git:
       url: https://github.com/bithuman-product/homebrew-bithuman.git
       path: packages/flutter-plugin
-      ref: flutter-plugin-v2.6.35   # the current tag: docs.bithuman.ai/downloads
+      ref: flutter-plugin-v2.6.36   # the current tag: docs.bithuman.ai/downloads
 ```
 
 The pubspec needs Dart 3.11.5 or newer. On Android, set these in `android/app/build.gradle.kts` (the
