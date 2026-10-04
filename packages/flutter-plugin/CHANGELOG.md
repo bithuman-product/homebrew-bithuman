@@ -1,3 +1,46 @@
+## Unreleased — Android LOCAL mode: the on-device brain, and the hybrid brain (on-device speech, the app's reply)
+
+* **Android, hybrid brain:** `localAudioStart(replyMode: 'host')` keeps speech-to-text and the
+  Supertonic voice on the phone and takes the reply text from the app: the brain sends
+  `reply_request` {id, messages} on the converse channel, the app streams the text back with
+  `localReplyText(id, piece)` (then `done: true`), and a barge-in sends `reply_cancel` {id} so the
+  app drops its stream. No GGUF is loaded. `LocalConverseTransport(replySource: ...)` wires it:
+  give it a function that streams the reply for the conversation (e.g. a cheap cloud text model
+  behind your server — no model key on the device). The brain keeps everything around the model,
+  as libconverse 2.5.0's host LLM does: the crisis guard (a crisis turn never reaches the host),
+  the bounded history, clause chunking, emoji/markdown stripping, barge-in, and an error reply
+  when the host fails before a word was said. The persona is the server's: the system prompt is
+  sent only when the app passes one. `maxSentences` caps a spoken reply.
+* **Android brain:** the speech-to-text model is picked by its directory (`sttDir`):
+  Moonshine (both sherpa-onnx exports), Whisper, NVIDIA Parakeet / NeMo transducers and NeMo CTC
+  (`brain/SpeechIn.kt`). The VAD endpoint is logged apart from the decode.
+* **Android, measurement:** `localInjectWav(path)` (a debuggable app only) plays a WAV on the
+  device into the brain in real time as if spoken, the microphone ignored, and logs the wall-clock
+  time of its speech onset and end.
+* **Android:** `localAudioStart` / `localPushText` / `localSetMuted` / `localAudioStop` and
+  `isLocalModeSupported` now work on Android (arm64, Android 10+): speech in (silero VAD +
+  Moonshine tiny), the reply (llama.cpp on the CPU, any chat GGUF) and the voice (Supertonic,
+  voice `M1`) all run on the phone. The Dart `LocalConverseTransport` is unchanged — same channel,
+  same events — and the transport registry now routes LOCAL on Android too. The brain mirrors
+  Apple's libconverse C ABI (`brain/ConverseEngine.kt`) and ships with what the Apple measurements taught
+  built in: reply audio is fed to the avatar as fast as it is synthesized with an in-order
+  end-of-reply flush, VAD endpointing without a forced finalize, capped history with KV-cache
+  reuse (a trimmed history is shifted in the cache, not re-prefilled), emoji/markdown stripping,
+  split-turn merging, persona house rules, and a deterministic crisis-line reply for self-harm.
+  See README "Android LOCAL mode" for the model files, sizes and licenses.
+* **Android brain:** each Supertonic chunk's leading silence (~0.25-0.45 s, the model's own
+  padding) is cut to a 30 ms pre-roll with a 5 ms fade-in, as on Apple (libconverse
+  `audio_trim.hpp`): end of speech -> first audible word p50 2.87 -> 2.55 s on a Galaxy S25+.
+  `ConverseEngine.Config.trimLeadingSilence = false` (or `debug.bh.brain.keeplead=1` in a
+  debuggable app) keeps it.
+* **Android player:** a reply fed as one burst (LOCAL mode) no longer loses its first-frame mark
+  when its end-of-reply arrives before its first frame is shown — `bhttfa first speech frame` is
+  logged for every reply again (instrumentation only; presentation is unchanged).
+* **Build:** the Android half now compiles native code: llama.cpp (pinned commit) and
+  sherpa-onnx v1.13.8 (with ONNX Runtime 1.28.2 static, and **without espeak-ng** — a no-op
+  stand-in replaces its GPL-3.0 dependency, see `android/src/main/cpp/no-espeak/`). Needs the
+  NDK and CMake 3.22.1; the first build takes a few minutes. +26.5 MB of native libraries.
+
 ## Unreleased — the on-device brain, fast enough for a free tier
 
 Needs libconverse **2.4.0**. Until a vendor bundle carries it, stage a local build with

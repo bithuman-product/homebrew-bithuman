@@ -76,12 +76,46 @@ rootProject.allprojects {
 apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
+// ---------------------------------------------------------------- the on-device brain
+// LOCAL mode's native code — llama.cpp (the reply) and sherpa-onnx (speech in: silero VAD +
+// Moonshine; speech out: Supertonic) — is compiled from pinned sources by
+// src/main/cpp/CMakeLists.txt; nothing prebuilt is downloaded or vendored. sherpa-onnx is built
+// without espeak-ng (GPL-3.0; see src/main/cpp/no-espeak/README.md) and with ONNX Runtime linked
+// in statically (essence2-android already ships a libonnxruntime.so of another version).
+
 android {
     namespace = 'ai.bithuman.flutter'
     compileSdk = 36
     defaultConfig {
         minSdk = 29   // essence2-android declares 29 (expression2-android 26); the app must match
         ndk { abiFilters 'arm64-v8a' }   // the AAR ships arm64-v8a only
+        consumerProguardFiles 'consumer-rules.pro'
+        externalNativeBuild {
+            cmake {
+                // c++_static: the brain's C++ runtime stays inside libbhbrain.so, so it neither
+                // ships a second libc++_shared.so nor depends on essence2-android's copy.
+                def args = ['-DANDROID_STL=c++_static', '-DCMAKE_BUILD_TYPE=Release']
+                // Offline builds: local checkouts / unpacked archives instead of the pinned downloads.
+                ['BH_LLAMA_CPP_DIR', 'BH_SHERPA_ONNX_DIR', 'BH_ORT_STATIC_DIR'].each { k ->
+                    def v = System.getenv(k)
+                    if (v) args << "-D${k}=${v}".toString()
+                }
+                arguments(*args)
+                cppFlags '-O3'
+            }
+        }
+    }
+    // The brain's native code (llama.cpp + its JNI) — see src/main/cpp/CMakeLists.txt.
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+    // Release-optimised native code even in a debug app build: an unoptimised llama.cpp
+    // is ~10x slower and would make a debug build's brain unusable.
+    buildTypes {
+        debug { externalNativeBuild { cmake { arguments '-DCMAKE_BUILD_TYPE=Release' } } }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
