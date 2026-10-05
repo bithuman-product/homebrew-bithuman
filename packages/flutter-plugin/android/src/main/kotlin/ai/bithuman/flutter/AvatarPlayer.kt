@@ -210,6 +210,8 @@ class AvatarPlayer(
     @Volatile private var nFed16k = 0L
     @Volatile private var replyBoundary = true
     @Volatile private var replyFirstPending = false
+    /** Wall clock of a reply's first feed, until its first frame comes out of the engine (`bhonset`, one line a reply). */
+    @Volatile private var onsetFeedAt = 0L
     @Volatile private var cutAtMs = 0L
     /** Set with [cutAtMs]; cleared by the first idle frame presented after the cut. */
     @Volatile private var cutIdleAtMs = 0L
@@ -358,6 +360,8 @@ class AvatarPlayer(
     @Volatile private var fedOffered = 0L
     /** Monotonic; never above [fedOffered]. Main looper. */
     @Volatile private var playedFed = 0L
+    /** The fed position heard so far (what [onPlayout] reports): the hybrid brain's `heardChars` clock. Any thread. */
+    val heardFed: Long get() = playedFed
     /** Fed position of stream offset 0, and the generation it belongs to (under [audioLock]). */
     private var streamFedBase = 0L
     private var streamFedGen = -1
@@ -580,6 +584,15 @@ class AvatarPlayer(
                     }
                 } else {
                     heldFrom = f * BYTES_PER_SAMPLE16
+                    val fa = onsetFeedAt
+                    if (fa > 0) {
+                        // A reply's first frame out of the ENGINE (render), as against on the glass (`bhttfa`):
+                        // the onset splits into the engine's time and the player's queue.
+                        onsetFeedAt = 0L
+                        val now = System.currentTimeMillis()
+                        Log.i("bhonset", "ENGINE-FIRST-FRAME sinceFeedMs=${now - fa} fedMs=${nFed16k / 16} toWrite=${toWrite.size} " +
+                            "silentQueued=${toWrite.count { isSilentKind(it.kind) }} hostMs=$now")
+                    }
                     if (starveAt > 0) {
                         val st = runCatching { avatar.stats() }.getOrNull()
                         val h = synchronized(audioLock) { head }
@@ -840,7 +853,12 @@ class AvatarPlayer(
                     if (cutAtMs > 0) Log.i("bhbarge", "RESET landed sinceCutMs=${t0 - cutAtMs} resetMs=${System.currentTimeMillis() - t0} leaks=$nLeak")
                 }
                 is Tail -> {
-                    replyBoundary = true; replyFirstPending = false
+                    // The boundary moves, but a reply whose first mouth is not on the glass yet
+                    // keeps its pending mark: a reply fed as a burst (LOCAL mode hands the whole
+                    // synthesized reply over at once, then ends it) reaches Tail BEFORE its first
+                    // frame is presented, and clearing the mark here silenced `bhttfa` for every
+                    // such reply. Only a Reset (a cut) discards it.
+                    replyBoundary = true
                     // Where this reply's audio stops. Used for one thing only: bounding the
                     // end-of-conversation drain above. Never to place a frame in time.
                     synchronized(audioLock) { if (replyEnds.lastOrNull() != audioLen) replyEnds.addLast(audioLen) }
@@ -876,7 +894,7 @@ class AvatarPlayer(
                         // What reached the ENGINE and when: the conversation contract's delivery
                         // ratio is read from these lines (audio seconds fed / wall seconds).
                         Log.i("bhfeed", "+${whole.size / 3} fed=$nFed16k q=${avatar.queuedFrames} hostMs=${System.currentTimeMillis()}")
-                        if (replyBoundary) { replyBoundary = false; replyFirstPending = true }
+                        if (replyBoundary) { replyBoundary = false; replyFirstPending = true; onsetFeedAt = System.currentTimeMillis() }
                     }
                 }
             }
@@ -982,7 +1000,9 @@ class AvatarPlayer(
     // the dropped silence are the only frames not shown. `debug.bh.speechstart.wait=1` (debuggable host only) restores the wait.
     // ★Not for an engine that needs that silence as its lead ([AvatarEngine.dropsLeadingSilence]: essence-2 waits, 2.6.29).
     private val trackLock = Any()
-    private val speechStartWait: Boolean = (debuggable && devInt("debug.bh.speechstart.wait") == 1) || !avatar.dropsLeadingSilence
+    // `debug.bh.speechstart.drop=1` (debuggable host only) drops it for essence-2 too (A/B of the engine's lead).
+    private val speechStartWait: Boolean = (debuggable && devInt("debug.bh.speechstart.wait") == 1) ||
+        (!avatar.dropsLeadingSilence && !(debuggable && devInt("debug.bh.speechstart.drop") == 1))
     private var silentWritten = 0
     @Volatile private var nSpeechStarts = 0
     @Volatile private var nSilentSkipped = 0
